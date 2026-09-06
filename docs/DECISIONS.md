@@ -161,13 +161,13 @@ motor (arenas, handles, pools) no sabe que existe.
 
 **Fecha:** 2026-09-06
 **Hito:** M0
-**Estado:** aceptada
+**Estado:** aceptada (ASan resuelto el mismo dia; UBSan sigue sin equivalente en MSVC)
 
 **Contexto.** SPEC.md §15 exige que Debug pase bajo ASan y UBSan. MSVC no implementa UBSan
 en absoluto (no existe equivalente). Ademas, la instalacion de Visual Studio disponible en
-esta maquina de desarrollo no trae el runtime `clang_rt.asan` para x64 (falta el componente
-individual "C++ AddressSanitizer" del VS Installer), y no se pudo instalar por no haber
-permisos de administrador en la sesion.
+esta maquina de desarrollo no traia el runtime `clang_rt.asan` para x64 (faltaba el
+componente individual "C++ AddressSanitizer" del VS Installer), y no se pudo instalar en un
+primer intento por no haber permisos de administrador en la sesion.
 
 **Decisión.** El `CMakeLists.txt` detecta en configuracion si el runtime de ASan esta
 disponible (`find_file` sobre `clang_rt.asan_dynamic_runtime_thunk-x86_64.lib`) y solo anade
@@ -179,12 +179,18 @@ completamente parado por una limitacion de la maquina, no del codigo. Forzar la 
 comprobar: rompe el link con un error dificil de diagnosticar ("cannot open file
 clang_rt.asan_dynamic_runtime_thunk-x86_64.lib").
 
-**Consecuencias.** En esta maquina, Debug se verifico **sin ASan y sin UBSan**: no queda
-demostrado que el codigo de M0 este libre de corrupcion de memoria o UB, solo que compila y
-se comporta correctamente en ejecucion normal. Cuando se instale el componente de VS (o se
-compile en Linux/macOS con GCC/Clang, donde ASan y UBSan si estan disponibles), hay que
-re-ejecutar `vne_tests` y `vne_game --autoplay-script` bajo sanitizers antes de dar por
-cerrado ningun hito que dependa de esta garantia.
+**Consecuencias.** El usuario reinicio la sesion con permisos de administrador e instalo el
+componente "C++ AddressSanitizer" (`vs_installer.exe modify --add
+Microsoft.VisualStudio.Component.VC.ASAN`). Con el runtime presente, `vne_tests.exe` (7/7
+tests, 32/32 asserts) y `vne_game.exe` corrieron bajo `/fsanitize=address` real sin ningun
+reporte; el contador de heap por frame se mantuvo en 0 tambien bajo instrumentacion ASan. La
+deteccion en CMake se deja tal cual: sigue siendo util si el proyecto se clona en otra
+maquina sin el componente instalado. Nota de entorno: el binario instrumentado necesita
+`clang_rt.asan_dynamic-x86_64.dll` (en
+`VC\Tools\MSVC\<version>\bin\Hostx64\x64\`) en el `PATH` en tiempo de ejecucion; sin el,
+falla con "error while loading shared libraries" en vez de un error de ASan. UBSan sigue sin
+verificarse: no existe en MSVC, asi que esta garantia solo se puede confirmar compilando en
+Linux o macOS con GCC/Clang, que siguen sin estar disponibles en este entorno.
 
 ---
 
@@ -193,9 +199,10 @@ cerrado ningun hito que dependa de esta garantia.
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
 desviarte.
 
-- Instalar el componente individual "C++ AddressSanitizer" del Visual Studio Installer en
-  esta máquina de desarrollo (requiere permisos de administrador) para poder verificar M0 (y
-  los hitos siguientes) bajo ASan en Windows. Ver ADR-0007.
+- ~~Instalar el componente "C++ AddressSanitizer" del VS Installer~~ — resuelto: instalado
+  el 2026-09-06 con permisos de administrador. Ver ADR-0007.
+- UBSan no tiene equivalente en MSVC/Windows. Solo se puede verificar compilando en Linux o
+  macOS con GCC/Clang.
 - No se compiló ni verificó en Linux ni en macOS por no haber esas plataformas disponibles en
   este entorno. Falta esa verificación antes de considerar M0 completamente cerrado según
   SPEC.md §15.1.

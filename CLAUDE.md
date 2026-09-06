@@ -5,8 +5,10 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno (M0 implementado, pendiente de confirmación para cerrar)
-**Último hito completado:** ninguno (M0 pendiente de cierre — ver docs/DECISIONS.md ADR-0007)
+**Hito activo:** M1 — Renderizado 2D
+**Último hito completado:** M0 — Esqueleto (verificado en Windows con ASan real; UBSan y
+Linux/macOS quedan pendientes de verificar por falta de esas plataformas, ver
+docs/DECISIONS.md)
 
 Actualiza estas dos líneas al empezar y al terminar cada hito.
 
