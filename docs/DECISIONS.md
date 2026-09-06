@@ -133,9 +133,69 @@ tiempo constante de un bump allocator.
 
 ---
 
+## ADR-0006 — SDL_Renderer como sustituto temporal de sokol_gfx solo para M0
+
+**Fecha:** 2026-09-06
+**Hito:** M0
+**Estado:** aceptada
+
+**Contexto.** El criterio de aceptación de M0 pide una ventana que "abre y limpia a un
+color", pero sokol_gfx (la RHI definitiva, SPEC.md §3 y §7.1) no se integra hasta M1. Hacía
+falta limpiar la pantalla sin adelantar trabajo de M1 ni introducir dependencias nuevas.
+
+**Decisión.** M0 usa el `SDL_Renderer` que ya trae SDL3 (`platform/window.cpp`) únicamente
+para `platform_window_clear`/`platform_window_present`. No se expone fuera de
+`platform/window.*`: nada en `base/` ni en el futuro `gfx/` depende de el.
+
+**Alternativas descartadas.** Adelantar la integracion de sokol_gfx a M0: viola la regla de
+un hito a la vez. Limpiar la ventana a mano con `SDL_GetWindowSurface`: mas codigo para el
+mismo resultado y sin vsync integrado.
+
+**Consecuencias.** Todo el codigo de `platform/window.cpp` que toca `SDL_Renderer` se
+descarta por completo en M1 cuando `gfx_init`/`gfx_present` tomen el control. El resto del
+motor (arenas, handles, pools) no sabe que existe.
+
+---
+
+## ADR-0007 — Ausencia de UBSan y ASan condicionado en la build Debug de Windows
+
+**Fecha:** 2026-09-06
+**Hito:** M0
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §15 exige que Debug pase bajo ASan y UBSan. MSVC no implementa UBSan
+en absoluto (no existe equivalente). Ademas, la instalacion de Visual Studio disponible en
+esta maquina de desarrollo no trae el runtime `clang_rt.asan` para x64 (falta el componente
+individual "C++ AddressSanitizer" del VS Installer), y no se pudo instalar por no haber
+permisos de administrador en la sesion.
+
+**Decisión.** El `CMakeLists.txt` detecta en configuracion si el runtime de ASan esta
+disponible (`find_file` sobre `clang_rt.asan_dynamic_runtime_thunk-x86_64.lib`) y solo anade
+`/fsanitize=address` a Debug si lo encuentra; si no, emite un `message(WARNING ...)` explicito
+y compila sin el, en vez de fallar todo el build por un componente opcional ausente.
+
+**Alternativas descartadas.** Bloquear el build hasta instalar el componente: dejaria M0
+completamente parado por una limitacion de la maquina, no del codigo. Forzar la flag sin
+comprobar: rompe el link con un error dificil de diagnosticar ("cannot open file
+clang_rt.asan_dynamic_runtime_thunk-x86_64.lib").
+
+**Consecuencias.** En esta maquina, Debug se verifico **sin ASan y sin UBSan**: no queda
+demostrado que el codigo de M0 este libre de corrupcion de memoria o UB, solo que compila y
+se comporta correctamente en ejecucion normal. Cuando se instale el componente de VS (o se
+compile en Linux/macOS con GCC/Clang, donde ASan y UBSan si estan disponibles), hay que
+re-ejecutar `vne_tests` y `vne_game --autoplay-script` bajo sanitizers antes de dar por
+cerrado ningun hito que dependa de esta garantia.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
 desviarte.
 
-- (vacío)
+- Instalar el componente individual "C++ AddressSanitizer" del Visual Studio Installer en
+  esta máquina de desarrollo (requiere permisos de administrador) para poder verificar M0 (y
+  los hitos siguientes) bajo ASan en Windows. Ver ADR-0007.
+- No se compiló ni verificó en Linux ni en macOS por no haber esas plataformas disponibles en
+  este entorno. Falta esa verificación antes de considerar M0 completamente cerrado según
+  SPEC.md §15.1.

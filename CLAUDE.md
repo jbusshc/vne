@@ -5,8 +5,8 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** M0 — Esqueleto (no iniciado)
-**Último hito completado:** ninguno
+**Hito activo:** ninguno (M0 implementado, pendiente de confirmación para cerrar)
+**Último hito completado:** ninguno (M0 pendiente de cierre — ver docs/DECISIONS.md ADR-0007)
 
 Actualiza estas dos líneas al empezar y al terminar cada hito.
 
