@@ -1,0 +1,15 @@
+build/
+build-*/
+out/
+assets_baked/
+.cache/
+compile_commands.json
+*.user
+*.vnsave
+config.ini
+.DS_Store
+Thumbs.db
+.vs/
+.vscode/
+!.vscode/extensions.json
+.idea/

@@ -1,0 +1,23 @@
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  readability-identifier-naming,
+  readability-braces-around-statements,
+  misc-*,
+  -bugprone-easily-swappable-parameters,
+  -misc-non-private-member-variables-in-classes
+WarningsAsErrors: 'bugprone-*,performance-*'
+CheckOptions:
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalVariablePrefix
+    value: g_
+  - key: readability-identifier-naming.ConstexprVariablePrefix
+    value: k_
