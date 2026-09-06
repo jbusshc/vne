@@ -5,6 +5,10 @@
 
 #include "base/log.h"
 
+Arena g_arena_perm;
+Arena g_arena_scene;
+Arena g_arena_frame;
+
 Arena arena_create(usize size, const char* name) {
     Arena a{};
     a.base = static_cast<u8*>(std::malloc(size));

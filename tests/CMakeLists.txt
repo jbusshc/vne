@@ -2,6 +2,8 @@ add_executable(vne_tests
   test_main.cpp
   test_arena.cpp
   test_pool.cpp
+  test_radix_sort.cpp
+  test_letterbox.cpp
 )
 target_link_libraries(vne_tests PRIVATE vne_base doctest::doctest)
 vne_apply_project_flags(vne_tests)

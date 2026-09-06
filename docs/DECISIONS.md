@@ -194,6 +194,176 @@ Linux o macOS con GCC/Clang, que siguen sin estar disponibles en este entorno.
 
 ---
 
+## ADR-0008 — Formato de textura horneada: QOI
+
+**Fecha:** 2026-09-06
+**Hito:** M1
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §14 dejaba explícitamente sin decidir el formato final de textura
+horneada (QOI vs BCn/ASTC) y prohibía al agente decidirlo solo. Se preguntó al usuario.
+
+**Decisión.** QOI ("Quite OK Image"). Se usa el codec de referencia de un solo header
+(`qoi.h`, dominio público) para codificar offline en `vne_bake` y decodificar en runtime en
+`src/assets`/`src/gfx`. Coincide con lo que ya insinuaba la tabla de pipeline de SPEC.md §11
+(`atlas_NN.qoi`).
+
+**Alternativas descartadas.** BCn/ASTC: compresión real en GPU y menos VRAM, pero exige un
+compresor offline más complejo y una ruta distinta por backend (BC en D3D/GL, ASTC en
+móvil/Metal). Se descarta por ahora: el proyecto no maneja todavía volumen de texturas que lo
+justifique, y puede añadirse después sin romper la interfaz de `texture_load`.
+
+**Consecuencias.** Sin compresión real de GPU: más VRAM por textura que con BCn/ASTC. La
+decodificación de `.qoi` en runtime es binaria y rápida (no es "parsear texto"), así que no
+viola la regla de SPEC.md §4 de no parsear texto en release.
+
+---
+
+## ADR-0009 — Backend Metal (macOS) diferido, sin código sin probar
+
+**Fecha:** 2026-09-06
+**Hito:** M1
+**Estado:** aceptada
+
+**Contexto.** M1 requiere sokol_gfx funcionando en los tres backends de prioridad 1 y 2
+(D3D11, GL 3.3, Metal). No hay una Mac disponible en este entorno para compilar ni probar el
+backend Metal.
+
+**Decisión.** M1 implementa y dejar verificados D3D11 (Windows) y GL 3.3 (Linux, compilado
+condicionalmente pero sin poder ejecutarse en esta máquina). El backend Metal se deja sin
+implementar, con un hueco explícito documentado aquí y en el cierre del hito, en vez de
+escribir Objective-C++ sin poder compilarlo ni probarlo.
+
+**Alternativas descartadas.** Escribir el `.mm` de todas formas siguiendo los ejemplos de
+sokol: se descarta porque un backend gráfico con errores no detectados hasta la primera
+compilación real en una Mac es peor que no tenerlo, y además impediría verificar M1 con
+honestidad.
+
+**Consecuencias.** M1 no está realmente cerrado hasta que alguien con acceso a macOS
+implemente y verifique `gfx_backend_metal.mm`. Queda anotado en "Pendientes observados".
+
+---
+
+## ADR-0010 — Shaders escritos a mano en vez de invocar el binario sokol-shdc
+
+**Fecha:** 2026-09-06
+**Hito:** M1
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §3 y §7.1 especifican que los shaders se compilan offline con
+`sokol-shdc`. Ese programa es un binario prebuilt por plataforma (no una librería C++
+descargable por CPM), y automatizar su descarga y ejecución como paso de build es trabajo
+adicional no trivial para un hito que solo necesita dos shaders sencillos (sprite y blit de
+letterbox) en dos backends verificables aquí.
+
+**Decisión.** `src/gfx/shaders.h` contiene a mano un `sg_shader_desc` por shader, con el
+código fuente HLSL5 (D3D11) y GLSL330 (GL) embebido como los generaría `sokol-shdc`, elegido
+en runtime según `sg_query_backend()`. Sigue sin haber parseo de texto de guion ni de
+assets del juego; es shader GPU, compilado una vez al crear el pipeline, igual que si
+`sokol-shdc` hubiera generado bytecode.
+
+**Alternativas descartadas.** Integrar `sokol-shdc` como paso de CMake que descarga el
+binario y lo ejecuta sobre `shaders/*.glsl`: correcto a largo plazo, pero prematuro para dos
+shaders fijos; se puede migrar sin romper la API de `gfx.h` cuando el número de shaders
+crezca (M2 en adelante, con el shader de texto).
+
+**Consecuencias.** Añadir un shader nuevo implica escribir su HLSL y GLSL a mano en vez de un
+único `.glsl` anotado. Cuando el conteo de shaders crezca esto se volverá tedioso; anotado en
+"Pendientes observados" para reconsiderar entonces.
+
+---
+
+## ADR-0011 — Atlas de M1 es una rejilla procedural, no un empaquetador real
+
+**Fecha:** 2026-09-06
+**Hito:** M1
+**Estado:** aceptada
+
+**Contexto.** El criterio de aceptación de M1 solo exige demostrar 5000 sprites de **un**
+atlas en una draw call a más de 300 fps; no exige un empaquetador de atlas real (eso es
+`vne_bake atlas` completo, con `assets_src/png/*.png` reales, que no existen todavía: SPEC.md
+§6 prohíbe inventar contenido de juego).
+
+**Decisión.** `tools/bake` genera proceduralmente una textura de rejilla de colores sólidos
+(placeholder obvio) y la codifica a `.qoi`; un `.bin` trivial describe la rejilla de subrects
+de forma fija (N×N celdas iguales). No hay empaquetador de rectángulos de tamaño variable.
+
+**Alternativas descartadas.** Escribir un empaquetador de atlas real (shelf/skyline) ahora:
+trabajo de un hito futuro sin assets reales que lo justifiquen todavía; se implementará
+cuando `assets_src/png/` tenga sprites reales que empaquetar.
+
+**Consecuencias.** El formato del `.bin` de M1 es deliberadamente el más simple posible y se
+espera que cambie cuando llegue el empaquetador real; no es el formato final de
+`atlas.bin` de SPEC.md §11.
+
+---
+
+## ADR-0012 — Swapchain D3D11 en modo flip y capa de depuracion con fallback
+
+**Fecha:** 2026-09-06
+**Hito:** M1
+**Estado:** aceptada
+
+**Contexto.** Dos problemas aparecieron al medir el criterio de M1 (5000 sprites, 1 draw
+call, >300 fps) en esta maquina: (1) `D3D11_CREATE_DEVICE_DEBUG` fallaba con
+`DXGI_ERROR_SDK_COMPONENT_MISSING` porque el componente opcional de Windows "Graphics
+Tools" no esta instalado; (2) el modelo de swapchain "blit" clasico
+(`DXGI_SWAP_EFFECT_DISCARD`) anade overhead de composicion de escritorio (DWM) en modo
+ventana.
+
+**Decisión.** `gfx_backend_d3d11.cpp` intenta crear el dispositivo con la capa de
+depuracion solo en `VN_DEBUG`, y si falla, reintenta sin ella en vez de abortar. El
+swapchain usa `DXGI_SWAP_EFFECT_FLIP_DISCARD` (modelo flip) en vez de `DISCARD`.
+
+**Alternativas descartadas.** Exigir el componente de Graphics Tools como requisito de
+build: bloquearia compilar en cualquier maquina sin ese componente opcional instalado, por
+un beneficio (breakpoints de validacion D3D) que no es necesario para pasar los criterios
+de aceptacion. Mantener el modelo "blit": mas simple pero con mayor latencia/overhead de
+`Present()` en ventana, medible en el frame_p99 reportado por el HUD.
+
+**Consecuencias.** La build Debug en una maquina sin "Graphics Tools" pierde la validacion
+extra de D3D11 (queda un `log_warn`, no silencioso). Verificado en esta maquina: 5000
+sprites en 2 draw calls (1 del atlas + 1 del blit de letterbox), ~450-500 fps con vsync
+desactivado en build Dev optimizada (ver cierre de M1 en el resumen de la conversacion),
+frame_p99 ~3.2-3.6 ms. La primera captura de pantalla automatizada salio en blanco (la
+ventana no tenia foco todavia cuando se disparo el screenshot); con la ventana enfocada se
+confirmo visualmente el atlas renderizado sin el placeholder magenta, y redimensionando la
+ventana a un aspecto 4:3 se vio la barra negra de letterbox exactamente donde predice
+`gfx_letterbox_rect`, sin distorsion del contenido.
+
+---
+
+## ADR-0013 — Windows como única plataforma verificada por ahora; Linux/macOS quedan abiertos, no bloqueantes
+
+**Fecha:** 2026-09-06
+**Hito:** M1 (cierre)
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §15 exige compilar limpio en las tres plataformas de prioridad 1 y 2
+antes de cerrar un hito. Este entorno de desarrollo solo tiene Windows disponible. El
+usuario confirmó explícitamente que sacar el motor primero en Windows es la prioridad
+real ahora mismo, y que Linux/macOS no son imperativos en este momento.
+
+**Decisión.** M1 (y, mientras no cambie esta indicación, los hitos siguientes) se dan por
+cerrados verificando solo Windows, siempre que la arquitectura no cierre la puerta a Linux
+y macOS: toda dependencia de plataforma pasa por una costura aislada (`gfx_backend.h`,
+`platform/window.h`) en vez de mezclarse con el resto del motor. El backend GL para Linux
+se escribe junto con el de D3D11 aunque no se pueda compilar ni probar aquí; el backend
+Metal se documenta como hueco explícito (ADR-0009) en vez de simularse.
+
+**Alternativas descartadas.** Bloquear cada hito hasta tener acceso a Linux y macOS:
+pararía todo el proyecto por una limitación del entorno de desarrollo, no del diseño.
+Ignorar el multiplataforma por completo y acoplar el codigo a Windows: violaría SPEC.md
+§1 (portabilidad es la prioridad #2 del proyecto) y obligaría a un rediseño caro más
+adelante.
+
+**Consecuencias.** Cada cierre de hito debe seguir diciendo explícitamente qué no se
+verificó (Linux, macOS) en vez de darlo por bueno, tal como ya pedía CLAUDE.md. El primer
+build real en Linux o macOS puede descubrir errores en código nunca compilado (el backend
+GL, sobre todo) — no es una garantía, es una apuesta consciente a favor de avanzar.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -206,3 +376,13 @@ desviarte.
 - No se compiló ni verificó en Linux ni en macOS por no haber esas plataformas disponibles en
   este entorno. Falta esa verificación antes de considerar M0 completamente cerrado según
   SPEC.md §15.1.
+- Backend Metal de sokol_gfx sin implementar (ADR-0009): hace falta una Mac para escribirlo y
+  probarlo. Bloquea el cierre real de M1 en macOS.
+- Backend GL 3.3 de M1 escrito pero no compilado ni probado: no hay Linux disponible aquí.
+- Shaders escritos a mano en vez de vía `sokol-shdc` (ADR-0010): reconsiderar automatizar el
+  binario cuando el número de shaders crezca (M2 añade el shader de texto).
+- El atlas de M1 es una rejilla procedural fija (ADR-0011), no el empaquetador real de
+  SPEC.md §11: hace falta implementarlo cuando existan sprites reales en `assets_src/png/`.
+- El componente "C++ AddressSanitizer" no cubre el componente separado "Graphics Tools" de
+  Windows: la capa de depuracion D3D11 sigue sin poder probarse aqui (ADR-0012). No bloquea
+  ningun criterio de aceptacion, solo reduce la validacion extra disponible en Debug.

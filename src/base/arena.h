@@ -27,3 +27,11 @@ template <typename T>
 T* arena_alloc_n(Arena* a, usize count) {
     return static_cast<T*>(arena_alloc(a, sizeof(T) * count, alignof(T)));
 }
+
+// Las tres arenas del motor (SPEC.md #6.1). Se crean una unica vez en main() y viven todo
+// el proceso; cualquier modulo puede usarlas sin pasarselas explicitamente por parametro,
+// igual que hace el resto de la especificacion (p. ej. "text_layout ... normalmente
+// g_arena_frame").
+extern Arena g_arena_perm;
+extern Arena g_arena_scene;
+extern Arena g_arena_frame;

@@ -1,0 +1,65 @@
+#include "gfx/gfx_backend.h"
+
+#if defined(VNE_GFX_BACKEND_GL)
+
+#include <SDL3/SDL.h>
+
+#include "base/log.h"
+
+// NOTA: este backend no se ha podido compilar ni probar en este entorno (no hay Linux
+// disponible). Escrito siguiendo la API documentada de SDL3 y sokol_gfx; revisar en
+// cuanto exista una maquina Linux real (ver docs/DECISIONS.md, "Pendientes observados").
+
+namespace {
+PlatformWindow* g_window     = nullptr;
+SDL_GLContext   g_gl_context = nullptr;
+}  // namespace
+
+bool gfx_backend_init(PlatformWindow* window) {
+    g_window = window;
+
+    g_gl_context = SDL_GL_CreateContext(window->sdl_window);
+    if (g_gl_context == nullptr) {
+        log_error("SDL_GL_CreateContext fallo: %s", SDL_GetError());
+        return false;
+    }
+    if (!SDL_GL_MakeCurrent(window->sdl_window, g_gl_context)) {
+        log_error("SDL_GL_MakeCurrent fallo: %s", SDL_GetError());
+        return false;
+    }
+    SDL_GL_SetSwapInterval(1);
+    return true;
+}
+
+void gfx_backend_shutdown() {
+    if (g_gl_context != nullptr) {
+        SDL_GL_DestroyContext(g_gl_context);
+        g_gl_context = nullptr;
+    }
+    g_window = nullptr;
+}
+
+sg_environment gfx_backend_environment() {
+    sg_environment env{};
+    env.defaults.color_format = SG_PIXELFORMAT_RGBA8;
+    env.defaults.depth_format = SG_PIXELFORMAT_NONE;
+    env.defaults.sample_count = 1;
+    return env;
+}
+
+sg_swapchain gfx_backend_begin_frame(i32 window_w, i32 window_h) {
+    sg_swapchain sc{};
+    sc.width          = window_w;
+    sc.height         = window_h;
+    sc.sample_count   = 1;
+    sc.color_format   = SG_PIXELFORMAT_RGBA8;
+    sc.depth_format   = SG_PIXELFORMAT_NONE;
+    sc.gl.framebuffer = 0;
+    return sc;
+}
+
+void gfx_backend_present() {
+    SDL_GL_SwapWindow(g_window->sdl_window);
+}
+
+#endif  // VNE_GFX_BACKEND_GL

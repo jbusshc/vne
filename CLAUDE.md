@@ -5,10 +5,16 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** M1 — Renderizado 2D
-**Último hito completado:** M0 — Esqueleto (verificado en Windows con ASan real; UBSan y
-Linux/macOS quedan pendientes de verificar por falta de esas plataformas, ver
-docs/DECISIONS.md)
+**Hito activo:** ninguno
+**Último hito completado:** M1 — Renderizado 2D. Verificado en Windows (criterios de
+SPEC.md §12 confirmados por contadores, tests y verificación visual: 5000 sprites de un
+atlas en 1 draw call + 1 de letterbox, >300 fps en build optimizada, letterbox correcto,
+cero allocs de heap por frame, tests bajo ASan real). Windows es la única plataforma
+verificada por ahora (decisión explícita del usuario); Linux y macOS no son prioridad
+inmediata, pero la arquitectura los deja abiertos sin rediseño: `gfx_backend.h` aísla todo
+lo específico de plataforma, el backend GL ya está escrito (sin compilar todavía, sin
+Linux disponible aquí) y el hueco de Metal/macOS está documentado en ADR-0009. Detalle
+completo en docs/DECISIONS.md.
 
 Actualiza estas dos líneas al empezar y al terminar cada hito.
 
