@@ -10,10 +10,19 @@
 #include "platform/clock.h"
 #include "platform/input.h"
 #include "platform/window.h"
+#include "text/font.h"
+#include "text/glyph_cache.h"
+#include "text/layout.h"
 
 // M1: renderizado 2D. Ademas del bucle base de M0, dibuja un stress test de 5000 sprites
 // de un unico atlas para verificar el criterio de aceptacion de M1 (SPEC.md #12): deben
 // resolverse en una sola draw call a mas de 300 fps.
+//
+// M2: texto. Ademas, monta un cuadro de dialogo de prueba con marcado inline y furigana,
+// avanzando con el efecto de maquina de escribir (visible_glyphs), para demostrar que
+// text_layout no se vuelve a llamar por frame (SPEC.md #12).
+
+constexpr f32 k_typewriter_glyphs_per_second = 18.0f;
 
 constexpr usize k_perm_arena_size  = 64ull * 1024 * 1024;
 constexpr usize k_scene_arena_size = 256ull * 1024 * 1024;
@@ -82,7 +91,7 @@ int main(int, char**) {
     g_arena_frame = arena_create(k_frame_arena_size, "frame");
 
     PlatformWindow window{};
-    if (!platform_window_create(&window, "vne \xe2\x80\x94 M1", 1280, 720)) {
+    if (!platform_window_create(&window, "vne \xe2\x80\x94 M2", 1280, 720)) {
         return 1;
     }
 
@@ -98,6 +107,20 @@ int main(int, char**) {
 
     i32 grid_cols = 0, grid_rows = 0, cell_w = 0, cell_h = 0;
     read_atlas_grid(&grid_cols, &grid_rows, &cell_w, &cell_h);
+
+    FontHandle demo_font = text_load_font("assets_src/ttf/NotoSansJP.ttf", 28);
+    if (!demo_font.valid()) {
+        log_error("No se pudo cargar la fuente de prueba NotoSansJP.ttf");
+    }
+    const char* demo_text =
+        "Hola {b}mundo{/b}. {color=#ff5040}Texto en rojo{/color}. "
+        "{ruby=\xE3\x81\x8B\xE3\x82\x93\xE3\x81\x98}\xE6\xBC\xA2\xE5\xAD\x97{/ruby} "
+        "con furigana.";
+    // La arena de escena (no la de frame) porque el layout debe sobrevivir entre frames:
+    // el efecto de maquina de escribir solo cambia visible_glyphs, nunca relayoutea
+    // (regla del skill vne-rendering).
+    TextLayout demo_layout = text_layout(demo_font, demo_text, 700.0f, &g_arena_scene);
+    f32        visible_glyphs_f = 0.0f;
 
     InputState input{};
     Clock      clock = clock_create();
@@ -115,6 +138,7 @@ int main(int, char**) {
         arena_reset(&g_arena_frame);
         heap_guard_reset_frame();
         gfx_begin_frame();
+        glyph_cache_begin_frame();
 
         platform_poll_events(&input);
         if (input.key_pressed[SDL_SCANCODE_ESCAPE]) {
@@ -146,6 +170,18 @@ int main(int, char**) {
             gfx_draw_sprite(s);
         }
 
+        visible_glyphs_f += k_typewriter_glyphs_per_second * dt;
+        if (visible_glyphs_f > static_cast<f32>(demo_layout.count) * 1.5f) {
+            visible_glyphs_f = 0.0f;  // reinicia el efecto para que la demo haga bucle
+        }
+        u32 visible_glyphs = static_cast<u32>(visible_glyphs_f);
+        text_draw(demo_layout, 80.0f, 900.0f, visible_glyphs);
+
+        // Una sola vez por frame, despues de todos los text_draw/text_layout del frame y
+        // antes de gfx_flush(): sg_update_image solo admite una subida por pagina y por
+        // frame (ver docs/DECISIONS.md, hito M2).
+        glyph_cache_flush_dirty_pages();
+
         gfx_flush();
 
         i32 window_w = 0, window_h = 0;
@@ -171,9 +207,10 @@ int main(int, char**) {
             f32 p99_ms    = frame_history_p99_ms(frame_times, frames_recorded);
             f32 fps       = dt > 0.0f ? 1.0f / dt : 0.0f;
             log_info(
-                "fps~%.1f frame_p99=%.2fms draw_calls=%u sprites=%u heap_allocs_frame_max=%llu",
+                "fps~%.1f frame_p99=%.2fms draw_calls=%u sprites=%u heap_allocs_frame_max=%llu "
+                "text_layout_calls=%u",
                 fps, p99_ms, g_gfx_draw_call_count, k_stress_sprite_count,
-                static_cast<unsigned long long>(max_frame_allocs));
+                static_cast<unsigned long long>(max_frame_allocs), g_text_layout_call_count);
         }
     }
 

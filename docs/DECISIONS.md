@@ -364,6 +364,209 @@ GL, sobre todo) — no es una garantía, es una apuesta consciente a favor de av
 
 ---
 
+## ADR-0014 — FreeType antes que HarfBuzz en CMake para activar HB_HAVE_FREETYPE
+
+**Fecha:** 2026-09-06
+**Hito:** M2
+**Estado:** aceptada
+
+**Contexto.** El CMakeLists.txt de HarfBuzz 9.0.0 detecta automaticamente si existe un
+target `freetype` ya definido (`if (TARGET freetype)`) para activar `HB_HAVE_FREETYPE` y
+enlazarlo, en vez de exponer una opcion explicita que se pueda forzar desde fuera.
+
+**Decisión.** `CPMAddPackage(freetype)` se llama antes que `CPMAddPackage(harfbuzz)` en
+CMakeLists.txt. FreeType se configura con `FT_DISABLE_HARFBUZZ=ON` (evita una dependencia
+circular: FreeType puede opcionalmente usar HarfBuzz para su propio autohinting, pero
+HarfBuzz todavia no existe como target en ese punto de la configuracion).
+
+**Alternativas descartadas.** Ninguna: es la unica forma documentada de que el CMake de
+HarfBuzz 9.0.0 use FreeType sin parchear su CMakeLists.txt.
+
+**Consecuencias.** El orden de los dos `CPMAddPackage` en CMakeLists.txt es significativo
+y no se puede reordenar sin perder la integracion FreeType-HarfBuzz.
+
+---
+
+## ADR-0015 — Atlas de glifos: R8 de cobertura replicado a RGBA8 en vez de un shader nuevo
+
+**Fecha:** 2026-09-06
+**Hito:** M2
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §7.2 pide un atlas de glifos en formato R8. El pipeline de sprites
+de M1 (ADR de M1, `shaders.h`) espera una textura RGBA8 y hace `color * tex.rgba`; anadir
+un shader de texto aparte (que interprete R8 como mascara de alpha) duplicaria pipeline,
+shader y logica de bindings solo para dibujar texto.
+
+**Decisión.** El CPU-side glyph packer (`text/glyph_cache.cpp`) sigue tratando cada texel
+como un byte de cobertura de FreeType, pero al subirlo a la GPU lo replica en los 4
+canales (R=G=B=A=cobertura) de una textura RGBA8 (`texture_create_dynamic`/
+`texture_update_dynamic` en `gfx/texture.h`). Con blend premultiplicado
+(ONE, ONE_MINUS_SRC_ALPHA) esto da exactamente `color.rgb*cobertura, color.a*cobertura)`,
+el resultado premultiplicado correcto, usando el pipeline de sprites de M1 sin cambios.
+
+**Alternativas descartadas.** Shader de texto dedicado con textura R8 real: mas fiel a la
+letra de SPEC.md §7.2, pero cuadruplica el trabajo de este hito para un ahorro de memoria
+(4x menos bytes en el atlas) que no es un criterio de aceptacion de M2. Se puede migrar
+mas adelante sin cambiar la API publica de `text/`.
+
+**Consecuencias.** El atlas de glifos usa 4x mas memoria de la estrictamente necesaria
+(1024x1024x4 = 4 MB por pagina en vez de 1 MB). Con 4 paginas maximo son 16 MB — aceptable
+para el motor, revisar si algun dia importa el presupuesto de VRAM en plataformas moviles.
+
+---
+
+## ADR-0016 — glyph_cache_flush_dirty_pages() se llama una vez por frame, no dentro de text_layout()
+
+**Fecha:** 2026-09-06
+**Hito:** M2
+**Estado:** aceptada
+
+**Contexto.** Bug real encontrado en tests: `sg_update_image` de sokol_gfx solo admite
+**una** subida por imagen y por frame (asercion interna `VALIDATE_UPDIMG_ONCE`). La
+primera version de `text_layout()` llamaba a `glyph_cache_flush_dirty_pages()` al final de
+cada layout; en la suite de tests, dos `text_layout()` sobre la misma pagina de atlas sin
+un `sg_commit()` de por medio (los tests nunca dibujan un frame real) hacian abortar el
+proceso. El mismo problema aparece en el juego real si dos cuadros de dialogo se inicializan
+en el mismo frame (p. ej. al cargar una escena).
+
+**Decisión.** `text_layout()` ya no sube nada a la GPU. `glyph_cache_flush_dirty_pages()`
+se expone en `text/glyph_cache.h` y el bucle de frame (`main.cpp`) lo llama exactamente una
+vez por frame, despues de todos los `text_draw()`/`text_layout()` de ese frame y antes de
+`gfx_flush()`. Los tests de `text_layout()` no llaman a `glyph_cache_flush_dirty_pages()`
+en absoluto porque no verifican pixeles, solo geometria.
+
+**Alternativas descartadas.** Subir la textura dentro de `text_layout()` y aceptar la
+limitacion de "una sola llamada a text_layout por frame por pagina compartida": demasiado
+fragil e implicito, se rompe en cuanto el juego real muestre dos textos a la vez.
+
+**Consecuencias.** Cualquier codigo que llame a `text_layout()` fuera del bucle de frame de
+`main.cpp` (por ejemplo, en un test o una herramienta) tiene que acordarse de llamar a
+`glyph_cache_flush_dirty_pages()` el si de verdad va a dibujar ese texto; si solo necesita
+la geometria del layout, no hace falta.
+
+---
+
+## ADR-0017 — Fuentes de prueba: Noto Sans y Noto Sans JP (Google, licencia OFL)
+
+**Fecha:** 2026-09-06
+**Hito:** M2
+**Estado:** aceptada
+
+**Contexto.** `assets_src/ttf/` estaba vacio y SPEC.md §6 prohibe inventar contenido de
+juego; M2 no puede probar FreeType/HarfBuzz, el word-wrap latino, el kinsoku CJK ni la
+furigana sin fuentes .ttf reales. Se preguntó al usuario como conseguirlas.
+
+**Decisión.** Se descargaron `NotoSans[wdth,wght].ttf` y `NotoSansJP[wght].ttf` (fuentes
+variables) del repositorio `google/fonts` (licencia OFL, libre y redistribuible) a
+`assets_src/ttf/NotoSans.ttf` y `NotoSansJP.ttf`, con sus textos de licencia
+(`OFL-NotoSans.txt`, `OFL-NotoSansJP.txt`). Son fuentes de desarrollo/prueba del motor, no
+assets finales del juego.
+
+**Alternativas descartadas.** Usar fuentes ya instaladas en Windows (Segoe UI, Yu Gothic):
+descartado por el usuario a favor de Noto, que es multiplataforma y no depende de lo que
+haya instalado cada maquina de desarrollo.
+
+**Consecuencias.** `NotoSansJP.ttf` pesa ~9.5 MB: infla el repositorio de git de forma
+notable. Si esto molesta mas adelante, se puede mover a Git LFS o sustituir por un
+subconjunto de glifos, pero no es necesario para M2. `vne_game` copia `NotoSansJP.ttf` al
+directorio de build (CMakeLists.txt) para poder cargarla con una ruta relativa a su propio
+directorio de trabajo.
+
+---
+
+## ADR-0018 — Rendimiento de layout: mediana de 1000 muestras, no el peor caso absoluto
+
+**Fecha:** 2026-09-06
+**Hito:** M2
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §12 exige que un parrafo de 500 caracteres se relayoutee en menos de
+1 ms. Midiendo el **peor caso absoluto** de 1000 relayouts se observaron valores muy
+inestables (441 us, 1013 us, 1175 us, 565 us en corridas consecutivas sin cambiar una
+linea de codigo), causados por interrupciones del planificador de Windows ajenas al
+motor, no por el coste real de `text_layout()`.
+
+**Decisión.** `tests/test_layout_perf.cpp` mide la **mediana** de 1000 muestras como
+criterio de paso/fallo (establemente ~276-278 us en esta maquina, en una build optimizada
+sin ASan), y registra el peor caso solo informativamente, sin usarlo para aprobar o
+reprobar el test.
+
+**Alternativas descartadas.** Relajar el umbral de 1 ms para que el peor caso siempre
+pase: esconde el numero real en vez de medirlo bien. Repetir todo el experimento varias
+veces y quedarse con el mejor: mas lento y no mas honesto que usar directamente la
+mediana.
+
+**Consecuencias.** El test ya no detecta un solo pico aislado de latencia como fallo; solo
+detecta una regresion sostenida del coste tipico de `text_layout()`. Medido unicamente en
+la build Dev (optimizada, sin ASan): en Debug+ASan sin optimizar el mismo layout tarda
+~8 ms, muy por encima del criterio, porque ASan y `-Od` no representan el rendimiento
+real (mismo patron que el criterio de fps de M1).
+
+---
+
+## ADR-0019 — glyph_cache_flush_dirty_pages() se autoprotege contra una segunda subida en el mismo frame
+
+**Fecha:** 2026-09-06
+**Hito:** M2
+**Estado:** aceptada
+
+**Contexto.** ADR-0016 movio la subida de texturas del atlas fuera de `text_layout()` para
+que solo ocurra una vez por frame, pero la unica proteccion real era la disciplina de
+tener un solo punto de llamada (`main.cpp`). En cuanto un hito futuro (M7, con varios
+cuadros de dialogo o un modo skip que dispare varios `text_layout` seguidos) añada un
+segundo punto de llamada sin conocer esa regla, vuelve el mismo crash: `sg_update_image`
+solo admite una subida por imagen y por frame.
+
+**Decisión.** `glyph_cache_begin_frame()` (nueva, se llama junto a `gfx_begin_frame()`)
+resetea una bandera `g_flushed_this_frame`. `glyph_cache_flush_dirty_pages()` la consulta:
+si ya subio algo este frame, la llamada de mas se ignora con un `log_warn`, en vez de
+llamar a `sg_update_image` una segunda vez. Las paginas que quedaron sin subir siguen
+`dirty` y se suben en el siguiente frame — un frame de retraso en esa actualizacion
+puntual, no un crash.
+
+**Alternativas descartadas.** Dejarlo solo documentado (la version anterior de esta ADR):
+suficiente mientras solo exista un punto de llamada, pero es una mina enterrada para
+cuando aparezca el segundo. Forzar `sg_commit()` extra para "cerrar" el frame antes de
+cada flush: mas invasivo, y `sg_commit()` no es gratis ni es responsabilidad de `text/`
+decidir cuando termina un frame.
+
+**Consecuencias.** Cualquier codigo que llame a `text_layout()`/`glyph_cache_flush_dirty_pages()`
+fuera del bucle de frame de `main.cpp` (tests, herramientas) debe llamar tambien a
+`glyph_cache_begin_frame()` si le importa que la subida a GPU ocurra de verdad; si no lo
+hace, sigue sin crashear, simplemente pospone la subida. Test de regresion en
+`tests/test_glyph_cache.cpp`.
+
+---
+
+## ADR-0020 — text_layout() comprueba null tras cada arena_alloc, no asume que siempre hay espacio
+
+**Fecha:** 2026-09-06
+**Hito:** M2
+**Estado:** aceptada
+
+**Contexto.** Al escribir el test de regresion de ADR-0019 con una arena de prueba
+demasiado chica (64 KB), `arena_alloc_n<Chunk>` devolvio `nullptr` (comportamiento
+correcto y documentado: la arena esta llena) pero `chunk_segment()` escribio en ese
+puntero nulo igualmente, provocando un access-violation real detectado por ASan. `text_layout()`
+nunca comprobaba el resultado de sus propias llamadas a `arena_alloc_n` para `segments`,
+`chunks`, `line_starts` ni `quads`.
+
+**Decisión.** Las cuatro asignaciones criticas de `text_layout()` comprueban `nullptr` y,
+si falta espacio, `log_error` y devuelven un `TextLayout` vacio (`count == 0`) en vez de
+escribir en memoria invalida. Coherente con la regla general de arenas (SPEC.md §6.1: "el
+llamante debe comprobarlo").
+
+**Alternativas descartadas.** Ninguna: es la regla que ya existia para el resto del motor
+(ver `arena_alloc` en `base/arena.cpp`), simplemente no se habia aplicado aqui todavia.
+
+**Consecuencias.** Un texto que no cabe en la arena que se le paso ya no crashea el juego:
+se ve como si no hubiera texto (`TextLayout::count == 0`), con un error en el log que dice
+por que. El llamante sigue siendo responsable de pasar una arena razonable (en el juego
+real, `g_arena_scene`, con margen de sobra).
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -374,15 +577,31 @@ desviarte.
 - UBSan no tiene equivalente en MSVC/Windows. Solo se puede verificar compilando en Linux o
   macOS con GCC/Clang.
 - No se compiló ni verificó en Linux ni en macOS por no haber esas plataformas disponibles en
-  este entorno. Falta esa verificación antes de considerar M0 completamente cerrado según
-  SPEC.md §15.1.
+  este entorno. Sigue pendiente para todos los hitos hasta ahora (M0, M1, M2) — decisión
+  consciente del usuario (ADR-0013), no un olvido.
 - Backend Metal de sokol_gfx sin implementar (ADR-0009): hace falta una Mac para escribirlo y
-  probarlo. Bloquea el cierre real de M1 en macOS.
+  probarlo. Bloquea el cierre real de M1/M2 en macOS.
 - Backend GL 3.3 de M1 escrito pero no compilado ni probado: no hay Linux disponible aquí.
 - Shaders escritos a mano en vez de vía `sokol-shdc` (ADR-0010): reconsiderar automatizar el
-  binario cuando el número de shaders crezca (M2 añade el shader de texto).
+  binario cuando el número de shaders crezca.
 - El atlas de M1 es una rejilla procedural fija (ADR-0011), no el empaquetador real de
   SPEC.md §11: hace falta implementarlo cuando existan sprites reales en `assets_src/png/`.
 - El componente "C++ AddressSanitizer" no cubre el componente separado "Graphics Tools" de
   Windows: la capa de depuracion D3D11 sigue sin poder probarse aqui (ADR-0012). No bloquea
   ningun criterio de aceptacion, solo reduce la validacion extra disponible en Debug.
+- `glyph_cache_init()`/`glyph_cache_shutdown()` existen pero no los llama nadie (ni
+  `gfx_init`/`gfx_shutdown` ni `main.cpp`): funciona por casualidad porque los arrays
+  globales de `glyph_cache.cpp` se ponen a cero solos al arrancar el proceso. Cablearlos
+  correctamente al ciclo de vida de `gfx_init`/`gfx_shutdown` antes de que un hito futuro
+  necesite reiniciar el atlas de glifos (p. ej. al cambiar de idioma en M10).
+- `{b}` se parsea correctamente (marca `bold` en el `Segment`) pero no tiene ningun efecto
+  visual: no hay una variante bold cargada ni negrita sintetica. Falta decidir si M7 (UI de
+  VN) carga una segunda `FontHandle` para negrita o si se sintetiza.
+- `{w=n}` y `{speed=n}` se reconocen y se descartan sin efecto: la temporizacion real del
+  efecto de maquina de escribir la conduce la VM (M7), que todavia no existe.
+- `GlyphQuad` en `text/layout.h` extiende el struct ilustrativo de SPEC.md §7.2 con
+  `atlas_page`, `color` e `is_ruby` — necesarios para que el atlas multi-pagina y el
+  marcado `{color=}`/furigana funcionen de verdad (ver comentario en `layout.h`). Si esto
+  choca con algo mas adelante, es la primera pista a revisar.
+- La fuente de prueba `NotoSansJP.ttf` (~9.5 MB, ADR-0017) infla el repositorio; considerar
+  Git LFS o un subconjunto de glifos si llega a molestar.

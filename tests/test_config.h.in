@@ -1,0 +1,5 @@
+#pragma once
+
+// Generado por CMake (configure_file): ruta absoluta a la raiz del repo, para que los
+// tests encuentren assets_src/ sin importar desde que directorio de build se ejecuten.
+#define VNE_SOURCE_DIR "@CMAKE_SOURCE_DIR@"

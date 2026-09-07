@@ -136,6 +136,40 @@ TextureLoadResult texture_load(const char* path, TextureHandle* out) {
     return TextureLoadResult::Ok;
 }
 
+TextureHandle texture_create_dynamic(i32 width, i32 height) {
+    TextureSlot*  slot   = nullptr;
+    TextureHandle handle = pool_acquire<struct TextureTag>(&g_pool, &slot);
+    if (!handle.valid()) {
+        log_error("texture_create_dynamic: pool de texturas lleno (%u)", k_max_textures);
+        return g_placeholder;
+    }
+
+    sg_image_desc img_desc{};
+    img_desc.width        = width;
+    img_desc.height       = height;
+    img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    img_desc.usage        = SG_USAGE_DYNAMIC;
+    img_desc.label        = "texture_dynamic";
+
+    slot->image   = sg_make_image(&img_desc);
+    slot->sampler = make_default_sampler();
+    slot->width   = width;
+    slot->height  = height;
+    return handle;
+}
+
+void texture_update_dynamic(TextureHandle h, const u8* pixels_rgba) {
+    TextureSlot* slot = pool_resolve<struct TextureTag>(&g_pool, h);
+    if (slot == nullptr) {
+        log_error("texture_update_dynamic: handle invalido");
+        return;
+    }
+    sg_image_data data{};
+    data.subimage[0][0].ptr  = pixels_rgba;
+    data.subimage[0][0].size = static_cast<usize>(slot->width) * slot->height * 4;
+    sg_update_image(slot->image, &data);
+}
+
 void texture_size(TextureHandle h, i32* out_w, i32* out_h) {
     TextureSlot* slot = pool_resolve<struct TextureTag>(&g_pool, h);
     *out_w            = slot != nullptr ? slot->width : 0;

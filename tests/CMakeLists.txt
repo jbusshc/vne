@@ -1,11 +1,21 @@
+configure_file(test_config.h.in test_config.h)
+
 add_executable(vne_tests
   test_main.cpp
   test_arena.cpp
   test_pool.cpp
   test_radix_sort.cpp
   test_letterbox.cpp
+  test_word_wrap.cpp
+  test_kinsoku.cpp
+  test_markup.cpp
+  test_ruby.cpp
+  test_layout_perf.cpp
+  test_typewriter.cpp
+  test_glyph_cache.cpp
 )
 target_link_libraries(vne_tests PRIVATE vne_base doctest::doctest)
+target_include_directories(vne_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 vne_apply_project_flags(vne_tests)
 
 # El proyecto compila sin excepciones (SPEC.md #4); doctest soporta ese modo con este

@@ -6,15 +6,24 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 ## Estado actual
 
 **Hito activo:** ninguno
-**Último hito completado:** M1 — Renderizado 2D. Verificado en Windows (criterios de
-SPEC.md §12 confirmados por contadores, tests y verificación visual: 5000 sprites de un
-atlas en 1 draw call + 1 de letterbox, >300 fps en build optimizada, letterbox correcto,
-cero allocs de heap por frame, tests bajo ASan real). Windows es la única plataforma
-verificada por ahora (decisión explícita del usuario); Linux y macOS no son prioridad
-inmediata, pero la arquitectura los deja abiertos sin rediseño: `gfx_backend.h` aísla todo
-lo específico de plataforma, el backend GL ya está escrito (sin compilar todavía, sin
-Linux disponible aquí) y el hueco de Metal/macOS está documentado en ADR-0009. Detalle
-completo en docs/DECISIONS.md.
+**Último hito completado:** M2 — Texto. FreeType + HarfBuzz, cache de glifos en atlas
+dinamico, layout con word-wrap latino y kinsoku CJK, marcado inline, furigana y efecto de
+maquina de escribir. Verificado en Windows (SPEC.md §12): mediana de layout de un parrafo
+de 500 caracteres ~276-285 us en build optimizada (<1ms), `text_draw` nunca relayoutea
+(contador de llamadas + test), furigana geometricamente correcta, texto renderizado y
+confirmado visualmente (incluye color de marcado y CJK). Se encontraron y corrigieron tres
+bugs reales durante la verificacion (no solo del test): `sg_update_image` solo admite una
+subida por imagen y por frame (ADR-0016, endurecido en ADR-0019 con autoproteccion en vez
+de depender de disciplina), y `text_layout()` no comprobaba `nullptr` tras `arena_alloc`
+(ADR-0020). 29/29 tests pasan en Ship; en Debug+ASan pasan 29/30 (el de rendimiento no es
+representativo sin optimizar, ver ADR-0018), sin ningun reporte de memoria. Windows sigue
+siendo la unica plataforma verificada (ADR-0013); Linux/macOS quedan abiertos
+arquitectonicamente pero sin compilar/probar. Detalle completo en docs/DECISIONS.md.
+
+M1 — Renderizado 2D (hito anterior): verificado en Windows, 5000 sprites de un atlas en 1
+draw call + 1 de letterbox, >300 fps en build optimizada, letterbox correcto, cero allocs
+de heap por frame, tests bajo ASan real. Backend GL escrito sin compilar (sin Linux
+disponible), Metal/macOS sin implementar (ADR-0009).
 
 Actualiza estas dos líneas al empezar y al terminar cada hito.
 

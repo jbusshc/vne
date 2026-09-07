@@ -90,6 +90,32 @@ endif()
 # reales de assets_src/ (ADR-0011), pero M1 todavia no lo necesita: el atlas de prueba es
 # procedural. Se anade cuando haya assets reales que leer, no antes.
 
+# FreeType antes que HarfBuzz: el CMakeLists.txt de HarfBuzz detecta el target "freetype"
+# ya existente y activa HB_HAVE_FREETYPE automaticamente (ver docs/DECISIONS.md M2).
+CPMAddPackage(
+  NAME freetype
+  GITHUB_REPOSITORY freetype/freetype
+  GIT_TAG VER-2-13-3
+  OPTIONS
+    "FT_DISABLE_ZLIB ON"
+    "FT_DISABLE_BZIP2 ON"
+    "FT_DISABLE_PNG ON"
+    "FT_DISABLE_HARFBUZZ ON"
+    "FT_DISABLE_BROTLI ON"
+)
+
+CPMAddPackage(
+  NAME harfbuzz
+  GITHUB_REPOSITORY harfbuzz/harfbuzz
+  GIT_TAG 9.0.0
+  OPTIONS
+    "HB_BUILD_UTILS OFF"
+    "HB_HAVE_GLIB OFF"
+    "HB_HAVE_ICU OFF"
+    "HB_HAVE_CAIRO OFF"
+    "HB_HAVE_GRAPHITE2 OFF"
+)
+
 # En MSVC, /fsanitize=address requiere el runtime clang_rt.asan de la instalacion. No todas
 # las instalaciones de Visual Studio lo traen (falta si no se marco el componente individual
 # "C++ AddressSanitizer" en el instalador). Lo detectamos para no romper el build entero por
@@ -175,12 +201,15 @@ add_library(vne_base STATIC
   src/platform/input.cpp
   src/gfx/gfx.cpp
   src/gfx/texture.cpp
+  src/text/font.cpp
+  src/text/glyph_cache.cpp
+  src/text/layout.cpp
   ${VNE_GFX_BACKEND_SOURCES}
 )
 target_include_directories(vne_base PUBLIC src)
 target_link_libraries(vne_base
   PUBLIC ${VNE_SDL3_TARGET} HandmadeMath
-  PRIVATE sokol_gfx qoi ${VNE_GFX_BACKEND_LIBS}
+  PRIVATE sokol_gfx qoi freetype harfbuzz ${VNE_GFX_BACKEND_LIBS}
 )
 target_compile_definitions(vne_base PRIVATE ${VNE_GFX_BACKEND_DEFINE})
 # El backend de sokol_gfx solo debe estar activo en la unidad de traduccion que hace
@@ -215,6 +244,22 @@ add_custom_target(vne_bake_assets
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.qoi
 )
 add_dependencies(vne_game vne_bake_assets)
+
+# Fuente de prueba para la demo de M2 (ADR pendiente de registrar: Noto Sans JP, OFL,
+# descargada para tener CJK real que probar; ver docs/DECISIONS.md). Se copia al
+# directorio de build para que vne_game la encuentre con una ruta relativa a su propio
+# CWD, igual que el atlas horneado.
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSansJP.ttf
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${CMAKE_SOURCE_DIR}/assets_src/ttf/NotoSansJP.ttf
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSansJP.ttf
+  DEPENDS ${CMAKE_SOURCE_DIR}/assets_src/ttf/NotoSansJP.ttf
+  COMMENT "Copiando NotoSansJP.ttf al directorio de build"
+)
+add_custom_target(vne_copy_fonts DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSansJP.ttf)
+add_dependencies(vne_game vne_copy_fonts)
 
 enable_testing()
 add_subdirectory(tests)

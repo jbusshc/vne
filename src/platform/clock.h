@@ -27,3 +27,11 @@ inline f32 clock_tick(Clock* c) {
     }
     return static_cast<f32>(dt);
 }
+
+// Marca de tiempo en microsegundos, sin relacion con Clock/clock_tick: para medir el
+// coste de una operacion puntual (skill vne-build-verify), no el dt del bucle de frame.
+inline u64 clock_now_microseconds() {
+    u64 counter = SDL_GetPerformanceCounter();
+    f64 freq_hz = static_cast<f64>(SDL_GetPerformanceFrequency());
+    return static_cast<u64>((static_cast<f64>(counter) / freq_hz) * 1000000.0);
+}
