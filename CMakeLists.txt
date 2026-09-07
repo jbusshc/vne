@@ -86,9 +86,20 @@ if(qoi_ADDED)
   target_include_directories(qoi INTERFACE ${qoi_SOURCE_DIR})
 endif()
 
-# stb_image.h esta en el stack cerrado (SPEC.md #3) para cuando tools/bake empaquete PNGs
-# reales de assets_src/ (ADR-0011), pero M1 todavia no lo necesita: el atlas de prueba es
-# procedural. Se anade cuando haya assets reales que leer, no antes.
+# stb_image.h: SPEC.md #3 dice "solo en herramientas offline, nunca en runtime". Ahora
+# hace falta de verdad: assets_src/png/ tiene sprites reales (Kenney UI Pack, CC0) y
+# vne_bake los empaqueta con un shelf packer real en vez de la rejilla procedural de M1
+# (ADR-0011 / ADR-0025, ver docs/DECISIONS.md).
+CPMAddPackage(
+  NAME stb
+  GITHUB_REPOSITORY nothings/stb
+  GIT_TAG 2c980bb59875b0d32144a71867fbdebb2f77cd20
+  DOWNLOAD_ONLY YES
+)
+if(stb_ADDED)
+  add_library(stb_image INTERFACE)
+  target_include_directories(stb_image INTERFACE ${stb_SOURCE_DIR})
+endif()
 
 # FreeType antes que HarfBuzz: el CMakeLists.txt de HarfBuzz detecta el target "freetype"
 # ya existente y activa HB_HAVE_FREETYPE automaticamente (ver docs/DECISIONS.md M2).
@@ -239,8 +250,26 @@ vne_apply_project_flags(vne_script_tools)
 # dibuja nada, solo genera y codifica bytes. Solo toma prestado base/log.cpp de vne_base.
 add_executable(vne_bake tools/bake/main.cpp src/base/log.cpp)
 target_include_directories(vne_bake PRIVATE src)
-target_link_libraries(vne_bake PRIVATE qoi vne_script_tools)
+target_link_libraries(vne_bake PRIVATE qoi vne_script_tools stb_image)
 vne_apply_project_flags(vne_bake)
+
+# vne_bake busca assets_src/png/*.png con una ruta relativa a su propio CWD (ADR-0025):
+# hace falta copiarlo al directorio de build igual que las fuentes, o siempre caeria al
+# respaldo procedural aunque los PNGs reales existan en el arbol fuente.
+file(GLOB VNE_PNG_ASSETS ${CMAKE_SOURCE_DIR}/assets_src/png/*.png)
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/.vne_png_assets_copied
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_src/png
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          ${CMAKE_SOURCE_DIR}/assets_src/png
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_src/png
+  COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/.vne_png_assets_copied
+  DEPENDS ${VNE_PNG_ASSETS}
+  COMMENT "Copiando assets_src/png/ (Kenney UI Pack, CC0) al directorio de build"
+)
+add_custom_target(vne_copy_png_assets
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/.vne_png_assets_copied
+)
 
 # Un checkout limpio mas un build debe producir un juego ejecutable sin pasos manuales
 # (skill vne-build-verify): vne_game depende del atlas de prueba horneado por vne_bake en
@@ -250,12 +279,13 @@ add_custom_command(
          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
   COMMAND vne_bake
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  DEPENDS vne_bake
-  COMMENT "vne_bake: generando atlas de prueba (ADR-0011)"
+  DEPENDS vne_bake ${CMAKE_CURRENT_BINARY_DIR}/.vne_png_assets_copied
+  COMMENT "vne_bake: generando atlas (real si hay PNGs, procedural si no — ADR-0011/0025)"
 )
 add_custom_target(vne_bake_assets
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.qoi
 )
+add_dependencies(vne_bake_assets vne_copy_png_assets)
 add_dependencies(vne_game vne_bake_assets)
 
 # Fuente de prueba para la demo de M2 (ADR pendiente de registrar: Noto Sans JP, OFL,

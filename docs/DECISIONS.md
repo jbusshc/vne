@@ -677,6 +677,47 @@ extension incremental) para soportar bloques indentados con `@if`/`@else`/`@end`
 
 ---
 
+## ADR-0025 — Empaquetador de atlas real con sprites CC0 de Kenney, sobre el placeholder de ADR-0011
+
+**Fecha:** 2026-09-06
+**Hito:** post-M3 (verificacion adicional pedida por el usuario)
+**Estado:** aceptada
+
+**Contexto.** ADR-0011 (M1) dejo el atlas de prueba como una rejilla procedural porque
+`assets_src/png/` no tenia sprites reales, y advirtio explicitamente que habria que
+sustituirlo por un empaquetador real "cuando existan sprites reales que empaquetar". El
+usuario pidio buscar assets libres y probarlo de verdad en vez de dejarlo pendiente
+indefinidamente.
+
+**Decisión.** Se descargo el "UI Pack" de Kenney (kenney.nl/assets/ui-pack, licencia CC0,
+`assets_src/png/LICENSE-kenney-ui-pack.txt`): 82 PNG sueltos de tamaños muy variados (16x16
+hasta 192x64), justo lo que hace falta para probar un empaquetador de verdad en vez de una
+rejilla uniforme. `tools/bake/main.cpp` ahora decodifica cada PNG con `stb_image` (SPEC.md
+§3, "solo en herramientas offline"), los empaqueta con un shelf packer (mismo principio que
+el de `glyph_cache.cpp` en M2: ordenar por alto descendente, colocar de izquierda a
+derecha, saltar de estante cuando no cabe) en un atlas de 1024x1024, y escribe
+`assets_baked/atlas_00.qoi` + un `atlas_00.bin` version 2 (manifiesto generico de
+rectangulos `{x,y,w,h}`, sin nombres). Si `assets_src/png/` estuviera vacio, cae de vuelta
+al placeholder procedural de ADR-0011, ahora escrito con el mismo formato version 2 para
+que `main.cpp` tenga una unica ruta de lectura.
+
+**Alternativas descartadas.** Mantener dos formatos de `atlas_00.bin` (rejilla v1 y
+sprites v2) y dos rutas de lectura en `main.cpp`: mas codigo por mantener sin ningun
+beneficio real, cuando el placeholder puede emitir el mismo formato que el empaquetador
+real. Empaquetar los 870 archivos del pack completo: innecesario para probar la logica del
+packer: 82 sprites de la variante "Blue/Default" ya cubren un rango de tamaños amplio.
+
+**Consecuencias.** El criterio de M1 (5000 sprites de un atlas en 1 draw call, >300 fps) se
+volvio a verificar con sprites reales en vez de la rejilla: sigue cumpliendose (ver cierre
+en el resumen de la conversacion). El formato `atlas_00.bin` cambio de version (1 -> 2);
+como es un artefacto de build, no un asset versionado, no hace falta migracion. Los
+nombres de archivo originales de los sprites se pierden (el manifiesto solo guarda
+rectangulos): si algun dia se necesita referenciar un sprite por nombre desde el DSL
+(conectaria con ADR-0022), hay que anadir un pool de nombres al formato, como ya se hace en
+`.vnc`.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -694,8 +735,11 @@ desviarte.
 - Backend GL 3.3 de M1 escrito pero no compilado ni probado: no hay Linux disponible aquí.
 - Shaders escritos a mano en vez de vía `sokol-shdc` (ADR-0010): reconsiderar automatizar el
   binario cuando el número de shaders crezca.
-- El atlas de M1 es una rejilla procedural fija (ADR-0011), no el empaquetador real de
-  SPEC.md §11: hace falta implementarlo cuando existan sprites reales en `assets_src/png/`.
+- ~~El atlas de M1 es una rejilla procedural fija, no el empaquetador real~~ — resuelto:
+  ADR-0025 implementa un shelf packer real sobre 82 sprites CC0 reales (Kenney UI Pack) en
+  `assets_src/png/`, verificado visualmente. Sigue sin ser el `atlas.bin` final de
+  SPEC.md §11 (sin nombres, sin sub-paginas, sin rotacion): eso queda para cuando el
+  pipeline de assets se formalice (probablemente M9/M11).
 - El componente "C++ AddressSanitizer" no cubre el componente separado "Graphics Tools" de
   Windows: la capa de depuracion D3D11 sigue sin poder probarse aqui (ADR-0012). No bloquea
   ningun criterio de aceptacion, solo reduce la validacion extra disponible en Debug.

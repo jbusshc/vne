@@ -68,29 +68,49 @@ static f32 frame_history_p99_ms(const f32* history, u32 count) {
     return sorted[p99_index] * 1000.0f;
 }
 
-// Lee la rejilla del atlas de prueba horneada por vne_bake (ADR-0011). No hay todavia un
-// modulo assets/ formal: esto es una lectura minima, solo para el stress test de M1.
-static void read_atlas_grid(i32* cols, i32* rows, i32* cell_w, i32* cell_h) {
-    *cols = 4;
-    *rows = 4;
-    *cell_w = 128;
-    *cell_h = 128;
+// Rectangulo de un sprite dentro del atlas (ADR-0025): mismo layout binario que
+// SpriteRect en tools/bake/main.cpp, sin compartir header porque uno es runtime y el
+// otro una herramienta offline.
+struct AtlasSpriteRect {
+    u16 x, y, w, h;
+};
+
+// Lee el manifiesto del atlas horneado por vne_bake (ADR-0025: empaquetador real sobre
+// assets_src/png/, o la rejilla procedural de respaldo si ese directorio esta vacio — en
+// ambos casos, mismo formato de sprites). No hay todavia un modulo assets/ formal: esto
+// es una lectura minima, solo para el stress test de M1. Devuelve nullptr si no se pudo
+// cargar; el llamante debe seguir funcionando igual (placeholder magenta).
+static AtlasSpriteRect* read_atlas_manifest(u32* out_count) {
+    *out_count = 0;
 
     std::FILE* bin = std::fopen("assets_baked/atlas_00.bin", "rb");
     if (bin == nullptr) {
         log_error("No se encontro assets_baked/atlas_00.bin; ejecuta vne_bake primero.");
-        return;
+        return nullptr;
     }
-    u32 header[6];
-    if (std::fread(header, sizeof(header), 1, bin) == 1 && header[0] == k_atlas_bin_magic) {
-        *cols   = static_cast<i32>(header[2]);
-        *rows   = static_cast<i32>(header[3]);
-        *cell_w = static_cast<i32>(header[4]);
-        *cell_h = static_cast<i32>(header[5]);
-    } else {
-        log_error("assets_baked/atlas_00.bin invalido");
+    u32 header[5];
+    if (std::fread(header, sizeof(header), 1, bin) != 1 || header[0] != k_atlas_bin_magic ||
+        header[1] != 2u) {
+        log_error("assets_baked/atlas_00.bin invalido o de una version anterior");
+        std::fclose(bin);
+        return nullptr;
+    }
+    u32 count = header[4];
+    if (count == 0) {
+        std::fclose(bin);
+        return nullptr;
+    }
+
+    AtlasSpriteRect* sprites = arena_alloc_n<AtlasSpriteRect>(&g_arena_perm, count);
+    if (sprites == nullptr ||
+        std::fread(sprites, sizeof(AtlasSpriteRect), count, bin) != count) {
+        log_error("assets_baked/atlas_00.bin truncado");
+        std::fclose(bin);
+        return nullptr;
     }
     std::fclose(bin);
+    *out_count = count;
+    return sprites;
 }
 
 // Corre un guion entero sin ventana ni GPU, a maxima velocidad, via vm_skip_current()
@@ -156,8 +176,8 @@ int main(int argc, char** argv) {
         log_error("No se pudo cargar el atlas de prueba; se usara el placeholder magenta.");
     }
 
-    i32 grid_cols = 0, grid_rows = 0, cell_w = 0, cell_h = 0;
-    read_atlas_grid(&grid_cols, &grid_rows, &cell_w, &cell_h);
+    u32              atlas_sprite_count = 0;
+    AtlasSpriteRect* atlas_sprites      = read_atlas_manifest(&atlas_sprite_count);
 
     FontHandle demo_font = text_load_font("assets_src/ttf/NotoSansJP.ttf", 28);
     if (!demo_font.valid()) {
@@ -207,16 +227,16 @@ int main(int argc, char** argv) {
         f32 dt = clock_tick(&clock);
 
         for (u32 i = 0; i < k_stress_sprite_count; ++i) {
-            i32 cell = static_cast<i32>(i) % (grid_cols * grid_rows);
-            i32 cx   = cell % grid_cols;
-            i32 cy   = cell / grid_cols;
+            AtlasSpriteRect rect =
+                atlas_sprite_count > 0 ? atlas_sprites[i % atlas_sprite_count]
+                                       : AtlasSpriteRect{0, 0, 1, 1};
 
             Sprite s{};
             s.tex   = atlas;
-            s.src_x = static_cast<f32>(cx * cell_w);
-            s.src_y = static_cast<f32>(cy * cell_h);
-            s.src_w = static_cast<f32>(cell_w);
-            s.src_h = static_cast<f32>(cell_h);
+            s.src_x = static_cast<f32>(rect.x);
+            s.src_y = static_cast<f32>(rect.y);
+            s.src_w = static_cast<f32>(rect.w);
+            s.src_h = static_cast<f32>(rect.h);
 
             u32 col = i % k_stress_grid_cols;
             u32 row = i / k_stress_grid_cols;

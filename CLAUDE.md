@@ -20,6 +20,12 @@ valida de verdad para etiquetas (ADR-0022: actor/pose/fondo se internan sin regi
 assets real, que todavia no existe). Windows sigue siendo la unica plataforma verificada
 (ADR-0013). Detalle completo en docs/DECISIONS.md.
 
+Verificacion adicional post-M3 (pedida por el usuario): el atlas procedural de M1
+(ADR-0011) se sustituyo por un empaquetador shelf real, probado con 82 sprites CC0 reales
+(Kenney UI Pack, `assets_src/png/`) — botones, flechas, estrellas — de tamaños variados
+(16x16 a 192x64). Confirmado visualmente en el juego real (ADR-0025). El criterio de M1
+(5000 sprites de un atlas en 1 draw call) se volvio a verificar con assets reales.
+
 M2 — Texto (hito anterior): FreeType+HarfBuzz, atlas de glifos, word-wrap+kinsoku,
 marcado inline, furigana, maquina de escribir. Verificado y confirmado visualmente.
 
