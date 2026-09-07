@@ -1229,6 +1229,82 @@ para añadirlo despues: `InputState` es un struct plano, ampliarlo es aditivo.
 
 ---
 
+## ADR-0041 — `src/editor/` se excluye de Ship a nivel de CMake, no con `#ifdef` vacío
+
+**Fecha:** 2026-09-07
+**Hito:** M8
+**Estado:** aceptada
+
+**Contexto.** SPEC.md #6 dice literalmente "en Ship, todo el código de `src/editor/`
+queda excluido del build", y el criterio de aceptación de M8 exige que la build Ship "no
+contenga símbolos de ImGui". El patrón ya usado para el backend GL (`gfx_backend_gl.cpp`,
+ADR-0009) es envolver el cuerpo entero de un archivo en `#if defined(...)` y dejar que
+compile "vacío" cuando la macro no está definida — eso basta para "cero uso", pero no
+garantiza "cero símbolos": el `.cpp` se compilaría igual (a un objeto casi vacío) y en
+teoría un símbolo residual podría colarse.
+
+**Decision.** Ni Dear ImGui ni `src/editor/editor.cpp` se añaden al build en absoluto
+cuando `CMAKE_BUILD_TYPE STREQUAL "Ship"` (comprobación en tiempo de configuración,
+fiable aquí porque cada preset tiene su propio directorio de build fijo, ver
+CMakePresets.json). `editor.h` sigue declarando sus funciones incondicionalmente (para
+que `main.cpp` compile en cualquier configuración), pero cada llamada real en `main.cpp`
+está envuelta en `#if defined(VN_EDITOR)`: en Ship ese código ni siquiera se parsea, y el
+enlazador nunca ve una referencia a un símbolo que no existe. Verificado con
+`strings vne_game.exe | grep -i imgui` sobre el binario Ship real: 0 coincidencias.
+
+**Alternativas descartadas.** `#if defined(VN_EDITOR)` envolviendo todo `editor.cpp`
+(mismo patrón que `gfx_backend_gl.cpp`) sin tocar CMake: más simple de escribir, pero no
+garantiza "cero símbolos" de la misma forma — dependería de que el enlazador elimine
+agresivamente un objeto casi vacío, en vez de que ni siquiera exista.
+
+**Consecuencias.** `editor.cpp` solo se compila (y por tanto solo se type-checkea) en
+Debug y Dev, nunca en Ship — igual que ya pasaba con `gfx_backend_gl.cpp` en Windows. Un
+error de tipos en el editor no se detectaría corriendo solo builds Ship; hay que
+recordar probar Dev cuando se toque `src/editor/`.
+
+---
+
+## ADR-0042 — Recarga de scripts invoca `vne_bake` como subproceso, no enlaza el compilador del DSL en el juego
+
+**Fecha:** 2026-09-07
+**Hito:** M8
+**Estado:** aceptada
+
+**Contexto.** El criterio de M8 "editar un `.vns` y ver el cambio sin reiniciar" exige
+que el editor pueda recompilar un guion en caliente. El compilador del DSL
+(`script/lexer.cpp`, `parser.cpp`, `compiler.cpp`) vive en la librería `vne_script_tools`,
+que las reglas del proyecto (skill vne-script-dsl) confinan explícitamente a
+herramientas offline: "nunca en `vne_game`/`vne_base`". Enlazar `vne_script_tools`
+directo en `vne_game` para poder recompilar en caliente rompería esa regla, aunque fuera
+solo bajo `VN_EDITOR`.
+
+**Decision.** El watcher del editor (mtime de `assets_src/scripts/demo.vns` comprobado
+cada 0.5s, SPEC.md #7.4) invoca `vne_bake.exe` como un subproceso (`std::system`) cuando
+detecta un cambio, y luego llama a `script_load()` (que sí es parte normal de `vne_base`,
+lee el `.vnc` ya compilado) sobre el resultado. El compilador del DSL en sí nunca se
+enlaza en `vne_game`, ni siquiera en Dev: sigue siendo exclusivo de `vne_bake`. Verificado
+end-to-end: modificar `demo.vns` mientras `vne_game.exe` (Dev) corre dispara la
+recompilación y el guion se recarga sin reiniciar el proceso (log:
+"editor: '...' recargado sin reiniciar").
+
+**Alternativas descartadas.** Enlazar `vne_script_tools` en `vne_base`/`vne_game` solo
+bajo `VN_EDITOR` (nunca en Ship): técnicamente respetaría "cero parsing en release" (la
+letra de la regla), pero no su espíritu — el objetivo de mantener el compilador fuera del
+juego es que el juego nunca necesite saber parsear texto, ni siquiera opcionalmente.
+Invocar `vne_bake` como proceso aparte mantiene esa separación limpia.
+
+**Consecuencias.** La recarga en caliente depende de que `vne_bake.exe` exista al lado de
+`vne_game.exe` en el directorio de build (siempre cierto tras un build normal) y de que
+`std::system()` pueda lanzarlo — en Windows se invoca con el prefijo `.\` explícito
+porque `cmd.exe` (lo que `system()` usa por debajo) no siempre resuelve el ejecutable del
+propio directorio de trabajo sin él. `heap_guard_suspend/resume` rodea la llamada (mismo
+motivo que ADR-0032/ADR-0035: lanzar un proceso puede asignar heap por debajo): `Dev` es
+la única configuración con `VN_EDITOR` activo, y también tiene `VN_DEBUG` activo (SPEC.md
+#4: sus flags son acumulativos, no exclusivos), así que `heap_guard` sí está vigilando de
+verdad ahí — la excepción no es teórica en este caso.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -1357,3 +1433,25 @@ desviarte.
   teclas aqui). El mecanismo es identico (VnMode::update en modo skip llama exactamente a
   vm_skip_current en bucle), asi que el numero medido deberia trasladarse igual, pero no
   se confirmo end-to-end.
+- El watcher de recarga de scripts de M8 solo vigila `assets_src/scripts/demo.vns` (fijo
+  a un solo archivo, no un directorio entero): SPEC.md #7.4 describe un watcher generico
+  de mtimes para "texturas, fuentes, shaders y guiones", que no existe todavia como
+  sistema unificado. Ampliar a un directorio completo (o a los otros tipos de asset)
+  cuando exista el modulo `assets/` formal.
+- Los paneles del editor (M8) son minimos: inspector de `GameState` (pc, actores, 16
+  variables editables), salto a comando arbitrario, contador de allocs/grafico de frame
+  time, y el estado del watcher de recarga. No hay visor de atlas visual (mostrar la
+  textura en si) porque `gfx.h`/`texture.h` mantienen deliberadamente los tipos de
+  sokol_gfx fuera de su API publica (para no acoplar el core a un backend), y exponer un
+  `ImTextureID` desde ahi habria requerido romper esa frontera o meter sokol_imgui en
+  `gfx.cpp` (que si se compila en Ship). Se dejo como texto (numero de sprites) en vez de
+  imagen; revisar si se necesita un visor visual real mas adelante.
+- No hay tests automatizados para el watcher de recarga de scripts ni para los paneles
+  del editor (ImGui no se presta a tests unitarios sencillos sin un backend de captura de
+  pantalla): se verifico end-to-end a mano una vez (modificar demo.vns mientras
+  vne_game.exe de Dev corria, confirmando en el log que se recompilo y recargo sin
+  reiniciar, con heap_allocs_frame_max en 0 durante todo el proceso). No hay
+  verificacion automatizada que impida una regresion futura aqui.
+- El editor solo vigila y recarga `demo.vns`; no hay forma de cambiarlo a otro guion
+  desde la UI del editor todavia (seria trivial de anadir, un campo de texto mas, pero no
+  se hizo por no ampliar el alcance de M8 mas de lo que pedia el criterio de aceptacion).

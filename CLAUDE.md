@@ -5,8 +5,33 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno (M7 implementado, pendiente de confirmación para cerrar)
-**Último hito completado:** M7 — UI de novela visual. Pila de modos `Mode`/`ModeStack`
+**Hito activo:** ninguno (M8 implementado, pendiente de confirmación para cerrar)
+**Último hito completado:** M8 — Editor. Dear ImGui (rama docking) integrado vía
+`util/sokol_imgui.h` de sokol (ya en el pin de M1, sin dependencia nueva). `src/editor/`
+y la propia librería de ImGui se excluyen del build por completo en Ship a nivel de
+CMake (`CMAKE_BUILD_TYPE STREQUAL "Ship"`), no solo con un `#ifdef` vacío (ADR-0041):
+verificado con `strings vne_game.exe | grep -i imgui` sobre el binario Ship real, 0
+coincidencias. F1 activa/desactiva el editor; paneles: inspector de `GameState` (pc,
+actores, 16 variables editables), salto a comando arbitrario, contador de
+allocs/gráfico de frame time, y recarga de scripts. La recarga invoca `vne_bake` como
+subproceso en vez de enlazar el compilador del DSL en el juego (ADR-0042): el
+compilador del DSL sigue siendo exclusivo de herramientas offline incluso en Dev.
+Criterio medible de M8 ("editar un `.vns` y ver el cambio sin reiniciar") verificado
+end-to-end de verdad: modificar `demo.vns` mientras `vne_game.exe` (Dev) corría disparó
+la recompilación y recarga sin reiniciar el proceso, con `heap_allocs_frame_max` en 0
+durante todo el proceso (confirma que la excepción de `heap_guard` alrededor del
+subproceso, mismo patrón que Lua/audio, funciona de verdad, no solo por simetría de
+código). `Say` bloqueando de verdad (M7) hizo evidente que `platform/input.h` necesitaba
+ratón real para que un editor con paneles fuera usable: `InputState` gana posición,
+botones y rueda de ratón (píxeles de ventana reales, la UI de VN sigue siendo solo
+teclado, ADR-0040 no cambia). 94/94 tests en Dev; 93/94 en Debug+ASan (el de rendimiento
+de M2 no representativo sin optimizar, ADR-0018) y 93/93 en Ship, sin ningún reporte de
+memoria en ninguna configuración. No hay tests automatizados para el watcher de recarga
+ni para los paneles del editor (ImGui no se presta a tests unitarios sin un backend de
+captura de pantalla); se verificó a mano una vez. Windows sigue siendo la única
+plataforma verificada (ADR-0013). Detalle completo en docs/DECISIONS.md.
+
+M7 — UI de novela visual (hito anterior). Pila de modos `Mode`/`ModeStack`
 (SPEC.md #10, `virtual` explícito de la especificación, no viola la regla general porque
 la pila tiene 2-4 elementos). `VnMode` dirige la VM y dibuja el cuadro de diálogo real:
 `Say` por fin bloquea de verdad esperando input (cierra ADR-0023 desde M3, ver ADR-0039),

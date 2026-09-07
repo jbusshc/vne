@@ -115,6 +115,37 @@ if(miniaudio_ADDED)
   target_include_directories(miniaudio INTERFACE ${miniaudio_SOURCE_DIR})
 endif()
 
+# Dear ImGui, rama docking (SPEC.md #3: "toda la UI de desarrollo"), solo para Debug/Dev.
+# SPEC.md #6 dice literalmente "en Ship, todo el codigo de src/editor/ queda excluido del
+# build": en vez de compilarlo vacio tras un #if defined(VN_EDITOR) (que dejaria simbolos
+# de ImGui como codigo muerto pero presente), directamente no se añade ni ImGui ni
+# src/editor/ al target en una configuracion Ship — la unica forma de garantizar "cero
+# simbolos de ImGui" de verdad, no solo "cero uso". CMAKE_BUILD_TYPE es fijo por
+# configuracion (un directorio de build por preset, ver CMakePresets.json), asi que esta
+# comprobacion en tiempo de configuracion es fiable aqui.
+set(VNE_EDITOR_ENABLED $<NOT:$<CONFIG:Ship>>)
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Ship")
+  CPMAddPackage(
+    NAME imgui
+    GITHUB_REPOSITORY ocornut/imgui
+    GIT_TAG v1.91.5-docking
+    DOWNLOAD_ONLY YES
+  )
+  if(imgui_ADDED)
+    add_library(imgui STATIC
+      ${imgui_SOURCE_DIR}/imgui.cpp
+      ${imgui_SOURCE_DIR}/imgui_draw.cpp
+      ${imgui_SOURCE_DIR}/imgui_tables.cpp
+      ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+      ${imgui_SOURCE_DIR}/imgui_demo.cpp
+    )
+    target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR})
+    # ImGui no compila limpio bajo -Wall -Wextra -Werror ajenos (SPEC.md #4 solo exige
+    # eso en el codigo propio del proyecto, ver el comentario de VNE_WARNING_FLAGS mas
+    # abajo): se compila con los flags por defecto del compilador, sin vne_apply_project_flags.
+  endif()
+endif()
+
 # FreeType antes que HarfBuzz: el CMakeLists.txt de HarfBuzz detecta el target "freetype"
 # ya existente y activa HB_HAVE_FREETYPE automaticamente (ver docs/DECISIONS.md M2).
 CPMAddPackage(
@@ -283,6 +314,31 @@ target_compile_definitions(vne_base PRIVATE ${VNE_GFX_BACKEND_DEFINE})
 # SOKOL_IMPL (gfx.cpp); definirlo a nivel de target es simple y no da falsos positivos
 # porque ninguna otra .cpp de vne_base incluye sokol_gfx.h con SOKOL_IMPL.
 set_source_files_properties(src/gfx/gfx.cpp PROPERTIES COMPILE_DEFINITIONS ${VNE_GFX_SOKOL_BACKEND_DEFINE})
+
+# Editor (M8): src/editor/editor.cpp NO se añade al target en una configuracion Ship
+# (SPEC.md #6, ver el bloque de ImGui mas arriba). En Debug/Dev si se añade y se compila
+# (aunque su cuerpo entero este vacio bajo #if defined(VN_EDITOR) salvo en Dev, igual que
+# gfx_backend_gl.cpp en Windows) para que los errores de tipos se detecten pronto, no solo
+# en una build Dev.
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Ship")
+  target_sources(vne_base PRIVATE src/editor/editor.cpp)
+  target_link_libraries(vne_base PRIVATE imgui)
+  # sokol_imgui.h necesita saber el backend activo para elegir sus shaders embebidos,
+  # igual que gfx.cpp con SOKOL_IMPL (mismo motivo, ver comentario de arriba).
+  # VNE_SOURCE_DIR: el watcher de recarga de scripts necesita la ruta absoluta al .vns
+  # fuente (assets_src/scripts/ nunca se copia al directorio de build, a diferencia de
+  # png/ogg/ttf: vne_bake ya lo lee directo de CMAKE_SOURCE_DIR), o dependeria de que
+  # vne_game se ejecute con el CWD exacto del directorio de build (fragil).
+  set_source_files_properties(src/editor/editor.cpp PROPERTIES COMPILE_DEFINITIONS
+    "${VNE_GFX_SOKOL_BACKEND_DEFINE};VNE_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"")
+  if(MSVC)
+    # ImGui/sokol_imgui.h son codigo de terceros que llega a esta unidad de traduccion:
+    # advertencias de conversion y variables locales sin usar en sus propias macros, no
+    # un problema de nuestro codigo (mismo patron que sol2/doctest en otros CMakeLists).
+    set_source_files_properties(src/editor/editor.cpp PROPERTIES COMPILE_OPTIONS "/wd4244;/wd4267;/wd4996")
+  endif()
+endif()
+
 vne_apply_project_flags(vne_base)
 
 if(MSVC)

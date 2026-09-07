@@ -55,6 +55,14 @@ Recti gfx_letterbox_rect(i32 window_w, i32 window_h, i32 virtual_w, i32 virtual_
 // gfx_begin_frame (el blit de letterbox de gfx_present tambien cuenta).
 extern u32 g_gfx_draw_call_count;
 
+// Punto de enganche opcional para el editor (SPEC.md #6.5: "editor_render() -> solo si
+// VN_EDITOR", entre el blit de letterbox y el intercambio de buffer). gfx.cpp (vne_base,
+// siempre compilado) no puede llamar a editor_render() directamente: src/editor/ ni
+// siquiera se compila en Ship (ver CMakeLists.txt). main.cpp asigna este puntero a
+// editor_render solo quien lo tenga disponible, dentro de su propio `#if defined
+// (VN_EDITOR)`; si queda en nullptr (Debug/Ship), gfx_present() simplemente no lo llama.
+extern void (*g_editor_render_hook)();
+
 // Textura 1x1 blanca, creada una sola vez (perezosamente) y cacheada: para paneles de UI
 // solidos (M7, cuadro de dialogo/menus/backlog) dibujados como un Sprite con esta
 // textura y el color deseado como tinte, sin necesitar un atlas real todavia. Un handle

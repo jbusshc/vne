@@ -42,6 +42,7 @@ PlatformWindow* g_window = nullptr;
 }  // namespace
 
 u32 g_gfx_draw_call_count = 0;
+void (*g_editor_render_hook)() = nullptr;
 
 namespace {
 
@@ -320,6 +321,13 @@ void gfx_present(i32 window_w, i32 window_h) {
     sg_apply_bindings(&bnd);
     sg_draw(0, 6, 1);
     g_gfx_draw_call_count += 1;
+
+    // SPEC.md #6.5: "editor_render() -> solo si VN_EDITOR", dentro de la misma pasada al
+    // swapchain, justo despues del blit de letterbox y antes de terminarla (para que el
+    // editor se dibuje encima de la escena ya compuesta, no debajo).
+    if (g_editor_render_hook != nullptr) {
+        g_editor_render_hook();
+    }
 
     sg_end_pass();
     sg_commit();

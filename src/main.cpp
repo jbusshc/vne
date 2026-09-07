@@ -7,6 +7,9 @@
 #include "base/arena.h"
 #include "base/heap_guard.h"
 #include "base/log.h"
+#if defined(VN_EDITOR)
+#include "editor/editor.h"
+#endif
 #include "game/backlog_mode.h"
 #include "game/menu_mode.h"
 #include "game/mode.h"
@@ -189,6 +192,11 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+#if defined(VN_EDITOR)
+    editor_init();
+    g_editor_render_hook = editor_render;
+#endif
+
     TextureHandle atlas{};
     if (texture_load("assets_baked/atlas_00.qoi", &atlas) != TextureLoadResult::Ok) {
         log_error("No se pudo cargar el atlas de prueba; se usara el placeholder magenta.");
@@ -265,6 +273,12 @@ int main(int argc, char** argv) {
         glyph_cache_begin_frame();
 
         platform_poll_events(&input);
+
+#if defined(VN_EDITOR)
+        if (input.key_pressed[SDL_SCANCODE_F1]) {
+            editor_toggle();
+        }
+#endif
 
         // Router de modos de nivel superior (SPEC.md #10, M7): B/M/F5/F9 abren un
         // overlay sobre VnMode solo cuando no hay ya uno abierto; ESC en la base cierra
@@ -358,6 +372,16 @@ int main(int argc, char** argv) {
         i32 window_w = 0, window_h = 0;
         platform_window_size_px(&window, &window_w, &window_h);
 
+#if defined(VN_EDITOR)
+        EditorDiagnostics editor_diag{};
+        editor_diag.frame_times        = frame_times;
+        editor_diag.frame_time_count   = frames_recorded;
+        editor_diag.max_frame_allocs   = max_frame_allocs;
+        editor_diag.atlas_sprite_count = atlas_sprite_count;
+        editor_update(input, &demo_state, &demo_script, "assets_src/scripts/demo.vns",
+                      editor_diag, window_w, window_h, dt);
+#endif
+
         // Justo antes de presentar: la regla de cero asignaciones se comprueba en este
         // punto exacto del frame (skill vne-memory-model).
         heap_guard_check_frame();
@@ -386,6 +410,9 @@ int main(int argc, char** argv) {
         }
     }
 
+#if defined(VN_EDITOR)
+    editor_shutdown();
+#endif
     audio_shutdown();
     gfx_shutdown();
     platform_window_destroy(&window);
