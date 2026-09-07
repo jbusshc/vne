@@ -30,9 +30,16 @@ struct VmState {
     u32 call_stack[k_max_call_depth] = {};
     u8  call_depth  = 0;
     u8  cmd_phase   = 0;  // 0 = sin iniciar, 1 = en curso
+    // Relleno explicito (skill vne-serializable-state: "padding sin inicializar" esta
+    // prohibido). El relleno implicito del compilador entre cmd_phase y cmd_timer no se
+    // preserva de forma fiable a traves de copias/escrituras parciales: hacerlo un campo
+    // real con valor por defecto evita que el mismo GameState logico produzca bytes
+    // distintos en un memcmp o al guardarse a disco.
+    u8  _pad0[2] = {};
     f32 cmd_timer   = 0.0f;
     u32 visible_glyphs   = 0;
     u8  waiting_for_input = 0;
+    u8  _pad1[3] = {};  // relleno final explicito, mismo motivo que _pad0.
 };
 
 struct GameState {
@@ -40,10 +47,12 @@ struct GameState {
     VmState   vm;
     ActorSlot actors[k_max_actor_slots];
     u16       bg_id = 0;
+    u8        _pad0[2] = {};  // ver comentario de relleno en VmState.
     i32       vars[k_max_vars]           = {};
     u8        flags[k_max_flags / 8]     = {};
     u32       rng_state         = 1;
     u16       bgm_track_id      = 0;
+    u8        _pad1[2] = {};  // ver comentario de relleno en VmState.
     f32       bgm_position      = 0.0f;
     f32       bus_volume[4]     = {1.0f, 1.0f, 1.0f, 1.0f};
     char      player_name[32]   = {};

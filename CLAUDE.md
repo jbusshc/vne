@@ -5,8 +5,29 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno
-**Último hito completado:** M3 — VM y DSL. `Cmd`/`CmdKind` (subconjunto de M3, ADR-0021),
+**Hito activo:** ninguno (M4 implementado, pendiente de confirmación para cerrar)
+**Último hito completado:** M4 — Guardado, carga y rollback. `base/crc32` (IEEE 802.3,
+vector de prueba `0xCBF43926` verificado), `vm/backlog` (200 entradas circulares),
+`vm/rollback` (64 instantaneas, deshacer/rehacer con truncado de "futuro" al capturar tras
+un retroceso), `vm/save` (formato `.vnsave` exacto de SPEC.md #8.3, magic+version+size+
+CRC32+GameState+miniatura(0, diferida a M7, ADR-0026)+backlog). F5/F9/flechas cableadas en
+`main.cpp` para probar a mano. Test obligatorio del skill `vne-serializable-state`
+(`tests/test_save_replay.cpp`): guardar y recargar `demo.vns` en cada uno de sus 185
+comandos da un `GameState`/`Backlog` byte a byte identico a una ejecucion sin
+interrupciones, verificado 4 ejecuciones seguidas sin fallos intermitentes. Bug real
+encontrado y arreglado en el proceso (ADR-0028): relleno de alineacion implicito en
+`VmState`/`GameState`/`BacklogEntry` no sobrevivia de forma fiable a copias/escrituras
+parciales bajo MSVC, convertido en campos `_pad` explicitos. 61/61 tests pasan en Ship; en
+Debug+ASan pasan 60/61 (el de rendimiento de M2 no es representativo sin optimizar,
+ADR-0018), sin ningun reporte de memoria. `--autoplay-script` verificado sin cambios
+(185 comandos). Las teclas F5/F9/flechas no se probaron con pulsaciones reales en la
+ventana interactiva en este entorno (sin forma de inyectar input real aqui); si estuviera
+mal cableado el input especifico de M4, una prueba manual del usuario lo detectaria.
+Rollback solo captura en `Say` por ahora; `Choice` se anadira en M5 (ADR-0027). Windows
+sigue siendo la unica plataforma verificada (ADR-0013). Detalle completo en
+docs/DECISIONS.md.
+
+M3 — VM y DSL (hito anterior). `Cmd`/`CmdKind` (subconjunto de M3, ADR-0021),
 interprete con `start`/`update`/`skip_to_end`, lexer/parser/compilador del DSL
 (`vne_script_tools`, solo herramientas offline), formato `.vnc`, `--autoplay-script`.
 Verificado en Windows (SPEC.md §12): guion de prueba de 204 lineas / 185 comandos se

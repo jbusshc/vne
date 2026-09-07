@@ -14,6 +14,9 @@
 #include "text/font.h"
 #include "text/glyph_cache.h"
 #include "text/layout.h"
+#include "vm/backlog.h"
+#include "vm/rollback.h"
+#include "vm/save.h"
 #include "vm/script_load.h"
 #include "vm/vm.h"
 
@@ -121,6 +124,8 @@ static int run_autoplay(const char* script_path) {
     g_arena_perm  = arena_create(k_perm_arena_size, "perm");
     g_arena_scene = arena_create(k_scene_arena_size, "scene");
     g_arena_frame = arena_create(k_frame_arena_size, "frame");
+    rollback_init(&g_rollback);
+    backlog_reset(&g_backlog);
 
     CompiledScript script{};
     if (script_load(script_path, &g_arena_scene, &script) != ScriptLoadResult::Ok) {
@@ -160,6 +165,8 @@ int main(int argc, char** argv) {
     g_arena_perm  = arena_create(k_perm_arena_size, "perm");
     g_arena_scene = arena_create(k_scene_arena_size, "scene");
     g_arena_frame = arena_create(k_frame_arena_size, "frame");
+    rollback_init(&g_rollback);
+    backlog_reset(&g_backlog);
 
     PlatformWindow window{};
     if (!platform_window_create(&window, "vne \xe2\x80\x94 M2", 1280, 720)) {
@@ -222,6 +229,30 @@ int main(int argc, char** argv) {
         platform_poll_events(&input);
         if (input.key_pressed[SDL_SCANCODE_ESCAPE]) {
             input.quit_requested = true;
+        }
+
+        // M4, para poder probarlo a mano: F5 guarda, F9 carga, flechas izq/der
+        // deshacen/rehacen sobre el buffer de rollback de 64 pasos (SPEC.md #12).
+        if (input.key_pressed[SDL_SCANCODE_F5]) {
+            SaveResult sr = save_game("assets_baked/quicksave.vnsave", demo_state, g_backlog);
+            log_info("F5: guardado -> %s", sr == SaveResult::Ok ? "ok" : "ERROR");
+        }
+        if (input.key_pressed[SDL_SCANCODE_F9]) {
+            LoadResult lr =
+                load_game("assets_baked/quicksave.vnsave", &demo_state, &g_backlog);
+            demo_finished = false;
+            vm_resync_after_state_change(&demo_state);
+            log_info("F9: carga -> %s", lr == LoadResult::Ok ? "ok" : "ERROR");
+        }
+        if (input.key_pressed[SDL_SCANCODE_LEFT]) {
+            bool moved = rollback_back(&g_rollback, &demo_state);
+            vm_resync_after_state_change(&demo_state);
+            log_info("rollback atras -> %s", moved ? "ok" : "sin mas historia");
+        }
+        if (input.key_pressed[SDL_SCANCODE_RIGHT]) {
+            bool moved = rollback_forward(&g_rollback, &demo_state);
+            vm_resync_after_state_change(&demo_state);
+            log_info("rollback adelante -> %s", moved ? "ok" : "sin mas historia");
         }
 
         f32 dt = clock_tick(&clock);

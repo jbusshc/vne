@@ -7,6 +7,8 @@
 #include "test_config.h"
 #include "test_fonts.h"
 #include "text/font.h"
+#include "vm/backlog.h"
+#include "vm/rollback.h"
 
 // Runner manual en vez de DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN: los tests de texto (M2)
 // necesitan un FontHandle real, y glyph_cache sube el atlas de glifos a una textura de
@@ -23,6 +25,8 @@ int main(int argc, char** argv) {
     g_arena_perm  = arena_create(64ull * 1024 * 1024, "test_perm");
     g_arena_scene = arena_create(64ull * 1024 * 1024, "test_scene");
     g_arena_frame = arena_create(8ull * 1024 * 1024, "test_frame");
+    rollback_init(&g_rollback);
+    backlog_reset(&g_backlog);
 
     PlatformWindow window{};
     bool           have_window = platform_window_create(&window, "vne tests", 64, 64);

@@ -718,6 +718,110 @@ rectangulos): si algun dia se necesita referenciar un sprite por nombre desde el
 
 ---
 
+## ADR-0026 — Miniatura de `.vnsave` diferida a M7
+
+**Fecha:** 2026-09-06
+**Hito:** M4
+**Estado:** aceptada
+
+**Contexto.** SPEC.md #8.3 define el formato `.vnsave` con un bloque de miniatura PNG
+384x216 tras el `GameState`. La pila cerrada de dependencias (SPEC.md #3) no incluye
+ningun codificador PNG (solo decodificacion via `stb_image`, y QOI para las texturas
+horneadas); anadir uno nuevo solo para esto requeriria pararse a preguntar por regla
+general del proyecto. Ademas, M4 no tiene todavia ninguna pantalla de guardado que
+muestre esa miniatura: el unico consumidor real llega en M7.
+
+**Decision.** Se pregunto al usuario explicitamente (parar-y-preguntar, formato en disco).
+Eligio diferir la miniatura a M7. El formato `.vnsave` ya incluye el campo
+`thumbnail_size` (u32) tal como lo define SPEC.md #8.3, compatible hacia adelante: M4
+siempre escribe 0 y `load_game` salta ese bloque con `fseek` si algun archivo futuro trae
+un tamano mayor que 0.
+
+**Alternativas descartadas.** Codificar la miniatura en QOI (ya esta en la pila) en vez de
+PNG: cambiaria el formato de disco frente a lo que dice SPEC.md #8.3 sin necesidad, y
+seguiria sin haber nada que capture el framebuffer todavia. Anadir un encoder PNG nuevo a
+la pila: es la dependencia nueva que la regla del proyecto prohibe anadir sin preguntar.
+
+**Consecuencias.** El formato de archivo no cambiara cuando llegue la miniatura real en M7
+(el campo ya existe); solo hay que rellenar `thumbnail_size` con el tamano real y escribir
+los bytes despues. Ningun criterio de aceptacion de M4 depende de la miniatura.
+
+---
+
+## ADR-0027 — El rollback solo captura en `Say`; `Choice` se anadira en M5
+
+**Fecha:** 2026-09-06
+**Hito:** M4
+**Estado:** aceptada
+
+**Contexto.** El skill `vne-serializable-state` especifica que la instantanea de rollback
+se captura "justo antes de ejecutar un comando `Say` y un comando `Choice`". El subconjunto
+de `CmdKind` de M3 (ADR-0021) no incluye `Choice` todavia: ese comando llega con la
+ramificacion en M5.
+
+**Decision.** `cmd_start` solo captura en `CmdKind::Say` por ahora. Cuando M5 añada
+`Choice` al enum, se añadira la misma llamada a `rollback_capture` en su caso del switch;
+como los switches del interprete no llevan `default` (ADR de M3), el compilador ya fuerza a
+tocar ese caso en cuanto exista.
+
+**Alternativas descartadas.** Ninguna: no hay otra opcion razonable mientras `Choice` no
+exista como comando.
+
+**Consecuencias.** El buffer de 64 instantaneas de rollback de M4 es funcionalmente
+completo para el subconjunto de comandos actual. Queda anotado en "Pendientes observados"
+para no olvidar el caso `Choice` al llegar a M5.
+
+---
+
+## ADR-0028 — Relleno de struct explicito en `VmState`, `GameState` y `BacklogEntry`
+
+**Fecha:** 2026-09-06
+**Hito:** M4
+**Estado:** aceptada
+
+**Contexto.** El test obligatorio de M4 (skill `vne-serializable-state`: ejecutar
+`demo.vns` guardando y recargando en cada comando, comparar el estado final byte a byte
+con una ejecucion sin interrupciones) fallaba de forma intermitente con `memcmp` en
+`GameState` y en `Backlog`, incluso cuando el contenido logico de ambos era identico. El
+diagnostico (comparando byte a byte donde diferian) mostro que las diferencias caian
+siempre exactamente en el relleno de alineacion implicito que el compilador inserta entre
+miembros de tamaño distinto (por ejemplo entre `cmd_phase` (u8) y `cmd_timer` (f32) en
+`VmState`, o entre `speaker_id` (u16) y `text_id` (u32) en `BacklogEntry`). La
+especificacion del proyecto ya avisaba de esto: el skill `vne-serializable-state` prohibe
+"padding sin inicializar" y pide relleno explicito con `memset` a cero. La causa raiz es
+que la inicializacion por valor (`GameState{}`) esta obligada por el estandar a poner a
+cero la representacion de objeto completa la primera vez, pero MSVC no garantiza que ese
+cero sobreviva a escrituras parciales posteriores sobre miembros vecinos: el relleno
+*implicito* no es un sub-objeto real, asi que ninguna copia ni ninguna asignacion
+posterior esta obligada a preservarlo.
+
+**Decision.** Se convirtio cada hueco de alineacion implicito en un campo real y con
+nombre: `u8 _pad0[2]`, `u8 _pad1[3]`, etc., en `VmState`, `GameState` y `BacklogEntry`,
+cada uno con su propio inicializador `= {}`. Al ser un miembro real del struct (no un
+hueco invisible para el lenguaje), su valor por defecto se preserva de la misma forma
+fiable que cualquier otro campo a traves de copias, asignaciones y el volcado crudo a
+disco de `save_game`. Tambien se corrigio `backlog_push`, que construia un `BacklogEntry`
+temporal por lista de agregados (`BacklogEntry{a, b, c}`) y lo asignaba: la temporal en si
+llevaba relleno indeterminado de la pila del llamador. Ahora se declara `BacklogEntry
+entry{};` (inicializacion por valor) y se rellenan los campos uno a uno antes de asignarla.
+
+**Alternativas descartadas.** Comparar `GameState`/`Backlog` campo a campo en vez de con
+`memcmp`: evita el sintoma en el test, pero no arregla el problema de fondo, que es que el
+propio `save_game` vuelca esos mismos bytes de relleno indeterminado a disco — dos
+partidas guardadas con el mismo contenido logico podrian producir archivos `.vnsave`
+distintos, lo cual es peor que un test fragil. Usar `#pragma pack(1)`: elimina el relleno
+pero fuerza acceso desalineado a los `u32`/`f32` del struct, mas lento y no portable a
+todas las plataformas de la lista de prioridad del proyecto.
+
+**Consecuencias.** El test obligatorio de M4 (`tests/test_save_replay.cpp`) pasa de forma
+estable en ejecuciones repetidas (verificado 4 veces seguidas). Cualquier campo nuevo que
+se añada a estos tres structs en hitos futuros debe revisarse por huecos de alineacion
+implicitos antes de darlo por terminado; no hay una comprobacion automatica de esto todavia
+(podria añadirse un `static_assert` de tamaño total documentado como ya existe para
+`Cmd`).
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -770,3 +874,13 @@ desviarte.
   `basic_ostream::operator<<`; se silencio con `/wd4530` solo en `vne_tests` (mismo patron
   que C5285 de doctest+`std::tuple`, ver tests/CMakeLists.txt). Si aparece en un contexto
   nuevo, es el mismo problema, no uno distinto.
+- Rollback: falta capturar tambien en `CmdKind::Choice` cuando M5 lo añada (ADR-0027). El
+  switch sin `default` de `cmd_start` obligara a tocar ese caso, pero queda anotado aqui
+  para no olvidar añadir la llamada a `rollback_capture` justo ahi.
+- Las teclas F5 (guardar)/F9 (cargar)/flechas (rollback) cableadas en `main.cpp` para M4 se
+  verificaron por tests automatizados (round-trip byte a byte, deshacer/rehacer, limite de
+  64 pasos) pero no se probaron pulsando las teclas de verdad en la ventana interactiva en
+  este entorno: no hay forma de inyectar pulsaciones de teclado real contra una ventana
+  SDL desde aqui. Si algo en el cableado de `input.key_pressed[...]` especifico de M4
+  estuviera mal (a diferencia de la logica que envuelve, que si esta probada), no se
+  detectaria hasta una prueba manual real.

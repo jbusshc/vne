@@ -208,6 +208,7 @@ add_library(vne_base STATIC
   src/base/heap_guard.cpp
   src/base/math.cpp
   src/base/radix_sort.cpp
+  src/base/crc32.cpp
   src/platform/window.cpp
   src/platform/input.cpp
   src/gfx/gfx.cpp
@@ -217,6 +218,9 @@ add_library(vne_base STATIC
   src/text/layout.cpp
   src/vm/vm.cpp
   src/vm/script_load.cpp
+  src/vm/backlog.cpp
+  src/vm/rollback.cpp
+  src/vm/save.cpp
   ${VNE_GFX_BACKEND_SOURCES}
 )
 target_include_directories(vne_base PUBLIC src)

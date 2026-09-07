@@ -17,6 +17,10 @@ add_executable(vne_tests
   test_parser.cpp
   test_compiler.cpp
   test_vm.cpp
+  test_crc32.cpp
+  test_rollback.cpp
+  test_save_load.cpp
+  test_save_replay.cpp
 )
 target_link_libraries(vne_tests PRIVATE vne_base vne_script_tools doctest::doctest)
 target_include_directories(vne_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
