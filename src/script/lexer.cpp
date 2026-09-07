@@ -40,9 +40,19 @@ std::vector<SourceLine> lex_lines(std::string_view source) {
         usize end     = newline == std::string_view::npos ? source.size() : newline;
         std::string_view raw = source.substr(pos, end - pos);
 
-        std::string_view content = trim(strip_comment(raw));
+        std::string_view no_comment = strip_comment(raw);
+        std::string_view content    = trim(no_comment);
         if (!content.empty()) {
-            lines.push_back(SourceLine{line_number, content});
+            // Indentacion significativa solo dentro de @if/@choice (SPEC.md #9.2), en
+            // multiplos de 4 espacios; un guion mal indentado (p. ej. 2 espacios) redondea
+            // hacia abajo en vez de fallar aqui, el parser es quien decide si el nivel
+            // resultante tiene sentido en el bloque que esta cerrando o abriendo.
+            usize leading = 0;
+            while (leading < no_comment.size() && no_comment[leading] == ' ') {
+                leading += 1;
+            }
+            u32 indent = static_cast<u32>(leading / 4);
+            lines.push_back(SourceLine{line_number, indent, content});
         }
 
         line_number += 1;

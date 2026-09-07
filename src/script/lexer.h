@@ -10,8 +10,9 @@
 // este codigo jamas corre en el bucle de frame del juego (skill vne-memory-model).
 
 struct SourceLine {
-    u32              number;  // 1-based, para mensajes de error con SPEC.md #9.2
-    std::string_view text;    // sin comentario, sin espacios al principio/final
+    u32              number;    // 1-based, para mensajes de error con SPEC.md #9.2
+    u32              indent;    // nivel de indentacion (multiplos de 4 espacios), 0 en la raiz
+    std::string_view text;      // sin comentario, sin espacios al principio/final ni de indentacion
 };
 
 // Divide `source` en lineas logicas: quita comentarios ('#' hasta fin de linea) y recorta

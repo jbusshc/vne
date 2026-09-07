@@ -26,3 +26,12 @@ TEST_CASE("lexer: lineas vacias se omiten") {
     REQUIRE(lines.size() == 1);
     CHECK(lines[0].number == 4);
 }
+
+TEST_CASE("lexer: la indentacion se cuenta en multiplos de 4 espacios") {
+    auto lines = lex_lines("@if x > 0\n    marta: hola\n        @end\n@end\n");
+    REQUIRE(lines.size() == 4);
+    CHECK(lines[0].indent == 0);
+    CHECK(lines[1].indent == 1);
+    CHECK(lines[2].indent == 2);
+    CHECK(lines[3].indent == 0);
+}

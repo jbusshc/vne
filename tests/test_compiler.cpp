@@ -49,13 +49,14 @@ TEST_CASE("compiler + write_vnc: el formato binario coincide con SPEC.md #9.3") 
 
     std::FILE* f = std::fopen(path, "rb");
     REQUIRE(f != nullptr);
-    u32 header[5];
+    u32 header[6];
     REQUIRE(std::fread(header, sizeof(header), 1, f) == 1);
     CHECK(header[0] == 0x53434E56u);  // 'VNCS'
-    CHECK(header[1] == 1u);
+    CHECK(header[1] == 2u);  // M5: se anadio la tabla de ChoiceOption
     CHECK(header[2] == static_cast<u32>(compiled.data.cmds.size()));
     CHECK(header[3] == static_cast<u32>(compiled.data.string_pool.size()));
     CHECK(header[4] == 0u);  // sin etiquetas en este guion
+    CHECK(header[5] == 0u);  // sin choices en este guion
     std::fclose(f);
     std::remove(path);
 }

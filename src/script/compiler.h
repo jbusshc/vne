@@ -18,6 +18,11 @@ struct CompiledScriptData {
     std::vector<Cmd>           cmds;
     std::string                string_pool;  // bytes UTF-8 terminados en '\0'
     std::vector<CompiledLabel> labels;
+    // Opciones de los comandos Choice del guion, en el orden en que se van generando;
+    // Cmd::choice.first_option/option_count indexan un tramo contiguo aqui. Extension del
+    // formato .vnc de SPEC.md #9.3 (que solo documenta Cmd[]/string_pool/Label[]): ver
+    // ADR de M5 en docs/DECISIONS.md.
+    std::vector<ChoiceOption>  choice_options;
 };
 
 struct CompileError {
@@ -37,5 +42,6 @@ struct CompileResult {
 CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                                     const std::string&              file_name);
 
-// Formato .vnc (SPEC.md #9.3). Devuelve false si no se pudo escribir el archivo.
+// Formato .vnc (SPEC.md #9.3, extendido en M5 con la tabla de ChoiceOption). Devuelve
+// false si no se pudo escribir el archivo.
 bool write_vnc(const std::string& path, const CompiledScriptData& data);

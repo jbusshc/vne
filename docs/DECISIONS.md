@@ -822,6 +822,178 @@ implicitos antes de darlo por terminado; no hay una comprobacion automatica de e
 
 ---
 
+## ADR-0029 — Nombres de variable/flag se resuelven por hash modulo capacidad, sin tabla de interning
+
+**Fecha:** 2026-09-06
+**Hito:** M5
+**Estado:** aceptada
+
+**Contexto.** El DSL referencia variables por nombre (`@set confianza = 0`, `@if
+confianza >= 3`) y Lua tambien (`vn.get_var("confianza")`, SPEC.md #9.4). El compilador
+del DSL interna nombres de actor/pose/fondo con una tabla secuencial (`NameInterner`),
+pero esa tabla vive solo en tiempo de compilacion y no se serializa al `.vnc`. Lua, en
+cambio, recibe el nombre como texto en tiempo de ejecucion (dentro de un fragmento
+`@lua` sin parsear, ver ADR-0024): no hay forma de que consulte una tabla de interning
+que el compilador ya descarto, salvo que esa tabla tambien se serialice — una seccion
+mas en el `.vnc` solo para esto.
+
+**Decision.** El `var_id`/`flag_id` de un nombre es `fnv1a_u32(nombre) % capacidad`
+(`k_max_vars` = 512, `k_max_flags` = 2048), calculado igual en `script/compiler.cpp`
+(para `@set`/`@add`/`@if`/opciones de `@choice`) y en `script/lua_bindings.cpp` (para
+`vn.get_var`/`vn.set_var`/`vn.get_flag`/`vn.set_flag`). El mismo nombre cae siempre en el
+mismo indice sin necesitar ninguna tabla adicional ni en el `.vnc` ni en tiempo de
+ejecucion.
+
+**Alternativas descartadas.** Una tabla `{name_hash, var_id}` serializada al `.vnc` (como
+la de `ChoiceOption`, ver ADR-0030): resuelve el problema sin riesgo de colision, pero
+Lua seguiria sin poder registrar nombres nuevos que el DSL nunca uso (un `@lua` que
+solo usa `vn.set_var` con un nombre que ningun `@set` toco en el guion no tendria
+entrada en esa tabla). Pedir que todo nombre de variable se declare primero en el DSL:
+anadiria una sintaxis nueva sin necesidad real todavia.
+
+**Consecuencias.** Riesgo real pero pequeño de colision de hash entre dos nombres
+distintos (dos variables distintas cayendo en el mismo indice y pisandose). Para el
+tamaño de guion de este proyecto (cientos de nombres, no millones) la probabilidad es
+baja, y el sintoma seria detectable (una variable con un valor inesperado). Si esto
+molesta en un hito futuro con guiones grandes, la solucion es la tabla serializada
+descartada arriba, no cambiar el esquema de hash.
+
+---
+
+## ADR-0030 — Tabla de `ChoiceOption` como extension del formato `.vnc` (version 2)
+
+**Fecha:** 2026-09-06
+**Hito:** M5
+**Estado:** aceptada
+
+**Contexto.** `Cmd::choice` (SPEC.md #8.1) solo reserva `first_option`/`option_count`: la
+cardinalidad de las opciones de un `@choice` es variable, así que no caben en el `Cmd` de
+tamaño fijo. El formato `.vnc` documentado en SPEC.md #9.3 solo lista
+`Cmd[]`/`string_pool`/`Label[]`, sin ninguna tabla de opciones. Sin datos en algún sitio
+del archivo, el runtime no puede saber a qué `pc` salta cada opción ni si tiene una
+condición.
+
+**Decision.** Se añadió una sección `ChoiceOption[]` al final del `.vnc`, con su propio
+contador `choice_option_count` en la cabecera (que pasó de 5 a 6 campos `u32`). Como es
+un cambio de formato binario, se subió `k_vnc_version` de 1 a 2 — sin migración, porque
+`.vnc` es un artefacto de build (`assets_baked/`, en `.gitignore`), no un asset
+versionado que alguien pueda tener guardado con el formato viejo (mismo precedente que
+`atlas_00.bin` en ADR-0025). `Cmd::choice.first_option`/`option_count` indexan un tramo
+contiguo de esta tabla, igual que `Label[]` ya indexaba por nombre.
+
+**Alternativas descartadas.** Codificar las opciones como `Cmd` normales intercalados en
+el array principal (p. ej. un `CmdKind::ChoiceOption` por opción, entre `Choice` y
+`ChoiceEnd`): evitaría la sección nueva, pero el intérprete tendría que reconocerlos y
+saltárselos en vez de ejecutarlos como comandos normales — más complejidad en el `switch`
+sin `default` por una distinción que no es realmente "un comando más".
+
+**Consecuencias.** `vm/vm.h` amplía `CompiledScript` con `choice_options`/
+`choice_option_count`, y de paso también expone `labels`/`label_count` (que SPEC.md #9.3
+ya documentaba pero el runtime ignoraba desde M3 — ver ADR-0031 para por qué M5 sí los
+necesita). `script/script_load.cpp` valida el tamaño total esperado del archivo
+incluyendo la sección nueva antes de aceptarlo.
+
+---
+
+## ADR-0031 — `vn.jump()` reactiva la tabla de etiquetas del `.vnc` en tiempo de ejecucion
+
+**Fecha:** 2026-09-06
+**Hito:** M5
+**Estado:** aceptada
+
+**Contexto.** Desde M3, `script_load.cpp` lee `Label[label_count]` del `.vnc` pero lo
+descarta (`(void)label_count`) porque el runtime nunca necesitaba resolver un nombre a
+`pc`: todos los saltos del DSL (`@jump`, `@call`) ya se resuelven a `pc` directo en
+tiempo de compilación. SPEC.md #9.4 expone `vn.jump(label)` a Lua, y Lua sólo tiene el
+nombre como texto en tiempo de ejecución — no hay forma de evitar una búsqueda en
+runtime para este caso concreto.
+
+**Decision.** `CompiledScript` (vm/vm.h) ahora expone `labels`/`label_count` apuntando
+directo al bloque `Label[]` ya presente en el `.vnc` (SPEC.md #9.3 ya lo documentaba, no
+es un campo nuevo del formato). `vm_find_label()` hace una búsqueda lineal por
+`name_hash`: el número de etiquetas de un guion es pequeño (decenas, no miles), así que
+no hace falta una tabla hash real.
+
+**Alternativas descartadas.** Ninguna seria: los datos ya estaban en el archivo desde
+M3, sólo hacía falta dejar de ignorarlos.
+
+**Consecuencias.** Ninguna negativa: es estrictamente wiring de algo que SPEC ya
+preveía. `vn.jump()` a una etiqueta desconocida se registra con `log_error` y no mueve el
+`pc` (no hay excepciones que lanzar, SPEC.md #4).
+
+---
+
+## ADR-0032 — `heap_guard` se suspende durante la ejecución de un `LuaCall`
+
+**Fecha:** 2026-09-06
+**Hito:** M5
+**Estado:** aceptada — decisión del usuario, no tomada unilateralmente
+
+**Contexto.** `CmdKind::LuaCall` ejecuta un fragmento de código Lua (vía sol2) dentro de
+`cmd_start`, que corre desde `vm_update`/`vm_skip_current` — el bucle de frame normal.
+Compilar y correr un fragmento de Lua asigna heap por cómo funciona cualquier intérprete
+de Lua (parsing a bytecode, tablas, closures): no hay forma de evitarlo sin renunciar a
+Lua como lenguaje de lógica, que es una decisión ya cerrada en SPEC.md #3/#9.4. Esto
+entra en conflicto directo con la regla no negociable #4 de `CLAUDE.md` ("cero
+asignaciones de heap en el bucle de frame"), que no preveía ninguna excepción. Se
+paró y se preguntó al usuario en vez de decidir por iniciativa propia (regla #3 de
+`CLAUDE.md`).
+
+**Decision.** El usuario eligió una excepción documentada y acotada: `heap_guard_suspend()`/
+`heap_guard_resume()` (base/heap_guard.h) rodean exactamente la llamada a sol2 dentro de
+`script/lua_bindings.cpp` (`lua_init()` y `lua_run()`), y en ningún otro sitio. Mientras
+está suspendido, `operator new` sigue funcionando pero no incrementa
+`g_frame_alloc_count`, así que `heap_guard_check_frame()` no dispara al final del frame
+por asignaciones que ocurrieron sólo ahí dentro.
+
+**Alternativas descartadas.** Precompilar todo el Lua del guion a bytecode al cargar el
+`.vnc` (fuera del bucle de frame): reduce pero no elimina la asignación (sol2/Lua pueden
+seguir asignando tablas y closures al *ejecutar*, no sólo al parsear), y no es una
+garantía completa — se descartó por dar una falsa sensación de estar resuelto. Restringir
+`@lua` a que sólo corra fuera de frames con render activo (p. ej. sólo en
+`--autoplay-script` o transiciones): cambiaría el alcance funcional de `@lua` respecto a
+como SPEC.md #9.1 lo muestra (intercalable con diálogo normal), sin necesidad.
+
+**Consecuencias.** `heap_guard` deja de ser una garantía absoluta de cero heap en el
+frame: es cero heap salvo la única excepción documentada y acotada aquí. Cualquier
+auditoría futura de asignaciones de heap por frame debe saber que un `@lua` en el guion
+es la única fuente legítima. Las llamadas a suspend/resume deben ir siempre en pareja y
+nunca envolver más que la llamada a sol2 en sí — si algún día se filtran a un ámbito más
+amplio, dejan de detectar bugs reales de asignación en el resto del motor.
+
+---
+
+## ADR-0033 — Un único `sol::state` persistente, creado en `lua_init()` fuera del bucle de frame
+
+**Fecha:** 2026-09-06
+**Hito:** M5
+**Estado:** aceptada
+
+**Contexto.** Con la excepción de heap_guard ya aceptada (ADR-0032), quedaba decidir si
+crear un `sol::state` nuevo en cada `LuaCall` o mantener uno persistente. SPEC.md #9.4
+exige que el estado de Lua no se serialice: cualquier dato que deba sobrevivir a un
+guardado tiene que pasar por `vn.set_var`/`vn.set_flag` hacia `GameState`.
+
+**Decision.** Un único `sol::state` global (`g_lua`), creado una vez en `lua_init()`
+(llamado junto al resto de la inicialización en `main()`/`test_main.cpp`, fuera del
+bucle de frame) y reutilizado en cada `lua_run()`. La tabla `vn` se liga una sola vez.
+Reutilizar el intérprete no compromete la restricción de SPEC.md #9.4: la restricción es
+sobre qué sobrevive a un *guardado* (sólo `GameState`), no sobre si el intérprete en sí
+persiste entre llamadas dentro de la misma sesión de juego.
+
+**Alternativas descartadas.** Crear y destruir un `sol::state` en cada `lua_run()`: más
+simple de razonar (garantiza cero estado colgante entre llamadas por construcción), pero
+mucho más lento (reabrir librerías y volver a ligar `vn.*` en cada `@lua`), y ninguna
+regla de SPEC.md lo exige.
+
+**Consecuencias.** Si un script Lua crea una variable global de Lua (no vía `vn.set_var`)
+esa variable sobrevive entre llamadas a `@lua` dentro de la misma sesión pero se pierde
+al reiniciar el proceso — y nunca se guarda. Es responsabilidad de quien escriba guiones
+Lua usar `vn.set_var`/`vn.set_flag` para cualquier dato que deba persistir; no hay
+enforcement automático de esto todavía.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -874,9 +1046,24 @@ desviarte.
   `basic_ostream::operator<<`; se silencio con `/wd4530` solo en `vne_tests` (mismo patron
   que C5285 de doctest+`std::tuple`, ver tests/CMakeLists.txt). Si aparece en un contexto
   nuevo, es el mismo problema, no uno distinto.
-- Rollback: falta capturar tambien en `CmdKind::Choice` cuando M5 lo añada (ADR-0027). El
-  switch sin `default` de `cmd_start` obligara a tocar ese caso, pero queda anotado aqui
-  para no olvidar añadir la llamada a `rollback_capture` justo ahi.
+- ~~Rollback: falta capturar tambien en `CmdKind::Choice` cuando M5 lo añada~~ — resuelto:
+  `cmd_start` captura en `Choice` igual que en `Say` (ver vm.cpp, cierra ADR-0027).
+- No hay ningun `@flag` en la sintaxis del DSL (SPEC.md #9.1 no lo tiene): las flags de
+  `GameState.flags` solo se pueden leer/escribir desde Lua (`vn.get_flag`/`vn.set_flag`,
+  ADR-0029). Si un hito futuro quiere condicionar el DSL a una flag directamente (no via
+  variable), hara falta anadir esa sintaxis.
+- `vn.play_sfx()` (SPEC.md #9.4) es un no-op que solo hace `log_info`: `Sfx` no existe
+  como `CmdKind` hasta M6 (audio). Revisar en cuanto exista.
+- El riesgo de colision de hash de ADR-0029 (nombres de variable/flag distintos cayendo
+  en el mismo `var_id`/`flag_id`) no tiene ninguna deteccion automatica todavia. Si algun
+  guion futuro se comporta de forma rara con una variable, es la primera sospecha antes
+  de asumir un bug logico.
+- El parser de M5 (`script/parser.cpp`) exige que `@else`/`@end` esten exactamente al
+  mismo nivel de indentacion que su `@if`/`@choice` de apertura; una indentacion irregular
+  (3 espacios en vez de 4, tabs mezclados con espacios) no da un error claro todavia, solo
+  hace que la linea no encaje en ningun nivel esperado y el guion falle a parsear con un
+  mensaje generico ("inesperado aqui"). Mejorar el mensaje si llega a confundir en la
+  practica.
 - Las teclas F5 (guardar)/F9 (cargar)/flechas (rollback) cableadas en `main.cpp` para M4 se
   verificaron por tests automatizados (round-trip byte a byte, deshacer/rehacer, limite de
   64 pasos) pero no se probaron pulsando las teclas de verdad en la ventana interactiva en

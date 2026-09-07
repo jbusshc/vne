@@ -1,0 +1,61 @@
+# Guion de prueba de M5 (SPEC.md #12: "un guion con 3 ramas y 2 finales se recorre
+# completo"). Contenido de relleno obvio, no narrativo (skill vne-milestone-workflow:
+# "no inventes contenido de juego").
+
+@set confianza = 0
+@set intentos = 0
+
+:: inicio
+
+narrador: Guion de prueba de ramificacion, capitulo unico.
+
+@if confianza >= 3
+    narrador: Rama alta: la confianza ya era suficiente antes de empezar.
+    @jump final_bueno
+@else
+    narrador: Rama baja: hace falta ganar confianza.
+@end
+
+@add confianza 1
+@add intentos 1
+
+@lua vn.set_var("intentos_lua", vn.get_var("intentos") * 10)
+
+@choice
+    "Intentar ganar mas confianza" -> rama_reintentar
+    "Rendirse" if intentos > 5 -> final_malo
+    "Ir directo al final" -> rama_directa
+@end
+
+:: rama_reintentar
+
+@add confianza 5
+
+@if confianza >= 3
+    @jump final_bueno
+@else
+    @jump final_malo
+@end
+
+:: rama_directa
+
+narrador: Tercera rama: salto directo sin pasar por el reintento.
+@call subrutina_registro
+@jump final_bueno
+
+:: subrutina_registro
+
+@set intentos = 99
+@return
+
+:: final_bueno
+
+narrador: Final bueno: confianza suficiente al terminar.
+@wait 0.1
+@end
+
+:: final_malo
+
+narrador: Final malo: no se logro suficiente confianza.
+@wait 0.1
+@end

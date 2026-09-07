@@ -127,6 +127,29 @@ CPMAddPackage(
     "HB_HAVE_GRAPHITE2 OFF"
 )
 
+# Lua 5.4 + sol2 (SPEC.md #3, #9.4): el repositorio oficial de Lua no trae CMakeLists.txt,
+# asi que se usa el fork de walterschell (empaquetado CMake/CPM-friendly del mismo codigo
+# fuente sin modificar) que ya usan otros proyectos que integran Lua via CPM.
+CPMAddPackage(
+  NAME lua
+  GITHUB_REPOSITORY walterschell/Lua
+  GIT_TAG v5.4.6
+  OPTIONS
+    "LUA_ENABLE_SHARED OFF"
+)
+
+# sol2 es solo cabeceras: envuelve la API C de Lua ya traida arriba.
+CPMAddPackage(
+  NAME sol2
+  GITHUB_REPOSITORY ThePhD/sol2
+  GIT_TAG v3.3.0
+  DOWNLOAD_ONLY YES
+)
+if(sol2_ADDED)
+  add_library(sol2 INTERFACE)
+  target_include_directories(sol2 INTERFACE ${sol2_SOURCE_DIR}/include)
+endif()
+
 # En MSVC, /fsanitize=address requiere el runtime clang_rt.asan de la instalacion. No todas
 # las instalaciones de Visual Studio lo traen (falta si no se marco el componente individual
 # "C++ AddressSanitizer" en el instalador). Lo detectamos para no romper el build entero por
@@ -209,6 +232,7 @@ add_library(vne_base STATIC
   src/base/math.cpp
   src/base/radix_sort.cpp
   src/base/crc32.cpp
+  src/base/rng.cpp
   src/platform/window.cpp
   src/platform/input.cpp
   src/gfx/gfx.cpp
@@ -221,12 +245,13 @@ add_library(vne_base STATIC
   src/vm/backlog.cpp
   src/vm/rollback.cpp
   src/vm/save.cpp
+  src/script/lua_bindings.cpp
   ${VNE_GFX_BACKEND_SOURCES}
 )
 target_include_directories(vne_base PUBLIC src)
 target_link_libraries(vne_base
   PUBLIC ${VNE_SDL3_TARGET} HandmadeMath
-  PRIVATE sokol_gfx qoi freetype harfbuzz ${VNE_GFX_BACKEND_LIBS}
+  PRIVATE sokol_gfx qoi freetype harfbuzz ${VNE_GFX_BACKEND_LIBS} lua_static sol2
 )
 target_compile_definitions(vne_base PRIVATE ${VNE_GFX_BACKEND_DEFINE})
 # El backend de sokol_gfx solo debe estar activo en la unidad de traduccion que hace
@@ -234,6 +259,16 @@ target_compile_definitions(vne_base PRIVATE ${VNE_GFX_BACKEND_DEFINE})
 # porque ninguna otra .cpp de vne_base incluye sokol_gfx.h con SOKOL_IMPL.
 set_source_files_properties(src/gfx/gfx.cpp PROPERTIES COMPILE_DEFINITIONS ${VNE_GFX_SOKOL_BACKEND_DEFINE})
 vne_apply_project_flags(vne_base)
+
+if(MSVC)
+  # sol2 es codigo de terceros que llega via #include a esta unica unidad de traduccion
+  # (SPEC.md #9.4): C5321 es su uso de literales UTF-8 con bytes altos en nombres
+  # internos, y C4530 es el mismo problema de excepciones-en-ostream ya visto con
+  # doctest en tests/CMakeLists.txt (basic_ostream::operator<< usa try/catch interno
+  # aunque nunca lance, y el proyecto compila con /EHs-c-). Ninguno de los dos es un
+  # problema de nuestro codigo.
+  set_source_files_properties(src/script/lua_bindings.cpp PROPERTIES COMPILE_OPTIONS "/wd5321;/wd4530")
+endif()
 
 add_executable(vne_game src/main.cpp)
 target_link_libraries(vne_game PRIVATE vne_base)
@@ -322,6 +357,21 @@ add_custom_command(
 )
 add_custom_target(vne_bake_script DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo.vnc)
 add_dependencies(vne_game vne_bake_script)
+
+# Guion de prueba de M5 (docs/DECISIONS.md): 3 ramas y 2 finales (SPEC.md #12), nombres
+# placeholder obvios igual que demo.vns.
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_branching.vnc
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
+  COMMAND vne_bake script
+          ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_branching.vns
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_branching.vnc
+  DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_branching.vns
+  COMMENT "vne_bake: compilando demo_branching.vns a demo_branching.vnc"
+)
+add_custom_target(vne_bake_script_branching
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_branching.vnc)
+add_dependencies(vne_game vne_bake_script_branching)
 
 enable_testing()
 add_subdirectory(tests)

@@ -5,8 +5,36 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno (M4 implementado, pendiente de confirmación para cerrar)
-**Último hito completado:** M4 — Guardado, carga y rollback. `base/crc32` (IEEE 802.3,
+**Hito activo:** ninguno (M5 implementado, pendiente de confirmación para cerrar)
+**Último hito completado:** M5 — Ramificación. `CmdKind` amplia con `SetVar`, `AddVar`,
+`JumpIf`, `Choice`, `ChoiceEnd`, `Call`, `Return`, `LuaCall` (`sizeof(Cmd)` sigue en 16
+bytes, verificado compilando). Parser reescrito con pila de bloques e indentacion
+significativa (`script/lexer.h` gana un campo `indent`): `@if/@else/@end` se traduce a
+`JumpIf`+`Jump`+etiquetas sinteticas (no hay `CmdKind::If`, SPEC.md #8.1 no lo tiene);
+`@choice/@end` con opciones `"texto" [if var OP valor] -> etiqueta`; `@set`/`@add`/
+`@call`/`@return`/`@lua`. Nombres de variable/flag se resuelven por `fnv1a % capacidad`
+sin tabla de interning (ADR-0029). Tabla `ChoiceOption[]` anadida al `.vnc` (version 2,
+ADR-0030); `Label[]` (ya en el formato desde M3 pero ignorado) ahora se usa de verdad
+para `vn.jump()` (ADR-0031). Lua 5.4 + sol2 integrados (`script/lua_bindings.cpp`, unica
+unidad de traduccion con sol2): `vn.get_var/set_var/get_flag/set_flag/jump/random`
+funcionando, `vn.play_sfx` como no-op documentado hasta M6. Conflicto real detectado
+entre ejecutar Lua y la regla de cero heap por frame: se paro y pregunto al usuario, que
+eligio una excepcion documentada y acotada a `LuaCall` en `heap_guard_suspend/resume`
+(ADR-0032); intérprete Lua persistente creado una vez en `lua_init()` (ADR-0033).
+Rollback ahora tambien captura en `Choice` (cierra ADR-0027). Guion de prueba nuevo
+`assets_src/scripts/demo_branching.vns` (3 ramas, 2 finales, SPEC.md #12), recorrido
+completo verificado en tests (las 3 ramas por separado via `vm_select_choice`, incluida
+la rama con opcion condicionada que se rechaza correctamente) y en
+`--autoplay-script` (20 comandos, exit 0). 74/74 tests pasan en Ship; en Debug+ASan pasan
+74/75 (el de rendimiento de M2 no es representativo sin optimizar, ADR-0018; el test
+adicional que falta en Ship es uno de `arena_reset` que solo existe bajo `VN_DEBUG`), sin
+ningun reporte de memoria. F5/F9/flechas de M4 y `@lua`/`@choice` de M5 no se probaron con
+pulsaciones/decisiones reales en la ventana interactiva en este entorno (sin forma de
+inyectar input real aqui); la logica esta probada exhaustivamente por tests
+automatizados. Windows sigue siendo la unica plataforma verificada (ADR-0013). Detalle
+completo en docs/DECISIONS.md.
+
+M4 — Guardado, carga y rollback (hito anterior). `base/crc32` (IEEE 802.3,
 vector de prueba `0xCBF43926` verificado), `vm/backlog` (200 entradas circulares),
 `vm/rollback` (64 instantaneas, deshacer/rehacer con truncado de "futuro" al capturar tras
 un retroceso), `vm/save` (formato `.vnsave` exacto de SPEC.md #8.3, magic+version+size+

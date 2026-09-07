@@ -7,6 +7,7 @@
 #include "test_config.h"
 #include "test_fonts.h"
 #include "text/font.h"
+#include "script/lua_bindings.h"
 #include "vm/backlog.h"
 #include "vm/rollback.h"
 
@@ -27,6 +28,7 @@ int main(int argc, char** argv) {
     g_arena_frame = arena_create(8ull * 1024 * 1024, "test_frame");
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
+    lua_init();
 
     PlatformWindow window{};
     bool           have_window = platform_window_create(&window, "vne tests", 64, 64);

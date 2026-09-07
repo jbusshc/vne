@@ -14,3 +14,13 @@ extern u64 g_frame_alloc_count;
 
 void heap_guard_reset_frame();
 void heap_guard_check_frame();
+
+// Excepcion puntual y documentada a la regla de cero heap por frame (SPEC.md #4, ADR de
+// M5 en docs/DECISIONS.md): ejecutar un fragmento @lua via sol2 asigna heap por como
+// funciona cualquier interprete de Lua, y no hay forma de evitarlo sin renunciar a Lua
+// como lenguaje de logica (SPEC.md #3). Es la UNICA fuente de asignacion de heap
+// permitida en el bucle de frame; todo lo demas del motor sigue en cero. Las llamadas
+// deben venir siempre en pareja, envolviendo exactamente la ejecucion de sol2 en
+// script/lua_bindings.cpp, nunca un ambito mas amplio.
+void heap_guard_suspend();
+void heap_guard_resume();

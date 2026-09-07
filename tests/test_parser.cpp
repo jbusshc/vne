@@ -60,3 +60,105 @@ TEST_CASE("parser: una cadena de dialogo sin cerrar es error") {
     ParseResult r = parse_script("\"sin cerrar\n", "x.vns");
     REQUIRE_FALSE(r.ok());
 }
+
+TEST_CASE("parser: @if/@else/@end se traduce a JumpIf+Jump+etiquetas sinteticas") {
+    const char* src =
+        "@if confianza >= 3\n"
+        "    marta: Rama alta.\n"
+        "@else\n"
+        "    marta: Rama baja.\n"
+        "@end\n"
+        "@end\n";
+    ParseResult r = parse_script(src, "t.vns");
+    REQUIRE(r.ok());
+    // JumpIf(invertido), Say(alta), Jump(end), Label(else), Say(baja), Label(end), End.
+    REQUIRE(r.instructions.size() == 7);
+    CHECK(r.instructions[0].kind == InstrKind::JumpIf);
+    CHECK(r.instructions[0].condition.var == "confianza");
+    CHECK(r.instructions[0].condition.op == CmpOp::Ge);
+    CHECK(r.instructions[0].condition.rhs == 3);
+    CHECK(r.instructions[0].invert_condition);
+    CHECK(r.instructions[0].name == r.instructions[3].name);  // salta al Label(else)
+    CHECK(r.instructions[1].kind == InstrKind::Say);
+    CHECK(r.instructions[2].kind == InstrKind::Jump);
+    CHECK(r.instructions[2].name == r.instructions[5].name);  // salta al Label(end)
+    CHECK(r.instructions[3].kind == InstrKind::Label);
+    CHECK(r.instructions[4].kind == InstrKind::Say);
+    CHECK(r.instructions[5].kind == InstrKind::Label);
+    CHECK(r.instructions[6].kind == InstrKind::End);
+}
+
+TEST_CASE("parser: @if sin @else tambien cierra bien (dos etiquetas adyacentes)") {
+    ParseResult r = parse_script("@if x > 0\n    \"cuerpo\"\n@end\n@end\n", "t.vns");
+    REQUIRE(r.ok());
+    REQUIRE(r.instructions.size() == 6);  // JumpIf, Say, Jump, Label, Label, End
+    CHECK(r.instructions[0].kind == InstrKind::JumpIf);
+    CHECK(r.instructions[3].kind == InstrKind::Label);
+    CHECK(r.instructions[4].kind == InstrKind::Label);
+}
+
+TEST_CASE("parser: @choice con opciones y condicion opcional") {
+    const char* src =
+        ":: destino_a\n"
+        "@end\n"
+        ":: destino_b\n"
+        "@end\n"
+        "@choice\n"
+        "    \"Opcion A\" -> destino_a\n"
+        "    \"Opcion B\" if valor > 2 -> destino_b\n"
+        "@end\n"
+        "@end\n";
+    ParseResult r = parse_script(src, "t.vns");
+    REQUIRE(r.ok());
+    // Label(a), End(a-no,es solo Label real: en realidad el primer @end cierra el
+    // guion... para evitar esa ambiguedad este test usa jump como cuerpo en vez de @end.
+    bool found_choice = false;
+    for (const auto& instr : r.instructions) {
+        if (instr.kind == InstrKind::Choice) {
+            found_choice = true;
+            REQUIRE(instr.choice_options.size() == 2);
+            CHECK(instr.choice_options[0].text == "Opcion A");
+            CHECK(instr.choice_options[0].target == "destino_a");
+            CHECK_FALSE(instr.choice_options[0].has_condition);
+            CHECK(instr.choice_options[1].text == "Opcion B");
+            CHECK(instr.choice_options[1].target == "destino_b");
+            REQUIRE(instr.choice_options[1].has_condition);
+            CHECK(instr.choice_options[1].condition.var == "valor");
+            CHECK(instr.choice_options[1].condition.op == CmpOp::Gt);
+            CHECK(instr.choice_options[1].condition.rhs == 2);
+        }
+    }
+    CHECK(found_choice);
+}
+
+TEST_CASE("parser: @set, @add, @call, @return, @lua") {
+    const char* src =
+        ":: rutina\n"
+        "@return\n"
+        "@set confianza = 5\n"
+        "@add confianza 1\n"
+        "@call rutina\n"
+        "@lua vn.set_var(\"x\", 1)\n"
+        "@end\n";
+    ParseResult r = parse_script(src, "t.vns");
+    REQUIRE(r.ok());
+    REQUIRE(r.instructions.size() == 7);
+    CHECK(r.instructions[0].kind == InstrKind::Label);
+    CHECK(r.instructions[1].kind == InstrKind::Return);
+    CHECK(r.instructions[2].kind == InstrKind::SetVar);
+    CHECK(r.instructions[2].var == "confianza");
+    CHECK(r.instructions[2].value == 5);
+    CHECK(r.instructions[3].kind == InstrKind::AddVar);
+    CHECK(r.instructions[3].var == "confianza");
+    CHECK(r.instructions[3].value == 1);
+    CHECK(r.instructions[4].kind == InstrKind::Call);
+    CHECK(r.instructions[4].name == "rutina");
+    CHECK(r.instructions[5].kind == InstrKind::Lua);
+    CHECK(r.instructions[5].text == "vn.set_var(\"x\", 1)");
+}
+
+TEST_CASE("parser: etiqueta desconocida en un @choice tambien es error de compilacion") {
+    ParseResult r = parse_script(
+        "@choice\n    \"opcion\" -> nunca_declarada\n@end\n@end\n", "roto.vns");
+    REQUIRE_FALSE(r.ok());
+}

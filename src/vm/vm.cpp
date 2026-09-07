@@ -1,6 +1,7 @@
 #include "vm/vm.h"
 
 #include "base/log.h"
+#include "script/lua_bindings.h"
 #include "vm/backlog.h"
 #include "vm/rollback.h"
 
@@ -8,15 +9,28 @@ namespace {
 
 constexpr u32 k_max_chained_steps = 4096;  // guarda contra bucles de comandos instantaneos
 
+bool eval_cmp(i32 lhs, CmpOp op, i32 rhs) {
+    switch (op) {
+        case CmpOp::Eq: return lhs == rhs;
+        case CmpOp::Ne: return lhs != rhs;
+        case CmpOp::Lt: return lhs < rhs;
+        case CmpOp::Le: return lhs <= rhs;
+        case CmpOp::Gt: return lhs > rhs;
+        case CmpOp::Ge: return lhs >= rhs;
+    }
+    return false;
+}
+
 // Las tres operaciones de cada comando, como funciones libres (skill vne-script-dsl), no
 // como metodos. Cada switch esta escrito sin `default` para que -Wswitch obligue a cubrir
 // todo CmdKind existente cuando se anada uno nuevo.
 
-void cmd_start(const Cmd& cmd, GameState* state) {
+void cmd_start(const Cmd& cmd, GameState* state, const CompiledScript& script) {
     switch (cmd.kind) {
         case CmdKind::Nop:
         case CmdKind::Label:
         case CmdKind::End:
+        case CmdKind::ChoiceEnd:
             break;
         case CmdKind::Say:
             // Instantanea justo antes de ejecutar el comando (SPEC.md #8.3), y entrada
@@ -48,6 +62,47 @@ void cmd_start(const Cmd& cmd, GameState* state) {
             // el bucle principal.
             state->vm.pc = cmd.jump.target_pc - 1;
             break;
+        case CmdKind::SetVar:
+            state->vars[cmd.set_var.var_id] = cmd.set_var.value;
+            break;
+        case CmdKind::AddVar:
+            state->vars[cmd.add_var.var_id] += cmd.add_var.value;
+            break;
+        case CmdKind::JumpIf:
+            if (eval_cmp(state->vars[cmd.jump_if.var_id], cmd.jump_if.op, cmd.jump_if.rhs)) {
+                state->vm.pc = cmd.jump_if.target_pc - 1;  // mismo truco que Jump
+            }
+            break;
+        case CmdKind::Choice:
+            // Rollback tambien antes de un Choice (SPEC.md #8.3, ADR-0027 cerrado en
+            // M5): el jugador debe poder deshacer una decision igual que una linea de
+            // dialogo. No hay entrada de backlog: Choice no es una linea hablada.
+            rollback_capture(&g_rollback, *state);
+            break;
+        case CmdKind::Call:
+            if (state->vm.call_depth < k_max_call_depth) {
+                // Direccion de retorno: la instruccion siguiente a este Call. vm_update
+                // sumara 1 al pc al completar este comando, asi que pc+1 (no pc) es la
+                // que hay que guardar.
+                state->vm.call_stack[state->vm.call_depth] = state->vm.pc + 1;
+                state->vm.call_depth += 1;
+            } else {
+                log_error("Call: pila de llamadas llena (%u), guion ignorado", k_max_call_depth);
+            }
+            state->vm.pc = cmd.call.target_pc - 1;
+            break;
+        case CmdKind::Return:
+            if (state->vm.call_depth > 0) {
+                state->vm.call_depth -= 1;
+                state->vm.pc = state->vm.call_stack[state->vm.call_depth] - 1;
+            } else {
+                log_error("Return sin Call correspondiente: se ignora, sigue a la "
+                           "siguiente instruccion");
+            }
+            break;
+        case CmdKind::LuaCall:
+            lua_run(script_string(script, cmd.lua_call.fn_id), state, &script);
+            break;
     }
 }
 
@@ -59,11 +114,23 @@ bool cmd_update(const Cmd& cmd, GameState* state, f32 dt) {
         case CmdKind::Label:
         case CmdKind::End:
         case CmdKind::Jump:
+        case CmdKind::SetVar:
+        case CmdKind::AddVar:
+        case CmdKind::JumpIf:
+        case CmdKind::ChoiceEnd:
+        case CmdKind::Call:
+        case CmdKind::Return:
+        case CmdKind::LuaCall:
             return true;
         case CmdKind::Say:
             // Instantaneo en M3: no hay todavia una UI real que espere un clic (M7).
             state->vm.waiting_for_input = 0;
             return true;
+        case CmdKind::Choice:
+            // Nunca se completa por si solo: hace falta vm_select_choice() (SPEC.md
+            // #9.1, no hay timeout ni avance automatico salvo con vm_skip_current, que
+            // resuelve la opcion via cmd_skip_to_end en vez de aqui).
+            return false;
         case CmdKind::Show: {
             if (cmd.show.fade <= 0.0f) {
                 return true;
@@ -107,13 +174,20 @@ bool cmd_update(const Cmd& cmd, GameState* state, f32 dt) {
     return true;
 }
 
-void cmd_skip_to_end(const Cmd& cmd, GameState* state) {
+void cmd_skip_to_end(const Cmd& cmd, GameState* state, const CompiledScript& script) {
     switch (cmd.kind) {
         case CmdKind::Nop:
         case CmdKind::Label:
         case CmdKind::End:
         case CmdKind::Jump:
         case CmdKind::Wait:
+        case CmdKind::SetVar:
+        case CmdKind::AddVar:
+        case CmdKind::JumpIf:
+        case CmdKind::ChoiceEnd:
+        case CmdKind::Call:
+        case CmdKind::Return:
+        case CmdKind::LuaCall:
             break;
         case CmdKind::Say:
             state->vm.waiting_for_input = 0;
@@ -131,6 +205,22 @@ void cmd_skip_to_end(const Cmd& cmd, GameState* state) {
         }
         case CmdKind::Bg:
             break;
+        case CmdKind::Choice: {
+            // No hay UI que elija por el jugador en --autoplay-script ni en el test
+            // obligatorio de M4/M5: se resuelve de forma deterministica a la primera
+            // opcion cuya condicion (si tiene) se cumpla, igual que "skip_to_end
+            // completa el efecto al instante" para cualquier otro comando.
+            for (u8 k = 0; k < cmd.choice.option_count; ++k) {
+                const ChoiceOption& opt = script.choice_options[cmd.choice.first_option + k];
+                bool visible = opt.has_condition == 0 ||
+                               eval_cmp(state->vars[opt.cond_var_id], opt.cond_op, opt.cond_rhs);
+                if (visible) {
+                    state->vm.pc = opt.target_pc - 1;  // mismo truco que Jump
+                    break;
+                }
+            }
+            break;
+        }
     }
 }
 
@@ -143,7 +233,7 @@ bool vm_update(VmState* vm, GameState* state, const CompiledScript& script, f32 
         }
         const Cmd& cmd = script.cmds[vm->pc];
         if (vm->cmd_phase == 0) {
-            cmd_start(cmd, state);
+            cmd_start(cmd, state, script);
             vm->cmd_phase = 1;
             vm->cmd_timer = 0.0f;
         }
@@ -170,11 +260,32 @@ void vm_skip_current(VmState* vm, GameState* state, const CompiledScript& script
     }
     const Cmd& cmd = script.cmds[vm->pc];
     if (vm->cmd_phase == 0) {
-        cmd_start(cmd, state);
+        cmd_start(cmd, state, script);
     }
-    cmd_skip_to_end(cmd, state);
+    cmd_skip_to_end(cmd, state, script);
     vm->cmd_phase = 0;
     if (cmd.kind != CmdKind::End) {
         vm->pc += 1;
     }
+}
+
+bool vm_select_choice(VmState* vm, GameState* state, const CompiledScript& script,
+                       u8 option_index) {
+    if (vm->pc >= script.cmd_count) {
+        return false;
+    }
+    const Cmd& cmd = script.cmds[vm->pc];
+    if (cmd.kind != CmdKind::Choice || option_index >= cmd.choice.option_count) {
+        return false;
+    }
+    const ChoiceOption& opt = script.choice_options[cmd.choice.first_option + option_index];
+    if (opt.has_condition && !eval_cmp(state->vars[opt.cond_var_id], opt.cond_op, opt.cond_rhs)) {
+        return false;
+    }
+    // A diferencia de Jump/Call (que ajustan pc-1 dentro de cmd_start porque vm_update va
+    // a sumar 1 al completar ESE comando), aqui Choice no se completa por si solo: este
+    // es el evento externo que lo completa, asi que el pc final es directo, sin -1.
+    vm->pc        = opt.target_pc;
+    vm->cmd_phase = 0;
+    return true;
 }

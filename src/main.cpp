@@ -14,6 +14,7 @@
 #include "text/font.h"
 #include "text/glyph_cache.h"
 #include "text/layout.h"
+#include "script/lua_bindings.h"
 #include "vm/backlog.h"
 #include "vm/rollback.h"
 #include "vm/save.h"
@@ -126,6 +127,7 @@ static int run_autoplay(const char* script_path) {
     g_arena_frame = arena_create(k_frame_arena_size, "frame");
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
+    lua_init();
 
     CompiledScript script{};
     if (script_load(script_path, &g_arena_scene, &script) != ScriptLoadResult::Ok) {
@@ -167,6 +169,7 @@ int main(int argc, char** argv) {
     g_arena_frame = arena_create(k_frame_arena_size, "frame");
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
+    lua_init();
 
     PlatformWindow window{};
     if (!platform_window_create(&window, "vne \xe2\x80\x94 M2", 1280, 720)) {
