@@ -65,3 +65,9 @@ void vm_skip_current(VmState* vm, GameState* state, const CompiledScript& script
 // si la opcion tiene una condicion que no se cumple.
 bool vm_select_choice(VmState* vm, GameState* state, const CompiledScript& script,
                        u8 option_index);
+
+// Confirma la linea de dialogo actual (SPEC.md #10, VnMode): sin efecto si no hay ningun
+// Say esperando input. Cierra ADR-0023.
+inline void vm_confirm_say(GameState* state) {
+    state->vm.waiting_for_input = 0;
+}

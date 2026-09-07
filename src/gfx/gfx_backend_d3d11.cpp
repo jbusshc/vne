@@ -155,4 +155,63 @@ void gfx_backend_present() {
     g_swapchain->Present(1, 0);
 }
 
+bool gfx_backend_capture_thumbnail(sg_image scene_image, u8* out_rgb, i32 out_w, i32 out_h) {
+    sg_d3d11_image_info info = sg_d3d11_query_image_info(scene_image);
+    if (info.res == nullptr) {
+        log_error("gfx_backend_capture_thumbnail: sg_d3d11_query_image_info sin recurso");
+        return false;
+    }
+    auto* src_tex = static_cast<ID3D11Texture2D*>(const_cast<void*>(info.res));
+
+    D3D11_TEXTURE2D_DESC src_desc{};
+    src_tex->GetDesc(&src_desc);
+
+    D3D11_TEXTURE2D_DESC staging_desc = src_desc;
+    staging_desc.Usage          = D3D11_USAGE_STAGING;
+    staging_desc.BindFlags      = 0;
+    staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    staging_desc.MiscFlags      = 0;
+
+    ID3D11Texture2D* staging = nullptr;
+    HRESULT          hr      = g_device->CreateTexture2D(&staging_desc, nullptr, &staging);
+    if (FAILED(hr)) {
+        log_error("gfx_backend_capture_thumbnail: CreateTexture2D (staging) fallo (hr=0x%08lX)",
+                  static_cast<unsigned long>(hr));
+        return false;
+    }
+
+    g_context->CopyResource(staging, src_tex);
+
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    hr = g_context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped);
+    if (FAILED(hr)) {
+        log_error("gfx_backend_capture_thumbnail: Map fallo (hr=0x%08lX)",
+                  static_cast<unsigned long>(hr));
+        staging->Release();
+        return false;
+    }
+
+    const u8* src_pixels = static_cast<const u8*>(mapped.pData);
+    i32       src_w       = static_cast<i32>(src_desc.Width);
+    i32       src_h       = static_cast<i32>(src_desc.Height);
+    for (i32 y = 0; y < out_h; ++y) {
+        i32 src_y = (y * src_h) / out_h;
+        for (i32 x = 0; x < out_w; ++x) {
+            i32       src_x = (x * src_w) / out_w;
+            const u8* px    = src_pixels + static_cast<usize>(src_y) * mapped.RowPitch +
+                            static_cast<usize>(src_x) * 4;
+            u8* dst = out_rgb + (static_cast<usize>(y) * static_cast<usize>(out_w) +
+                                  static_cast<usize>(x)) *
+                                     3;
+            dst[0] = px[0];
+            dst[1] = px[1];
+            dst[2] = px[2];
+        }
+    }
+
+    g_context->Unmap(staging, 0);
+    staging->Release();
+    return true;
+}
+
 #endif  // VNE_GFX_BACKEND_D3D11

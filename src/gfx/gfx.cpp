@@ -326,3 +326,20 @@ void gfx_present(i32 window_w, i32 window_h) {
 
     gfx_backend_present();
 }
+
+namespace {
+TextureHandle g_white_texture{};
+}  // namespace
+
+TextureHandle gfx_white_texture() {
+    if (!g_white_texture.valid()) {
+        g_white_texture = texture_create_dynamic(1, 1);
+        const u8 white_pixel[4] = {255, 255, 255, 255};
+        texture_update_dynamic(g_white_texture, white_pixel);
+    }
+    return g_white_texture;
+}
+
+bool gfx_capture_thumbnail(u8* out_rgb, i32 out_w, i32 out_h) {
+    return gfx_backend_capture_thumbnail(g_scene_color_image, out_rgb, out_w, out_h);
+}

@@ -36,6 +36,48 @@ TEST_CASE("save_game/load_game: round-trip preserva el estado y el backlog exact
     std::remove(path);
 }
 
+TEST_CASE("save_game/load_save_thumbnail: la miniatura QOI hace round-trip exacto (M7)") {
+    GameState state{};
+    Backlog   backlog{};
+    const char* path = "test_save_thumb.vnsave";
+
+    u8 fake_qoi[16];
+    for (u32 i = 0; i < sizeof(fake_qoi); ++i) {
+        fake_qoi[i] = static_cast<u8>(i * 7);
+    }
+
+    REQUIRE(save_game(path, state, backlog, fake_qoi, sizeof(fake_qoi)) == SaveResult::Ok);
+
+    u8  out[64];
+    u32 out_size = 0;
+    REQUIRE(load_save_thumbnail(path, out, sizeof(out), &out_size) == LoadResult::Ok);
+    REQUIRE(out_size == sizeof(fake_qoi));
+    CHECK(std::memcmp(out, fake_qoi, sizeof(fake_qoi)) == 0);
+
+    // load_game (la carga completa) debe seguir funcionando exactamente igual con
+    // miniatura presente: la salta, no la decodifica.
+    GameState loaded{};
+    Backlog   loaded_backlog{};
+    REQUIRE(load_game(path, &loaded, &loaded_backlog) == LoadResult::Ok);
+    CHECK(std::memcmp(&state, &loaded, sizeof(GameState)) == 0);
+
+    std::remove(path);
+}
+
+TEST_CASE("load_save_thumbnail: un .vnsave sin miniatura (M4-M6) devuelve tamano 0, no error") {
+    GameState state{};
+    Backlog   backlog{};
+    const char* path = "test_save_nothumb.vnsave";
+    REQUIRE(save_game(path, state, backlog) == SaveResult::Ok);
+
+    u8  out[64];
+    u32 out_size = 123;
+    REQUIRE(load_save_thumbnail(path, out, sizeof(out), &out_size) == LoadResult::Ok);
+    CHECK(out_size == 0);
+
+    std::remove(path);
+}
+
 TEST_CASE("load_game: archivo inexistente devuelve NotFound") {
     GameState state{};
     Backlog   backlog{};

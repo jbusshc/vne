@@ -7,6 +7,11 @@
 #include "base/arena.h"
 #include "base/heap_guard.h"
 #include "base/log.h"
+#include "game/backlog_mode.h"
+#include "game/menu_mode.h"
+#include "game/mode.h"
+#include "game/save_load_mode.h"
+#include "game/vn_mode.h"
 #include "gfx/gfx.h"
 #include "gfx/texture.h"
 #include "platform/clock.h"
@@ -35,7 +40,7 @@
 // --autoplay-script <ruta> corre un guion entero via vm_skip_current() sin abrir ventana,
 // a maxima velocidad (skill vne-build-verify), y sale con codigo 0/1.
 
-constexpr f32 k_typewriter_glyphs_per_second = 18.0f;
+constexpr f32 k_demo_typewriter_glyphs_per_second = 18.0f;
 
 constexpr usize k_perm_arena_size  = 64ull * 1024 * 1024;
 constexpr usize k_scene_arena_size = 256ull * 1024 * 1024;
@@ -202,17 +207,44 @@ int main(int argc, char** argv) {
         "con furigana.";
     // La arena de escena (no la de frame) porque el layout debe sobrevivir entre frames:
     // el efecto de maquina de escribir solo cambia visible_glyphs, nunca relayoutea
-    // (regla del skill vne-rendering).
-    TextLayout demo_layout = text_layout(demo_font, demo_text, 700.0f, &g_arena_scene);
+    // (regla del skill vne-rendering). Arriba de la pantalla para no pelear visualmente
+    // con el cuadro de dialogo real de M7 (VnMode), que vive en la parte de abajo.
+    TextLayout demo_layout = text_layout(demo_font, demo_text, 1700.0f, &g_arena_scene);
     f32        visible_glyphs_f = 0.0f;
 
+    GameState     demo_state{};
     CompiledScript demo_script{};
     if (script_load("assets_baked/demo.vnc", &g_arena_scene, &demo_script) !=
         ScriptLoadResult::Ok) {
         log_error("No se pudo cargar assets_baked/demo.vnc; ejecuta vne_bake primero.");
     }
-    GameState demo_state{};
-    bool      demo_finished = false;
+
+    // Pila de modos (SPEC.md #10, M7): VnMode dirige la VM y el cuadro de dialogo real
+    // (cierra ADR-0023); Backlog/Menu/SaveLoad se apilan encima sin destruirlo.
+    VnMode vn_mode{};
+    vn_mode.state        = &demo_state;
+    vn_mode.script        = demo_script;
+    vn_mode.font          = demo_font;
+    vn_mode.layout_arena = &g_arena_scene;
+
+    BacklogMode backlog_mode{};
+    backlog_mode.script        = &vn_mode.script;
+    backlog_mode.font          = demo_font;
+    backlog_mode.scratch_arena = &g_arena_scene;
+
+    MenuMode menu_mode{};
+    menu_mode.state         = &demo_state;
+    menu_mode.font          = demo_font;
+    menu_mode.scratch_arena = &g_arena_scene;
+
+    SaveLoadMode save_load_mode{};
+    save_load_mode.state         = &demo_state;
+    save_load_mode.backlog       = &g_backlog;
+    save_load_mode.font          = demo_font;
+    save_load_mode.scratch_arena = &g_arena_scene;
+
+    ModeStack mode_stack{};
+    mode_stack_push(&mode_stack, &vn_mode);
 
     InputState input{};
     Clock      clock = clock_create();
@@ -233,36 +265,54 @@ int main(int argc, char** argv) {
         glyph_cache_begin_frame();
 
         platform_poll_events(&input);
-        if (input.key_pressed[SDL_SCANCODE_ESCAPE]) {
-            input.quit_requested = true;
-        }
 
-        // M4, para poder probarlo a mano: F5 guarda, F9 carga, flechas izq/der
-        // deshacen/rehacen sobre el buffer de rollback de 64 pasos (SPEC.md #12).
-        if (input.key_pressed[SDL_SCANCODE_F5]) {
-            SaveResult sr = save_game("assets_baked/quicksave.vnsave", demo_state, g_backlog);
-            log_info("F5: guardado -> %s", sr == SaveResult::Ok ? "ok" : "ERROR");
+        // Router de modos de nivel superior (SPEC.md #10, M7): B/M/F5/F9 abren un
+        // overlay sobre VnMode solo cuando no hay ya uno abierto; ESC en la base cierra
+        // el juego, ESC dentro de un overlay lo cierra a el (cada Mode marca su propio
+        // wants_close, comprobado despues de mode_stack_update mas abajo).
+        if (mode_stack.count == 1) {
+            if (input.key_pressed[SDL_SCANCODE_ESCAPE]) {
+                input.quit_requested = true;
+            }
+            if (input.key_pressed[SDL_SCANCODE_B]) {
+                mode_stack_push(&mode_stack, &backlog_mode);
+            } else if (input.key_pressed[SDL_SCANCODE_M]) {
+                mode_stack_push(&mode_stack, &menu_mode);
+            } else if (input.key_pressed[SDL_SCANCODE_F5]) {
+                save_load_mode.is_save = true;
+                mode_stack_push(&mode_stack, &save_load_mode);
+            } else if (input.key_pressed[SDL_SCANCODE_F9]) {
+                save_load_mode.is_save = false;
+                mode_stack_push(&mode_stack, &save_load_mode);
+            }
         }
-        if (input.key_pressed[SDL_SCANCODE_F9]) {
-            LoadResult lr =
-                load_game("assets_baked/quicksave.vnsave", &demo_state, &g_backlog);
-            demo_finished = false;
+        // Izquierda/derecha para rollback (SPEC.md #12) solo en la base: dentro de un
+        // overlay esas mismas teclas navegan su propia UI (M7).
+        if (mode_stack.count == 1 && input.key_pressed[SDL_SCANCODE_LEFT]) {
+            rollback_back(&g_rollback, &demo_state);
             vm_resync_after_state_change(&demo_state);
-            log_info("F9: carga -> %s", lr == LoadResult::Ok ? "ok" : "ERROR");
         }
-        if (input.key_pressed[SDL_SCANCODE_LEFT]) {
-            bool moved = rollback_back(&g_rollback, &demo_state);
+        if (mode_stack.count == 1 && input.key_pressed[SDL_SCANCODE_RIGHT]) {
+            rollback_forward(&g_rollback, &demo_state);
             vm_resync_after_state_change(&demo_state);
-            log_info("rollback atras -> %s", moved ? "ok" : "sin mas historia");
-        }
-        if (input.key_pressed[SDL_SCANCODE_RIGHT]) {
-            bool moved = rollback_forward(&g_rollback, &demo_state);
-            vm_resync_after_state_change(&demo_state);
-            log_info("rollback adelante -> %s", moved ? "ok" : "sin mas historia");
         }
 
         f32 dt = clock_tick(&clock);
         audio_update(dt, &demo_state.bgm_position);
+
+        mode_stack_update(&mode_stack, input, dt);
+        if (backlog_mode.wants_close) {
+            backlog_mode.wants_close = false;
+            mode_stack_pop(&mode_stack);
+        }
+        if (menu_mode.wants_close) {
+            menu_mode.wants_close = false;
+            mode_stack_pop(&mode_stack);
+        }
+        if (save_load_mode.wants_close) {
+            save_load_mode.wants_close = false;
+            mode_stack_pop(&mode_stack);
+        }
 
         for (u32 i = 0; i < k_stress_sprite_count; ++i) {
             AtlasSpriteRect rect =
@@ -287,19 +337,16 @@ int main(int argc, char** argv) {
             gfx_draw_sprite(s);
         }
 
-        if (!demo_finished && demo_script.cmd_count > 0) {
-            if (vm_update(&demo_state.vm, &demo_state, demo_script, dt)) {
-                demo_finished = true;
-                log_info("demo.vnc: guion completo (%u comandos)", demo_script.cmd_count);
-            }
-        }
+        // VnMode ya avanzo la VM dentro de mode_stack_update() de mas arriba (SPEC.md
+        // #10): un unico router de modos, no una llamada aparte a vm_update aqui.
+        mode_stack_render(&mode_stack);
 
-        visible_glyphs_f += k_typewriter_glyphs_per_second * dt;
+        visible_glyphs_f += k_demo_typewriter_glyphs_per_second * dt;
         if (visible_glyphs_f > static_cast<f32>(demo_layout.count) * 1.5f) {
             visible_glyphs_f = 0.0f;  // reinicia el efecto para que la demo haga bucle
         }
         u32 visible_glyphs = static_cast<u32>(visible_glyphs_f);
-        text_draw(demo_layout, 80.0f, 900.0f, visible_glyphs);
+        text_draw(demo_layout, 80.0f, 60.0f, visible_glyphs);
 
         // Una sola vez por frame, despues de todos los text_draw/text_layout del frame y
         // antes de gfx_flush(): sg_update_image solo admite una subida por pagina y por

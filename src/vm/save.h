@@ -1,14 +1,19 @@
 #pragma once
+#include "base/types.h"
 #include "vm/backlog.h"
 #include "vm/state.h"
 
-// Formato .vnsave (SPEC.md #8.3). La miniatura se difiere a M7 (ADR pendiente de
-// registrar): el campo de tamano de miniatura existe en el formato desde ya (compatible
-// hacia adelante) pero M4 siempre escribe 0 bytes de miniatura — ningun criterio de
-// aceptacion de M4 depende de ella, y capturar+codificar el framebuffer solo tiene
-// sentido cuando exista una pantalla de guardado que la muestre.
+// Formato .vnsave (SPEC.md #8.3). La miniatura llega en M7 (ADR-0026 la difirio desde
+// M4): se codifica en QOI en vez de PNG (ADR de M7 en docs/DECISIONS.md — QOI ya esta en
+// la pila cerrada desde ADR-0008 y no hace falta un codificador nuevo en runtime, cosa
+// que PNG si necesitaria).
 
 constexpr u32 k_savegame_version = 1;
+constexpr i32 k_thumbnail_width  = 384;
+constexpr i32 k_thumbnail_height = 216;
+// Cota generosa: un QOI de 384x216 en la practica pesa unos pocos KB salvo contenido muy
+// ruidoso (QOI no tiene compresion garantizada como un formato con diccionario).
+constexpr u32 k_thumbnail_max_bytes = 256 * 1024;
 
 enum class SaveResult : u8 { Ok, WriteError };
 enum class LoadResult : u8 {
@@ -19,8 +24,16 @@ enum class LoadResult : u8 {
     UnsupportedVersion,
 };
 
-SaveResult save_game(const char* path, const GameState& state, const Backlog& backlog);
+// thumbnail_qoi/thumbnail_size son opcionales (nullptr/0 = sin miniatura, como en M4).
+SaveResult save_game(const char* path, const GameState& state, const Backlog& backlog,
+                      const u8* thumbnail_qoi = nullptr, u32 thumbnail_size = 0);
 LoadResult load_game(const char* path, GameState* out_state, Backlog* out_backlog);
+
+// Solo la miniatura QOI de un .vnsave, sin decodificar el resto (para listar slots en
+// SaveLoadMode sin pagar el coste de cargar cada GameState completo). out_qoi debe tener
+// espacio para cap bytes; *out_size queda en 0 si el archivo no tiene miniatura (no es un
+// error: los .vnsave de M4-M6 nunca la tuvieron).
+LoadResult load_save_thumbnail(const char* path, u8* out_qoi, u32 cap, u32* out_size);
 
 // Reconcilia servicios que no viven en GameState (musica, texto en pantalla, sprites)
 // tras cargar o hacer rollback. Vacia por ahora a proposito: en M4 todo lo que se ve

@@ -5,8 +5,31 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno (M6 implementado, pendiente de confirmación para cerrar)
-**Último hito completado:** M6 — Audio. `audio/audio.{h,cpp}` envuelve miniaudio con la
+**Hito activo:** ninguno (M7 implementado, pendiente de confirmación para cerrar)
+**Último hito completado:** M7 — UI de novela visual. Pila de modos `Mode`/`ModeStack`
+(SPEC.md #10, `virtual` explícito de la especificación, no viola la regla general porque
+la pila tiene 2-4 elementos). `VnMode` dirige la VM y dibuja el cuadro de diálogo real:
+`Say` por fin bloquea de verdad esperando input (cierra ADR-0023 desde M3, ver ADR-0039),
+con modo skip (`vm_skip_current` en bucle) y modo auto (temporizador tras el efecto
+máquina de escribir). `BacklogMode`, `MenuMode` (volúmenes de bus) y `SaveLoadMode` (4
+slots, miniaturas QOI reales — ADR-0037, decisión del usuario ante la falta de un
+codificador PNG en runtime) se apilan encima. Captura del framebuffer
+(`gfx_backend_capture_thumbnail`) implementada de verdad solo en D3D11 (staging texture +
+`CopyResource` + `Map`, con downsampling durante la lectura; GL sigue sin implementar,
+ADR-0038/ADR-0009). Toda la interacción es solo teclado (sin ratón todavía, ADR-0040).
+Criterio medible de M7 (SPEC.md #12: "modo skip recorre 1000 comandos en menos de 1
+segundo") verificado con holgura: mediana de 444us en Debug+ASan, 65us en Ship (mediana
+de 50 muestras, mismo método que ADR-0018). 93/93 tests en Ship; en Debug+ASan 93/94 (el
+de rendimiento de M2 no representativo sin optimizar, ADR-0018), sin ningún reporte de
+memoria. `SaveLoadMode`/`BacklogMode`/`MenuMode` no se probaron con pulsaciones de teclado
+reales en la ventana interactiva en este entorno (misma limitación que F5/F9 desde M4):
+solo se verificó que compilan, que el juego arranca sin crashear con ellos cableados
+(`heap_allocs_frame_max=0` se mantiene, `vm_pc` se queda correctamente parado en el
+primer `Say` esperando confirmación en vez de avanzar solo), y su lógica interna vía
+tests (`mode_stack`, `save.h`). Windows sigue siendo la única plataforma verificada
+(ADR-0013). Detalle completo en docs/DECISIONS.md.
+
+M6 — Audio (hito anterior). `audio/audio.{h,cpp}` envuelve miniaudio con la
 API exacta de SPEC.md #7.3 (`Bus`, `audio_init/load/play/stop/set_bus_volume/
 crossfade_music`). `CmdKind` gana `Sfx`, `Bgm`, `StopBgm` (`sizeof(Cmd)` sigue en 16
 bytes). `Sfx.sound_id` reutiliza el `string_pool` del guion (misma ruta que `Say`);

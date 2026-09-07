@@ -10,7 +10,8 @@ namespace {
 constexpr u32 k_vnsave_magic = 0x56534E56u;  // 'VNSV'
 }  // namespace
 
-SaveResult save_game(const char* path, const GameState& state, const Backlog& backlog) {
+SaveResult save_game(const char* path, const GameState& state, const Backlog& backlog,
+                      const u8* thumbnail_qoi, u32 thumbnail_size) {
     std::FILE* file = std::fopen(path, "wb");
     if (file == nullptr) {
         log_error("save_game: no se pudo abrir '%s' para escribir", path);
@@ -19,7 +20,6 @@ SaveResult save_game(const char* path, const GameState& state, const Backlog& ba
 
     const u32 state_size     = sizeof(GameState);
     const u32 state_checksum = crc32(&state, sizeof(GameState));
-    const u32 thumbnail_size = 0;  // diferido a M7, ver save.h
 
     bool ok = true;
     ok &= std::fwrite(&k_vnsave_magic, sizeof(u32), 1, file) == 1;
@@ -28,6 +28,9 @@ SaveResult save_game(const char* path, const GameState& state, const Backlog& ba
     ok &= std::fwrite(&state_checksum, sizeof(u32), 1, file) == 1;
     ok &= std::fwrite(&state, sizeof(GameState), 1, file) == 1;
     ok &= std::fwrite(&thumbnail_size, sizeof(u32), 1, file) == 1;
+    if (thumbnail_size > 0) {
+        ok &= std::fwrite(thumbnail_qoi, 1, thumbnail_size, file) == thumbnail_size;
+    }
 
     BacklogEntry ordered[k_backlog_capacity];
     backlog_get_ordered(backlog, ordered);
@@ -119,6 +122,44 @@ LoadResult load_game(const char* path, GameState* out_state, Backlog* out_backlo
 
     *out_state = state;
     backlog_load_ordered(out_backlog, ordered, backlog_count);
+    return LoadResult::Ok;
+}
+
+LoadResult load_save_thumbnail(const char* path, u8* out_qoi, u32 cap, u32* out_size) {
+    *out_size = 0;
+    std::FILE* file = std::fopen(path, "rb");
+    if (file == nullptr) {
+        return LoadResult::NotFound;
+    }
+
+    u32 magic = 0, version = 0, state_size = 0, checksum = 0;
+    bool ok = true;
+    ok &= std::fread(&magic, sizeof(u32), 1, file) == 1;
+    ok &= std::fread(&version, sizeof(u32), 1, file) == 1;
+    ok &= std::fread(&state_size, sizeof(u32), 1, file) == 1;
+    ok &= std::fread(&checksum, sizeof(u32), 1, file) == 1;
+    (void)checksum;
+    if (!ok || magic != k_vnsave_magic || version != k_savegame_version) {
+        std::fclose(file);
+        return LoadResult::BadFormat;
+    }
+    // Salta el bloque de GameState entero sin decodificarlo: solo hace falta llegar al
+    // tamano de miniatura que viene justo despues.
+    std::fseek(file, static_cast<long>(state_size), SEEK_CUR);
+
+    u32 thumbnail_size = 0;
+    if (std::fread(&thumbnail_size, sizeof(u32), 1, file) != 1) {
+        std::fclose(file);
+        return LoadResult::BadFormat;
+    }
+    if (thumbnail_size > 0 && thumbnail_size <= cap) {
+        if (std::fread(out_qoi, 1, thumbnail_size, file) != thumbnail_size) {
+            std::fclose(file);
+            return LoadResult::BadFormat;
+        }
+        *out_size = thumbnail_size;
+    }
+    std::fclose(file);
     return LoadResult::Ok;
 }
 

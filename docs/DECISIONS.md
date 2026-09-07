@@ -1099,6 +1099,136 @@ prisa. Anotado también en "Pendientes observados".
 
 ---
 
+## ADR-0037 — Miniatura del `.vnsave` en QOI, no PNG
+
+**Fecha:** 2026-09-07
+**Hito:** M7
+**Estado:** aceptada — decisión del usuario, no tomada unilateralmente
+
+**Contexto.** SPEC.md #8.3 dice literalmente "miniatura PNG 384x216", pero la lista
+cerrada de dependencias (SPEC.md #3) solo tiene `stb_image` para decodificar imágenes, y
+explícitamente "solo en herramientas offline, nunca en runtime" — no hay ningún
+codificador PNG disponible para volcar el framebuffer a disco cuando el jugador guarda
+la partida en tiempo real. Esto ya se había diferido una vez (ADR-0026, M4); M7 lo
+necesita de verdad porque el criterio de aceptación es "pantalla de guardado con
+miniaturas". Se paró y se preguntó al usuario en vez de decidir por iniciativa propia
+(regla #3 de `CLAUDE.md`, cambio de formato de disco).
+
+**Decision.** La miniatura se codifica en QOI en vez de PNG. QOI ya está en la pila
+cerrada desde ADR-0008 (usado para las texturas horneadas) y es trivial de codificar en
+tiempo de ejecución (formato mucho más simple que PNG, sin necesitar zlib ni ninguna
+dependencia nueva). El campo `thumbnail_size`/bloque de miniatura de `.vnsave` (ya
+presente desde M4) ahora contiene bytes QOI reales en vez de estar siempre a 0.
+
+**Alternativas descartadas.** El usuario también consideró "downsample crudo sin
+comprimir" (guardar los 384x216 píxeles RGB8 tal cual): descartada por inflar cada
+`.vnsave` a ~250 KB por miniatura sin necesidad, cuando QOI ya resuelve eso con una
+dependencia que el proyecto ya tiene. "Miniatura sin implementar todavía, otra vez":
+descartada porque dejaría el criterio de M7 sin cumplir una tercera vez.
+
+**Consecuencias.** `vm/save.h` gana `k_thumbnail_width/height` (384x216) y
+`load_save_thumbnail()` para leer solo la miniatura sin decodificar el `GameState`
+completo (para listar slots en `SaveLoadMode` sin pagar el coste de cada carga
+completa). La captura del framebuffer en sí (`gfx_capture_thumbnail`) solo está
+implementada en el backend D3D11 por ahora (ver ADR-0038): en GL, `save_game` sigue
+funcionando pero sin miniatura.
+
+---
+
+## ADR-0038 — Lectura de vuelta del render target (`gfx_backend_capture_thumbnail`) solo en D3D11
+
+**Fecha:** 2026-09-07
+**Hito:** M7
+**Estado:** aceptada — mismo hueco que el resto del backend GL (ADR-0009)
+
+**Contexto.** La versión de sokol_gfx pineada por el proyecto (previa al refactor de
+"sg_view", ADR de M1) no tiene una API de lectura de textura portable entre backends.
+Capturar el framebuffer para la miniatura de guardado (M7) necesita, por tanto, un
+mecanismo especifico de cada backend gráfico.
+
+**Decision.** `gfx_backend_capture_thumbnail()` (declarada en `gfx/gfx_backend.h`) se
+implementa de verdad solo en D3D11: usa `sg_d3d11_query_image_info()` (función de
+interop que sokol_gfx sí expone) para obtener el `ID3D11Texture2D*` del render target de
+escena, lo copia a una textura de staging (`D3D11_USAGE_STAGING` +
+`D3D11_CPU_ACCESS_READ`) con `CopyResource`, y lee los píxeles con `Map` — con
+downsampling por vecino más cercano directo durante la lectura, sin materializar nunca
+un buffer intermedio a resolución completa (1920x1080 RGBA8 serían ~8.3 MB, mayor que
+`g_arena_frame`). El backend GL devuelve `false` sin implementar nada (mismo patrón que
+el resto de ese backend desde M1, ADR-0009: sin Linux disponible aquí para escribirlo y
+probarlo con `glReadPixels`).
+
+**Alternativas descartadas.** Materializar un buffer RGBA8 a resolución completa en la
+arena de escena antes de reducirlo: más simple de escribir pero desperdicia ~8 MB de una
+arena que además se resetea al cambiar de capítulo/mapa, por una operación que en
+realidad no necesita nunca los píxeles completos en memoria a la vez.
+
+**Consecuencias.** Guardar una partida en el backend GL (cuando exista, ADR-0009) no
+tendrá miniatura real hasta que alguien escriba y pruebe la contraparte GL de esta
+función en una máquina Linux de verdad. `SaveLoadMode` ya maneja ese caso con
+normalidad (guarda igual, solo que sin imagen).
+
+---
+
+## ADR-0039 — `Say` bloquea de verdad esperando input (cierra ADR-0023)
+
+**Fecha:** 2026-09-07
+**Hito:** M7
+**Estado:** aceptada
+
+**Contexto.** ADR-0023 (M3) simplificó `Say` para que se completara al instante,
+anotando explícitamente "revisar en cuanto exista VnMode (M7)". Ese momento llegó.
+
+**Decision.** `cmd_update` para `CmdKind::Say` ahora es
+`return state->vm.waiting_for_input == 0;` en vez de limpiar la bandera él mismo: el
+comando se queda parado hasta que algo externo llama a la nueva `vm_confirm_say()`
+(`vm/vm.h`), que `VnMode::update()` invoca cuando el jugador confirma (tecla/clic) o
+cuando el modo automático completa su temporizador. `vm_skip_current` no cambia: su
+`cmd_skip_to_end` para `Say` ya limpiaba la bandera incondicionalmente desde M3, así que
+el modo skip y `--autoplay-script` siguen funcionando igual que antes sin ningún cambio.
+
+**Alternativas descartadas.** Ninguna: es exactamente el mecanismo que ADR-0023 ya
+había anticipado, mismo patrón que `Choice`/`vm_select_choice` (M5).
+
+**Consecuencias.** Cualquier código que llame a `vm_update` directamente sobre un guion
+con líneas de diálogo (no vía `vm_skip_current`) ahora se queda parado en el primer
+`Say` hasta que alguien llame a `vm_confirm_say` — confirmado en el smoke test
+interactivo de M7 (`vm_pc` se queda fijo en el primer `Say` en vez de avanzar solo).
+Ningún test existente se vio afectado porque M3-M6 solo ejercitaban `Say` vía
+`vm_skip_current`, nunca vía `vm_update` directo en un test.
+
+---
+
+## ADR-0040 — Sin soporte de ratón todavía: toda la UI de M7 es solo teclado
+
+**Fecha:** 2026-09-07
+**Hito:** M7
+**Estado:** aceptada
+
+**Contexto.** `platform/input.h` (desde M0) solo rastrea teclado (`key_down`/
+`key_pressed` por `SDL_Scancode`); no hay posición ni botones de ratón. SPEC.md #10 no
+especifica el mecanismo de interacción de cada modo, así que la elección de cómo
+interactuar con el cuadro de diálogo/backlog/menú/pantalla de guardado quedaba abierta.
+
+**Decision.** Toda la UI de M7 (confirmar diálogo, navegar backlog, ajustar volúmenes
+del menú, elegir slot de guardado) se maneja solo con teclado: SPACE/ENTER confirma,
+flechas navegan, ESC cierra un overlay. Ninguna de las nuevas pantallas necesita
+hit-testing de rectángulos contra una posición de ratón.
+
+**Alternativas descartadas.** Añadir rastreo de posición/clic de ratón a
+`platform/input.cpp` (eventos `SDL_EVENT_MOUSE_*` de SDL3) para permitir clic-para-
+avanzar y clic en botones: se descartó por alcance — ampliaría el módulo de input de
+plataforma (fuera del núcleo de "UI de novela visual" que pide M7) y el teclado ya cubre
+cada interacción sin ambigüedad. SPEC.md no exige ratón explícitamente en ningún
+criterio de M7.
+
+**Consecuencias.** Un jugador esperaría poder hacer clic para avanzar diálogo (convención
+estándar del género); no puede todavía. Añadir soporte de ratón real (posición +
+botones en `InputState`, más hit-testing de rectángulos de UI) queda como trabajo futuro
+explícito — anotado en "Pendientes observados". El proyecto no necesita rediseñar nada
+para añadirlo despues: `InputState` es un struct plano, ampliarlo es aditivo.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -1201,3 +1331,29 @@ desviarte.
   `main.cpp` no disparan audio todavia, solo `demo_audio.vns` via `--autoplay-script`,
   que no tiene bucle de frame). La correccion se apoya en la simetria de codigo con
   ADR-0032 (ya probado), no en una medicion directa de este caso concreto.
+- Sin soporte de raton todavia (ADR-0040): toda la interaccion de M7 es solo teclado.
+  Anadir posicion/clic real a `platform/input.h` cuando se necesite de verdad.
+- La captura de miniatura (`gfx_backend_capture_thumbnail`, ADR-0038) solo esta
+  implementada en D3D11: revisar cuando exista una maquina Linux real para escribir la
+  contraparte GL con `glReadPixels` contra un FBO (mismo hueco que el resto del backend
+  GL desde M1, ADR-0009).
+- `SaveLoadMode`, `BacklogMode` y `MenuMode` no se probaron con pulsaciones de teclado
+  reales en la ventana interactiva en este entorno (misma limitacion que F5/F9 de M4,
+  ver Pendientes de esa epoca): solo se verifico que compilan, que el juego arranca sin
+  crashear con ellos cableados, y su logica interna vía los tests de `mode_stack` y de
+  `save.h`. El flujo completo de "abrir menu con M, bajar volumen con flechas, cerrar con
+  ESC" (por ejemplo) no se ha visto funcionar de verdad.
+- `BacklogMode`/`MenuMode`/`SaveLoadMode` dibujan paneles solidos con `gfx_white_texture()`
+  en vez de arte real de UI (no hay pipeline de assets de UI todavia, fuera de alcance de
+  M7): placeholders deliberados, obvios visualmente (skill vne-milestone-workflow).
+- El modo auto de VnMode usa un tiempo de espera fijo (`k_auto_hold_seconds = 1.2s`) sin
+  ajustar por la longitud del texto mostrado; SPEC.md no exige mas que "modo auto" exista,
+  pero un temporizador proporcional a la longitud de la linea seria mas natural. Anotado
+  para revisar si molesta en la practica.
+- El criterio de rendimiento del modo skip (SPEC.md #12: "1000 comandos en menos de un
+  segundo") se verifico con `vm_skip_current` directamente en un test (444us de mediana en
+  Debug+ASan, 65us en Ship — muy por debajo del limite), no con el modo skip real de
+  VnMode corriendo dentro de la ventana interactiva (misma limitacion de no poder pulsar
+  teclas aqui). El mecanismo es identico (VnMode::update en modo skip llama exactamente a
+  vm_skip_current en bucle), asi que el numero medido deberia trasladarse igual, pero no
+  se confirmo end-to-end.

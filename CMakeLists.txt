@@ -261,6 +261,10 @@ add_library(vne_base STATIC
   src/vm/save.cpp
   src/script/lua_bindings.cpp
   src/audio/audio.cpp
+  src/game/vn_mode.cpp
+  src/game/backlog_mode.cpp
+  src/game/menu_mode.cpp
+  src/game/save_load_mode.cpp
   ${VNE_GFX_BACKEND_SOURCES}
 )
 target_include_directories(vne_base PUBLIC src)

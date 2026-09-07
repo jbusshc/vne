@@ -149,9 +149,10 @@ bool cmd_update(const Cmd& cmd, GameState* state, f32 dt) {
         case CmdKind::StopBgm:
             return true;
         case CmdKind::Say:
-            // Instantaneo en M3: no hay todavia una UI real que espere un clic (M7).
-            state->vm.waiting_for_input = 0;
-            return true;
+            // Cierra ADR-0023 (M3: "Say no bloquea esperando input"): ahora si bloquea
+            // de verdad. cmd_start ya puso waiting_for_input a 1; solo se completa
+            // cuando algo externo (VnMode, SPEC.md #10) lo pone a 0 con vm_confirm_say().
+            return state->vm.waiting_for_input == 0;
         case CmdKind::Choice:
             // Nunca se completa por si solo: hace falta vm_select_choice() (SPEC.md
             // #9.1, no hay timeout ni avance automatico salvo con vm_skip_current, que

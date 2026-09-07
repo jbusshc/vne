@@ -23,6 +23,8 @@ add_executable(vne_tests
   test_save_replay.cpp
   test_lua_bindings.cpp
   test_audio.cpp
+  test_skip_perf.cpp
+  test_mode_stack.cpp
 )
 target_link_libraries(vne_tests PRIVATE vne_base vne_script_tools doctest::doctest)
 target_include_directories(vne_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR})

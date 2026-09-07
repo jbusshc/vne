@@ -62,4 +62,17 @@ void gfx_backend_present() {
     SDL_GL_SwapWindow(g_window->sdl_window);
 }
 
+bool gfx_backend_capture_thumbnail(sg_image scene_image, u8* out_rgb, i32 out_w, i32 out_h) {
+    // No implementado todavia (mismo hueco que el resto de este backend, ADR-0009: sin
+    // Linux disponible aqui para escribirlo y probarlo con glReadPixels contra un FBO).
+    // La pantalla de guardado se queda sin miniatura real en este backend hasta entonces
+    // (ver docs/DECISIONS.md, M7).
+    (void)scene_image;
+    (void)out_rgb;
+    (void)out_w;
+    (void)out_h;
+    log_error("gfx_backend_capture_thumbnail: no implementado en el backend GL todavia");
+    return false;
+}
+
 #endif  // VNE_GFX_BACKEND_GL

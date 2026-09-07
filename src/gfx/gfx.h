@@ -54,3 +54,16 @@ Recti gfx_letterbox_rect(i32 window_w, i32 window_h, i32 virtual_w, i32 virtual_
 // Contador de draw calls del frame actual, para el HUD de depuracion. Se resetea en
 // gfx_begin_frame (el blit de letterbox de gfx_present tambien cuenta).
 extern u32 g_gfx_draw_call_count;
+
+// Textura 1x1 blanca, creada una sola vez (perezosamente) y cacheada: para paneles de UI
+// solidos (M7, cuadro de dialogo/menus/backlog) dibujados como un Sprite con esta
+// textura y el color deseado como tinte, sin necesitar un atlas real todavia. Un handle
+// invalido (por defecto) resolveria al placeholder magenta (SPEC.md #7.4), que es para
+// assets rotos, no para UI solida — por eso existe esto en vez de dejar Sprite::tex sin
+// poner.
+TextureHandle gfx_white_texture();
+
+// Miniatura del render target de escena actual, reducida a out_w x out_h RGB8 (para la
+// pantalla de guardado, SPEC.md #8.3, M7). Solo disponible en el backend D3D11 por ahora
+// (ADR-0009): devuelve false en GL, dejando *out_rgb sin tocar.
+bool gfx_capture_thumbnail(u8* out_rgb, i32 out_w, i32 out_h);
