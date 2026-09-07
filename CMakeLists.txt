@@ -204,6 +204,8 @@ add_library(vne_base STATIC
   src/text/font.cpp
   src/text/glyph_cache.cpp
   src/text/layout.cpp
+  src/vm/vm.cpp
+  src/vm/script_load.cpp
   ${VNE_GFX_BACKEND_SOURCES}
 )
 target_include_directories(vne_base PUBLIC src)
@@ -222,11 +224,22 @@ add_executable(vne_game src/main.cpp)
 target_link_libraries(vne_game PRIVATE vne_base)
 vne_apply_project_flags(vne_game)
 
+# Lexer/parser/compilador del DSL (SPEC.md #9.3): solo se linkan en herramientas
+# offline. vne_game nunca los ve — "cero parsing en release". std::string/vector son
+# aceptables aqui porque este codigo jamas corre en el bucle de frame del juego.
+add_library(vne_script_tools STATIC
+  src/script/lexer.cpp
+  src/script/parser.cpp
+  src/script/compiler.cpp
+)
+target_include_directories(vne_script_tools PUBLIC src)
+vne_apply_project_flags(vne_script_tools)
+
 # Herramienta offline: no enlaza vne_base (SDL3/sokol/gfx) porque no abre ventana ni
 # dibuja nada, solo genera y codifica bytes. Solo toma prestado base/log.cpp de vne_base.
 add_executable(vne_bake tools/bake/main.cpp src/base/log.cpp)
 target_include_directories(vne_bake PRIVATE src)
-target_link_libraries(vne_bake PRIVATE qoi)
+target_link_libraries(vne_bake PRIVATE qoi vne_script_tools)
 vne_apply_project_flags(vne_bake)
 
 # Un checkout limpio mas un build debe producir un juego ejecutable sin pasos manuales
@@ -260,6 +273,21 @@ add_custom_command(
 )
 add_custom_target(vne_copy_fonts DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSansJP.ttf)
 add_dependencies(vne_game vne_copy_fonts)
+
+# Guion de prueba de M3 (ADR pendiente, ver docs/DECISIONS.md): nombres placeholder
+# obvios, no contenido de juego real (SPEC.md #6). Se compila a .vnc en el directorio de
+# build, igual que el atlas y las fuentes.
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo.vnc
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
+  COMMAND vne_bake script
+          ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo.vns
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo.vnc
+  DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo.vns
+  COMMENT "vne_bake: compilando demo.vns a demo.vnc"
+)
+add_custom_target(vne_bake_script DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo.vnc)
+add_dependencies(vne_game vne_bake_script)
 
 enable_testing()
 add_subdirectory(tests)

@@ -13,8 +13,12 @@ add_executable(vne_tests
   test_layout_perf.cpp
   test_typewriter.cpp
   test_glyph_cache.cpp
+  test_lexer.cpp
+  test_parser.cpp
+  test_compiler.cpp
+  test_vm.cpp
 )
-target_link_libraries(vne_tests PRIVATE vne_base doctest::doctest)
+target_link_libraries(vne_tests PRIVATE vne_base vne_script_tools doctest::doctest)
 target_include_directories(vne_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 vne_apply_project_flags(vne_tests)
 
@@ -27,6 +31,12 @@ if(MSVC)
   # como advertencia (C5285). Es codigo de terceros que llega a nuestra unidad de
   # traduccion via #include, no un problema de nuestro codigo: se silencia solo aqui.
   target_compile_options(vne_tests PRIVATE /wd5285)
+  # Al hacer CHECK() sobre un std::string/string_view, doctest instancia
+  # basic_ostream::operator<< del STL, que internamente usa try/catch para resetear el
+  # estado del stream si algo falla — con las excepciones desactivadas (SPEC.md #4) eso
+  # dispara C4530. Nunca se lanza de verdad (no usamos estados de fallo de stream), asi
+  # que es ruido del STL, no un problema real; se silencia solo aqui, igual que C5285.
+  target_compile_options(vne_tests PRIVATE /wd4530)
 endif()
 
 include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)

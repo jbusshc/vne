@@ -1,6 +1,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdio>
+#include <cstring>
 
 #include "base/arena.h"
 #include "base/heap_guard.h"
@@ -13,6 +14,8 @@
 #include "text/font.h"
 #include "text/glyph_cache.h"
 #include "text/layout.h"
+#include "vm/script_load.h"
+#include "vm/vm.h"
 
 // M1: renderizado 2D. Ademas del bucle base de M0, dibuja un stress test de 5000 sprites
 // de un unico atlas para verificar el criterio de aceptacion de M1 (SPEC.md #12): deben
@@ -21,6 +24,11 @@
 // M2: texto. Ademas, monta un cuadro de dialogo de prueba con marcado inline y furigana,
 // avanzando con el efecto de maquina de escribir (visible_glyphs), para demostrar que
 // text_layout no se vuelve a llamar por frame (SPEC.md #12).
+//
+// M3: VM y DSL. Carga assets_baked/demo.vnc (compilado por vne_bake desde
+// assets_src/scripts/demo.vns) y lo avanza con vm_update() cada frame. Con
+// --autoplay-script <ruta> corre un guion entero via vm_skip_current() sin abrir ventana,
+// a maxima velocidad (skill vne-build-verify), y sale con codigo 0/1.
 
 constexpr f32 k_typewriter_glyphs_per_second = 18.0f;
 
@@ -85,7 +93,50 @@ static void read_atlas_grid(i32* cols, i32* rows, i32* cell_w, i32* cell_h) {
     std::fclose(bin);
 }
 
-int main(int, char**) {
+// Corre un guion entero sin ventana ni GPU, a maxima velocidad, via vm_skip_current()
+// (skill vne-build-verify: "--autoplay-script ... a maxima velocidad ... sale con codigo
+// 0 o distinto de 0"). No es una demostracion visual: es la base de la verificacion
+// automatizada de guiones completos.
+static int run_autoplay(const char* script_path) {
+    g_arena_perm  = arena_create(k_perm_arena_size, "perm");
+    g_arena_scene = arena_create(k_scene_arena_size, "scene");
+    g_arena_frame = arena_create(k_frame_arena_size, "frame");
+
+    CompiledScript script{};
+    if (script_load(script_path, &g_arena_scene, &script) != ScriptLoadResult::Ok) {
+        log_error("--autoplay-script: no se pudo cargar '%s'", script_path);
+        return 1;
+    }
+
+    GameState state{};
+    bool      finished = false;
+    u32       steps    = 0;
+    constexpr u32 k_max_autoplay_steps = 1000000;
+    while (!finished && steps < k_max_autoplay_steps) {
+        CmdKind kind = script.cmds[state.vm.pc].kind;
+        vm_skip_current(&state.vm, &state, script);
+        steps += 1;
+        if (kind == CmdKind::End) {
+            finished = true;
+        }
+    }
+
+    if (!finished) {
+        log_error("--autoplay-script: '%s' no termino tras %u pasos (posible bucle)",
+                  script_path, k_max_autoplay_steps);
+        return 1;
+    }
+    log_info("--autoplay-script: '%s' completo en %u comandos", script_path, steps);
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::strcmp(argv[i], "--autoplay-script") == 0) {
+            return run_autoplay(argv[i + 1]);
+        }
+    }
+
     g_arena_perm  = arena_create(k_perm_arena_size, "perm");
     g_arena_scene = arena_create(k_scene_arena_size, "scene");
     g_arena_frame = arena_create(k_frame_arena_size, "frame");
@@ -121,6 +172,14 @@ int main(int, char**) {
     // (regla del skill vne-rendering).
     TextLayout demo_layout = text_layout(demo_font, demo_text, 700.0f, &g_arena_scene);
     f32        visible_glyphs_f = 0.0f;
+
+    CompiledScript demo_script{};
+    if (script_load("assets_baked/demo.vnc", &g_arena_scene, &demo_script) !=
+        ScriptLoadResult::Ok) {
+        log_error("No se pudo cargar assets_baked/demo.vnc; ejecuta vne_bake primero.");
+    }
+    GameState demo_state{};
+    bool      demo_finished = false;
 
     InputState input{};
     Clock      clock = clock_create();
@@ -170,6 +229,13 @@ int main(int, char**) {
             gfx_draw_sprite(s);
         }
 
+        if (!demo_finished && demo_script.cmd_count > 0) {
+            if (vm_update(&demo_state.vm, &demo_state, demo_script, dt)) {
+                demo_finished = true;
+                log_info("demo.vnc: guion completo (%u comandos)", demo_script.cmd_count);
+            }
+        }
+
         visible_glyphs_f += k_typewriter_glyphs_per_second * dt;
         if (visible_glyphs_f > static_cast<f32>(demo_layout.count) * 1.5f) {
             visible_glyphs_f = 0.0f;  // reinicia el efecto para que la demo haga bucle
@@ -208,9 +274,10 @@ int main(int, char**) {
             f32 fps       = dt > 0.0f ? 1.0f / dt : 0.0f;
             log_info(
                 "fps~%.1f frame_p99=%.2fms draw_calls=%u sprites=%u heap_allocs_frame_max=%llu "
-                "text_layout_calls=%u",
+                "text_layout_calls=%u vm_pc=%u/%u",
                 fps, p99_ms, g_gfx_draw_call_count, k_stress_sprite_count,
-                static_cast<unsigned long long>(max_frame_allocs), g_text_layout_call_count);
+                static_cast<unsigned long long>(max_frame_allocs), g_text_layout_call_count,
+                demo_state.vm.pc, demo_script.cmd_count);
         }
     }
 

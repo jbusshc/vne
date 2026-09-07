@@ -567,6 +567,116 @@ real, `g_arena_scene`, con margen de sobra).
 
 ---
 
+## ADR-0021 — CmdKind/Cmd de M3 solo con el subconjunto de este hito; sizeof(Cmd) crecera
+
+**Fecha:** 2026-09-06
+**Hito:** M3
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §8.1 da `CmdKind`/`Cmd` con los 22 comandos finales del proyecto y un
+`static_assert(sizeof(Cmd) == 20)`. M3 solo pide `Say, Show, Hide, Bg, Wait, Jump, Label,
+End`. El skill `vne-script-dsl` dice explicitamente que los tres `switch` del interprete
+van **sin** `default` para que `-Wswitch` obligue a cubrir cada `CmdKind` que exista.
+
+**Decisión.** `CmdKind` declara solo los 9 valores de M3 (`Nop` incluido como comodin). El
+`static_assert(sizeof(Cmd) == 16)` refleja el tamano real de este subconjunto, no el 20
+final. Cada hito que anada comandos (M5: `Choice, SetVar, AddVar, JumpIf, Call, Return,
+LuaCall`; M6: `Sfx, Bgm, StopBgm`) suma sus valores y struct de union, y ajusta el
+`static_assert` al nuevo tamano real.
+
+**Alternativas descartadas.** Declarar los 22 `CmdKind` y los 14 structs de union desde
+ya, dejando sin implementar los `switch` de los que no tocan a M3: rompe la regla de "un
+hito a la vez" (obligaria a decidir semantica de `Choice`/`SetVar`/`LuaCall` ahora) y el
+`-Wswitch` sin `default` dejaria de servir para nada (todo estaria "cubierto" con casos
+vacios puestos por adelantado).
+
+**Consecuencias.** Cada hito que anada comandos debe recordar tocar el `static_assert` de
+tamano (fallara la compilacion si no coincide, lo cual es la señal correcta). El tamano de
+`Cmd` en disco (`.vnc`) cambia entre hitos: no hay compatibilidad de formato entre
+versiones de este ADR, aceptable porque los `.vnc` son artefactos de build, no assets
+versionados.
+
+---
+
+## ADR-0022 — Identificador desconocido: solo etiquetas se validan de verdad en M3
+
+**Fecha:** 2026-09-06
+**Hito:** M3
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §9.2 exige que "un identificador desconocido" sea error de
+compilacion con archivo y linea. El guion referencia tres tipos de identificador: etiquetas
+(`@jump destino`), nombres de actor/pose (`@show marta neutral`) y nombres de fondo (`@bg
+mansion`). No existe todavia ningun registro de assets reales (no hay `assets_src/png/`
+con sprites, SPEC.md §6 prohibe inventar contenido) contra el que validar actor/pose/fondo.
+
+**Decisión.** El parser valida etiquetas estrictamente: recolecta todas las `::etiqueta`
+declaradas en el propio guion y falla si un `@jump` referencia una que no existe ahi — es
+autocontenido, no depende de ningun asset externo. Los nombres de actor, pose y fondo se
+internan automaticamente la primera vez que aparecen (compilador, `NameInterner`), sin
+validarlos contra nada externo.
+
+**Alternativas descartadas.** Inventar una lista de actores/fondos "validos" solo para
+poder rechazar los demas: violaria SPEC.md §6 (no inventar contenido de juego) con
+contenido inventado peor todavia, solo para simular una validacion que no significa nada
+sin assets reales.
+
+**Consecuencias.** Un typo en un nombre de actor (`@show mrata neutral`) compila sin error
+y crea un actor nuevo con ese nombre por accidente — no se detecta hasta que el juego se
+ve mal. Cuando exista un registro real de actores/fondos (probablemente atado al pipeline
+de assets de M9/M11), esta validacion debe extenderse a esos identificadores tambien.
+
+---
+
+## ADR-0023 — Say no bloquea esperando input en M3
+
+**Fecha:** 2026-09-06
+**Hito:** M3
+**Estado:** aceptada
+
+**Contexto.** `VmState.waiting_for_input` (SPEC.md §8.2) sugiere que `Say` deberia esperar
+a que el jugador avance. M3 no tiene todavia una UI real (`VnMode` es M7) que lea input y
+decida cuando avanzar un dialogo.
+
+**Decisión.** En M3, `Say.update()` completa siempre al instante (pone y quita
+`waiting_for_input` en el mismo paso). El campo sigue existiendo y se sigue tocando, para
+que `VnMode` (M7) solo tenga que dejar de limpiarlo automaticamente y esperar una accion
+real del jugador, sin cambiar la forma del campo.
+
+**Alternativas descartadas.** Dejar `Say` bloqueado para siempre esperando input real:
+imposible de probar en M3 (no hay VnMode todavia) y rompe el criterio de "un guion de 200
+lineas se ejecuta completo" con `--autoplay-script`.
+
+**Consecuencias.** El guion de demo se "juega" en el modo interactivo de `vne_game` sin
+que el jugador pueda leer el dialogo (avanza solo): esperado y aceptable, es una
+demostracion de la VM, no del juego terminado.
+
+---
+
+## ADR-0024 — DSL parseado linea a linea en vez de un grammar completo, hasta que existan bloques
+
+**Fecha:** 2026-09-06
+**Hito:** M3
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §9.2 dice que la indentacion de 4 espacios "solo es significativa
+dentro de `@if` y `@choice`". Ninguno de los dos existe hasta M5. Escribir ya un parser con
+manejo de bloques indentados para comandos que no existen todavia adelanta trabajo de M5.
+
+**Decisión.** `src/script/parser.cpp` procesa el guion linea a linea, sin ningun concepto
+de bloque ni indentacion: cada linea logica (tras quitar comentarios) es una etiqueta, un
+comando o una linea de dialogo independiente.
+
+**Alternativas descartadas.** Escribir ya un parser recursivo-descendente con soporte de
+bloques: la complejidad extra no tiene ningun caso de uso real hasta que `@if`/`@choice`
+existan, y el diseño de bloques no esta decidido todavia (SPEC.md no especifica su AST).
+
+**Consecuencias.** Cuando llegue M5, `parse_script` necesita reescritura real (no una
+extension incremental) para soportar bloques indentados con `@if`/`@else`/`@end` y
+`@choice`/`@end` anidables. Anotado aqui para que no sorprenda entonces.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -605,3 +715,14 @@ desviarte.
   choca con algo mas adelante, es la primera pista a revisar.
 - La fuente de prueba `NotoSansJP.ttf` (~9.5 MB, ADR-0017) infla el repositorio; considerar
   Git LFS o un subconjunto de glifos si llega a molestar.
+- `parse_script` es linea a linea (ADR-0024): necesita reescritura real cuando lleguen
+  `@if`/`@choice` en M5 (bloques indentados).
+- Validacion de identificadores desconocidos limitada a etiquetas (ADR-0022): actores,
+  poses y fondos se internan sin validar. Ampliar cuando exista un registro real de
+  assets.
+- `Say` no bloquea esperando input (ADR-0023): revisar en cuanto exista `VnMode` (M7).
+- Al usar `CHECK()`/`REQUIRE()` de doctest sobre un `std::string`/`std::string_view`, el
+  STL de MSVC dispara C4530 (excepcion usada sin `/EHsc`) dentro de su propio
+  `basic_ostream::operator<<`; se silencio con `/wd4530` solo en `vne_tests` (mismo patron
+  que C5285 de doctest+`std::tuple`, ver tests/CMakeLists.txt). Si aparece en un contexto
+  nuevo, es el mismo problema, no uno distinto.

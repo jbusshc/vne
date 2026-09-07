@@ -1,4 +1,9 @@
 #include <cstdio>
+#include <cstring>
+#include <string>
+
+#include "script/compiler.h"
+#include "script/parser.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -54,9 +59,59 @@ constexpr u8 k_cell_colors[k_grid_rows * k_grid_cols][3] = {
     {170, 110, 40}, {255, 250, 200}, {128, 0, 0},    {170, 255, 195},
 };
 
-}  // namespace
+bool read_whole_file(const char* path, std::string* out) {
+    std::FILE* file = std::fopen(path, "rb");
+    if (file == nullptr) {
+        return false;
+    }
+    std::fseek(file, 0, SEEK_END);
+    long size = std::ftell(file);
+    std::fseek(file, 0, SEEK_SET);
+    if (size < 0) {
+        std::fclose(file);
+        return false;
+    }
+    out->resize(static_cast<usize>(size));
+    usize read = std::fread(out->data(), 1, static_cast<usize>(size), file);
+    std::fclose(file);
+    return read == static_cast<usize>(size);
+}
 
-int main() {
+// vne_bake script <entrada.vns> <salida.vnc> (SPEC.md #9.3, pipeline de SPEC.md #11).
+int bake_script(const char* in_path, const char* out_path) {
+    std::string source;
+    if (!read_whole_file(in_path, &source)) {
+        log_error("vne_bake: no se pudo leer '%s'", in_path);
+        return 1;
+    }
+
+    ParseResult parsed = parse_script(source, in_path);
+    if (!parsed.ok()) {
+        for (const ParseError& err : parsed.errors) {
+            log_error("%s:%u: %s", err.file.c_str(), err.line, err.message.c_str());
+        }
+        return 1;
+    }
+
+    CompileResult compiled = compile_instructions(parsed.instructions, in_path);
+    if (!compiled.ok()) {
+        for (const CompileError& err : compiled.errors) {
+            log_error("%s:%u: %s", err.file.c_str(), err.line, err.message.c_str());
+        }
+        return 1;
+    }
+
+    if (!write_vnc(out_path, compiled.data)) {
+        log_error("vne_bake: no se pudo escribir '%s'", out_path);
+        return 1;
+    }
+
+    log_info("vne_bake: %s -> %s (%zu comandos, %zu bytes de strings)", in_path, out_path,
+              compiled.data.cmds.size(), compiled.data.string_pool.size());
+    return 0;
+}
+
+int bake_atlas() {
     ensure_directory_exists("assets_baked");
 
     static u8 pixels[static_cast<usize>(k_atlas_h) * k_atlas_w * 4];
@@ -108,4 +163,19 @@ int main() {
     log_info("vne_bake: atlas_00.qoi (%dx%d, rejilla %dx%d de %dpx) y atlas_00.bin generados",
               k_atlas_w, k_atlas_h, k_grid_cols, k_grid_rows, k_cell_size);
     return 0;
+}
+
+}  // namespace
+
+// Uso: vne_bake [atlas | script <entrada.vns> <salida.vnc>]
+// Sin argumentos (o "atlas"): genera el atlas placeholder de M1 (compatibilidad).
+int main(int argc, char** argv) {
+    if (argc >= 2 && std::strcmp(argv[1], "script") == 0) {
+        if (argc < 4) {
+            log_error("uso: vne_bake script <entrada.vns> <salida.vnc>");
+            return 1;
+        }
+        return bake_script(argv[2], argv[3]);
+    }
+    return bake_atlas();
 }

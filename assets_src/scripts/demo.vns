@@ -1,0 +1,204 @@
+# Guion de prueba de M3 (SPEC.md #12: 'un guion de 200 lineas se ejecuta completo').
+# Nombres de personajes y fondos son placeholders obvios, no contenido de juego real
+# (SPEC.md #6). Sirve para probar el DSL/VM, no para contar una historia.
+
+:: capitulo_1
+
+@bg fondo_dia fade 0.5
+@show personaje_a pose_neutral slot 0 fade 0.3
+
+personaje_a: Linea de dialogo de prueba numero 1 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 2 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 3 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 4 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 5 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 6 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 7 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 8 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 9 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 10 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 11 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 12 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 13 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 14 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 15 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 16 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 17 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 18 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 19 del capitulo uno.
+personaje_a: Linea de dialogo de prueba numero 20 del capitulo uno.
+
+@wait 0.2
+@show personaje_b pose_neutral slot 1 fade 0.3
+
+personaje_b: Respuesta de prueba numero 1, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 2, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 3, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 4, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 5, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 6, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 7, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 8, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 9, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 10, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 11, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 12, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 13, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 14, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 15, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 16, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 17, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 18, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 19, todavia en el capitulo uno.
+personaje_b: Respuesta de prueba numero 20, todavia en el capitulo uno.
+
+@hide slot 0 fade 0.2
+@jump capitulo_2
+
+:: capitulo_2
+
+@bg fondo_noche fade 0.5
+@show personaje_a pose_feliz slot 0 fade 0.3
+
+personaje_a: Linea de prueba 1 del capitulo dos, de noche.
+personaje_a: Linea de prueba 2 del capitulo dos, de noche.
+personaje_a: Linea de prueba 3 del capitulo dos, de noche.
+personaje_a: Linea de prueba 4 del capitulo dos, de noche.
+personaje_a: Linea de prueba 5 del capitulo dos, de noche.
+personaje_a: Linea de prueba 6 del capitulo dos, de noche.
+personaje_a: Linea de prueba 7 del capitulo dos, de noche.
+personaje_a: Linea de prueba 8 del capitulo dos, de noche.
+personaje_a: Linea de prueba 9 del capitulo dos, de noche.
+personaje_a: Linea de prueba 10 del capitulo dos, de noche.
+personaje_a: Linea de prueba 11 del capitulo dos, de noche.
+personaje_a: Linea de prueba 12 del capitulo dos, de noche.
+personaje_a: Linea de prueba 13 del capitulo dos, de noche.
+personaje_a: Linea de prueba 14 del capitulo dos, de noche.
+personaje_a: Linea de prueba 15 del capitulo dos, de noche.
+personaje_a: Linea de prueba 16 del capitulo dos, de noche.
+personaje_a: Linea de prueba 17 del capitulo dos, de noche.
+personaje_a: Linea de prueba 18 del capitulo dos, de noche.
+personaje_a: Linea de prueba 19 del capitulo dos, de noche.
+personaje_a: Linea de prueba 20 del capitulo dos, de noche.
+personaje_a: Linea de prueba 21 del capitulo dos, de noche.
+personaje_a: Linea de prueba 22 del capitulo dos, de noche.
+personaje_a: Linea de prueba 23 del capitulo dos, de noche.
+personaje_a: Linea de prueba 24 del capitulo dos, de noche.
+personaje_a: Linea de prueba 25 del capitulo dos, de noche.
+personaje_a: Linea de prueba 26 del capitulo dos, de noche.
+personaje_a: Linea de prueba 27 del capitulo dos, de noche.
+personaje_a: Linea de prueba 28 del capitulo dos, de noche.
+personaje_a: Linea de prueba 29 del capitulo dos, de noche.
+personaje_a: Linea de prueba 30 del capitulo dos, de noche.
+
+@wait 0.3
+@hide slot 1 fade 0.2
+
+"Linea sin hablante numero 1, narrando el capitulo dos."
+"Linea sin hablante numero 2, narrando el capitulo dos."
+"Linea sin hablante numero 3, narrando el capitulo dos."
+"Linea sin hablante numero 4, narrando el capitulo dos."
+"Linea sin hablante numero 5, narrando el capitulo dos."
+"Linea sin hablante numero 6, narrando el capitulo dos."
+"Linea sin hablante numero 7, narrando el capitulo dos."
+"Linea sin hablante numero 8, narrando el capitulo dos."
+"Linea sin hablante numero 9, narrando el capitulo dos."
+"Linea sin hablante numero 10, narrando el capitulo dos."
+"Linea sin hablante numero 11, narrando el capitulo dos."
+"Linea sin hablante numero 12, narrando el capitulo dos."
+"Linea sin hablante numero 13, narrando el capitulo dos."
+"Linea sin hablante numero 14, narrando el capitulo dos."
+"Linea sin hablante numero 15, narrando el capitulo dos."
+"Linea sin hablante numero 16, narrando el capitulo dos."
+"Linea sin hablante numero 17, narrando el capitulo dos."
+"Linea sin hablante numero 18, narrando el capitulo dos."
+"Linea sin hablante numero 19, narrando el capitulo dos."
+"Linea sin hablante numero 20, narrando el capitulo dos."
+"Linea sin hablante numero 21, narrando el capitulo dos."
+"Linea sin hablante numero 22, narrando el capitulo dos."
+"Linea sin hablante numero 23, narrando el capitulo dos."
+"Linea sin hablante numero 24, narrando el capitulo dos."
+"Linea sin hablante numero 25, narrando el capitulo dos."
+"Linea sin hablante numero 26, narrando el capitulo dos."
+"Linea sin hablante numero 27, narrando el capitulo dos."
+"Linea sin hablante numero 28, narrando el capitulo dos."
+"Linea sin hablante numero 29, narrando el capitulo dos."
+"Linea sin hablante numero 30, narrando el capitulo dos."
+
+@jump capitulo_3
+
+:: capitulo_3
+
+@bg fondo_dia fade 0.4
+@show personaje_b pose_neutral slot 1 fade 0.3
+
+personaje_b: Cierre de prueba numero 1, capitulo tres.
+personaje_b: Cierre de prueba numero 2, capitulo tres.
+personaje_b: Cierre de prueba numero 3, capitulo tres.
+personaje_b: Cierre de prueba numero 4, capitulo tres.
+personaje_b: Cierre de prueba numero 5, capitulo tres.
+personaje_b: Cierre de prueba numero 6, capitulo tres.
+personaje_b: Cierre de prueba numero 7, capitulo tres.
+personaje_b: Cierre de prueba numero 8, capitulo tres.
+personaje_b: Cierre de prueba numero 9, capitulo tres.
+personaje_b: Cierre de prueba numero 10, capitulo tres.
+personaje_b: Cierre de prueba numero 11, capitulo tres.
+personaje_b: Cierre de prueba numero 12, capitulo tres.
+personaje_b: Cierre de prueba numero 13, capitulo tres.
+personaje_b: Cierre de prueba numero 14, capitulo tres.
+personaje_b: Cierre de prueba numero 15, capitulo tres.
+personaje_b: Cierre de prueba numero 16, capitulo tres.
+personaje_b: Cierre de prueba numero 17, capitulo tres.
+personaje_b: Cierre de prueba numero 18, capitulo tres.
+personaje_b: Cierre de prueba numero 19, capitulo tres.
+personaje_b: Cierre de prueba numero 20, capitulo tres.
+personaje_b: Cierre de prueba numero 21, capitulo tres.
+personaje_b: Cierre de prueba numero 22, capitulo tres.
+personaje_b: Cierre de prueba numero 23, capitulo tres.
+personaje_b: Cierre de prueba numero 24, capitulo tres.
+personaje_b: Cierre de prueba numero 25, capitulo tres.
+personaje_b: Cierre de prueba numero 26, capitulo tres.
+personaje_b: Cierre de prueba numero 27, capitulo tres.
+personaje_b: Cierre de prueba numero 28, capitulo tres.
+personaje_b: Cierre de prueba numero 29, capitulo tres.
+personaje_b: Cierre de prueba numero 30, capitulo tres.
+personaje_b: Cierre de prueba numero 31, capitulo tres.
+personaje_b: Cierre de prueba numero 32, capitulo tres.
+personaje_b: Cierre de prueba numero 33, capitulo tres.
+personaje_b: Cierre de prueba numero 34, capitulo tres.
+personaje_b: Cierre de prueba numero 35, capitulo tres.
+personaje_b: Cierre de prueba numero 36, capitulo tres.
+personaje_b: Cierre de prueba numero 37, capitulo tres.
+personaje_b: Cierre de prueba numero 38, capitulo tres.
+personaje_b: Cierre de prueba numero 39, capitulo tres.
+personaje_b: Cierre de prueba numero 40, capitulo tres.
+personaje_b: Cierre de prueba numero 41, capitulo tres.
+personaje_b: Cierre de prueba numero 42, capitulo tres.
+personaje_b: Cierre de prueba numero 43, capitulo tres.
+personaje_b: Cierre de prueba numero 44, capitulo tres.
+personaje_b: Cierre de prueba numero 45, capitulo tres.
+personaje_b: Cierre de prueba numero 46, capitulo tres.
+personaje_b: Cierre de prueba numero 47, capitulo tres.
+personaje_b: Cierre de prueba numero 48, capitulo tres.
+personaje_b: Cierre de prueba numero 49, capitulo tres.
+personaje_b: Cierre de prueba numero 50, capitulo tres.
+personaje_b: Cierre de prueba numero 51, capitulo tres.
+personaje_b: Cierre de prueba numero 52, capitulo tres.
+personaje_b: Cierre de prueba numero 53, capitulo tres.
+personaje_b: Cierre de prueba numero 54, capitulo tres.
+personaje_b: Cierre de prueba numero 55, capitulo tres.
+personaje_b: Cierre de prueba numero 56, capitulo tres.
+personaje_b: Cierre de prueba numero 57, capitulo tres.
+personaje_b: Cierre de prueba numero 58, capitulo tres.
+personaje_b: Cierre de prueba numero 59, capitulo tres.
+personaje_b: Cierre de prueba numero 60, capitulo tres.
+personaje_b: Cierre de prueba numero 61, capitulo tres.
+personaje_b: Cierre de prueba numero 62, capitulo tres.
+personaje_b: Cierre de prueba numero 63, capitulo tres.
+personaje_b: Cierre de prueba numero 64, capitulo tres.
+personaje_b: Cierre de prueba numero 65, capitulo tres.
+
+@hide slot 0 fade 0.2
+@hide slot 1 fade 0.2
+@wait 0.1
+@end

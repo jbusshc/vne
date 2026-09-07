@@ -6,19 +6,22 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 ## Estado actual
 
 **Hito activo:** ninguno
-**Último hito completado:** M2 — Texto. FreeType + HarfBuzz, cache de glifos en atlas
-dinamico, layout con word-wrap latino y kinsoku CJK, marcado inline, furigana y efecto de
-maquina de escribir. Verificado en Windows (SPEC.md §12): mediana de layout de un parrafo
-de 500 caracteres ~276-285 us en build optimizada (<1ms), `text_draw` nunca relayoutea
-(contador de llamadas + test), furigana geometricamente correcta, texto renderizado y
-confirmado visualmente (incluye color de marcado y CJK). Se encontraron y corrigieron tres
-bugs reales durante la verificacion (no solo del test): `sg_update_image` solo admite una
-subida por imagen y por frame (ADR-0016, endurecido en ADR-0019 con autoproteccion en vez
-de depender de disciplina), y `text_layout()` no comprobaba `nullptr` tras `arena_alloc`
-(ADR-0020). 29/29 tests pasan en Ship; en Debug+ASan pasan 29/30 (el de rendimiento no es
-representativo sin optimizar, ver ADR-0018), sin ningun reporte de memoria. Windows sigue
-siendo la unica plataforma verificada (ADR-0013); Linux/macOS quedan abiertos
-arquitectonicamente pero sin compilar/probar. Detalle completo en docs/DECISIONS.md.
+**Último hito completado:** M3 — VM y DSL. `Cmd`/`CmdKind` (subconjunto de M3, ADR-0021),
+interprete con `start`/`update`/`skip_to_end`, lexer/parser/compilador del DSL
+(`vne_script_tools`, solo herramientas offline), formato `.vnc`, `--autoplay-script`.
+Verificado en Windows (SPEC.md §12): guion de prueba de 204 lineas / 185 comandos se
+ejecuta completo (`vne_game --autoplay-script`, exit 0, y en tiempo real dentro del juego,
+`vm_pc` avanzando visible en el log); `@jump` a una etiqueta desconocida falla la
+compilacion con archivo y linea exactos (verificado a mano y en test); `skip_to_end`
+completa cualquier comando al instante (test + uso real en autoplay). 45/45 tests pasan en
+Ship; en Debug+ASan pasan 45/46 (el de rendimiento de M2 no es representativo sin
+optimizar, ADR-0018), sin ningun reporte de memoria. Identificador desconocido solo se
+valida de verdad para etiquetas (ADR-0022: actor/pose/fondo se internan sin registro de
+assets real, que todavia no existe). Windows sigue siendo la unica plataforma verificada
+(ADR-0013). Detalle completo en docs/DECISIONS.md.
+
+M2 — Texto (hito anterior): FreeType+HarfBuzz, atlas de glifos, word-wrap+kinsoku,
+marcado inline, furigana, maquina de escribir. Verificado y confirmado visualmente.
 
 M1 — Renderizado 2D (hito anterior): verificado en Windows, 5000 sprites de un atlas en 1
 draw call + 1 de letterbox, >300 fps en build optimizada, letterbox correcto, cero allocs
