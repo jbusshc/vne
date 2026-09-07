@@ -157,6 +157,27 @@ TEST_CASE("parser: @set, @add, @call, @return, @lua") {
     CHECK(r.instructions[5].text == "vn.set_var(\"x\", 1)");
 }
 
+TEST_CASE("parser: @sfx, @bgm y @stopbgm") {
+    const char* src =
+        "@sfx puerta_cierra.wav\n"
+        "@bgm tema_tenso fade 1.0\n"
+        "@stopbgm fade 0.5\n"
+        "@stopbgm\n"
+        "@end\n";
+    ParseResult r = parse_script(src, "t.vns");
+    REQUIRE(r.ok());
+    REQUIRE(r.instructions.size() == 5);
+    CHECK(r.instructions[0].kind == InstrKind::Sfx);
+    CHECK(r.instructions[0].sound == "puerta_cierra.wav");
+    CHECK(r.instructions[1].kind == InstrKind::Bgm);
+    CHECK(r.instructions[1].sound == "tema_tenso");
+    CHECK(r.instructions[1].fade == doctest::Approx(1.0f));
+    CHECK(r.instructions[2].kind == InstrKind::StopBgm);
+    CHECK(r.instructions[2].fade == doctest::Approx(0.5f));
+    CHECK(r.instructions[3].kind == InstrKind::StopBgm);
+    CHECK(r.instructions[3].fade == doctest::Approx(0.0f));
+}
+
 TEST_CASE("parser: etiqueta desconocida en un @choice tambien es error de compilacion") {
     ParseResult r = parse_script(
         "@choice\n    \"opcion\" -> nunca_declarada\n@end\n@end\n", "roto.vns");

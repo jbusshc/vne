@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include "audio/audio.h"
 #include "base/crc32.h"
 #include "base/log.h"
 
@@ -122,6 +123,24 @@ LoadResult load_game(const char* path, GameState* out_state, Backlog* out_backlo
 }
 
 void vm_resync_after_state_change(GameState* state) {
-    (void)state;
-    // Nada que hacer todavia: ver el comentario en save.h.
+    // M6: restaura la pista de musica y su posicion aproximada tras cargar o hacer
+    // rollback (criterio de M6, SPEC.md #12). audio_crossfade_music con fade 0 empieza
+    // la pista al instante (sin fundido: no hay nada sonando antes de un F9, es una
+    // resincronizacion, no una transicion narrativa); luego se busca hasta bgm_position
+    // para que la reanudacion sea aproximada, no siempre desde el principio.
+    if (state->bgm_track_id != 0) {
+        SoundHandle h{};
+        if (audio_load_track(state->bgm_track_id, &h)) {
+            audio_crossfade_music(h, 0.0f);
+            audio_seek_music(state->bgm_position);
+        }
+    } else {
+        audio_stop_music(0.0f);
+    }
+    // Volumenes de bus (criterio de M6: "los volumenes de bus persisten"): se reaplican
+    // aqui por si el proceso los habia dejado en otro valor (p. ej. tras un F9 que carga
+    // una partida con volumenes distintos a los que estaban sonando).
+    for (u32 i = 0; i < 4; ++i) {
+        audio_set_bus_volume(static_cast<Bus>(i), state->bus_volume[i]);
+    }
 }

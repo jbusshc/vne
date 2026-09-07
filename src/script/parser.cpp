@@ -359,6 +359,39 @@ void parse_block(ParserState& st, usize& i, u32 depth) {
                         push(st, instr);
                     }
                 }
+            } else if (cmd == "@sfx") {
+                if (tokens.size() < 2) {
+                    st.error(sl.number, "@sfx espera un nombre de sonido");
+                } else {
+                    ParsedInstr instr;
+                    instr.kind  = InstrKind::Sfx;
+                    instr.line  = sl.number;
+                    instr.sound = std::string(tokens[1]);
+                    push(st, instr);
+                }
+            } else if (cmd == "@bgm") {
+                if (tokens.size() < 2) {
+                    st.error(sl.number, "@bgm espera un nombre de pista");
+                } else {
+                    ParsedInstr instr;
+                    instr.kind  = InstrKind::Bgm;
+                    instr.line  = sl.number;
+                    instr.sound = std::string(tokens[1]);
+                    std::string_view fade_str;
+                    if (find_kv(tokens, 2, "fade", &fade_str)) {
+                        parse_f32(fade_str, &instr.fade);
+                    }
+                    push(st, instr);
+                }
+            } else if (cmd == "@stopbgm") {
+                ParsedInstr instr;
+                instr.kind = InstrKind::StopBgm;
+                instr.line = sl.number;
+                std::string_view fade_str;
+                if (find_kv(tokens, 1, "fade", &fade_str)) {
+                    parse_f32(fade_str, &instr.fade);
+                }
+                push(st, instr);
             } else if (cmd == "@bg") {
                 if (tokens.size() < 2) {
                     st.error(sl.number, "@bg espera un nombre de fondo");

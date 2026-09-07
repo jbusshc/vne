@@ -8,9 +8,9 @@
 // cual.
 //
 // M3 declaro el subconjunto de dialogo/flujo lineal (Nop, Say, Show, Hide, Bg, Wait,
-// Jump, Label, End). M5 anade ramificacion (SetVar, AddVar, JumpIf, Choice, ChoiceEnd,
-// Call, Return, LuaCall), no los 22 valores finales de SPEC.md #8.1 todavia: M6 anadira
-// Sfx/Bgm/StopBgm/Move/Transition cuando le toque. Los switch sin `default` del
+// Jump, Label, End). M5 anadio ramificacion (SetVar, AddVar, JumpIf, Choice, ChoiceEnd,
+// Call, Return, LuaCall). M6 anade audio (Sfx, Bgm, StopBgm); Move/Transition quedan
+// para cuando les toque (no son de M6, SPEC.md #12). Los switch sin `default` del
 // interprete siguen obligando a cubrir exactamente lo que existe ahora.
 //
 // Anadir un comando toca exactamente cuatro sitios: un valor aqui, un struct en la
@@ -35,6 +35,9 @@ enum class CmdKind : u8 {
     Call,
     Return,
     LuaCall,
+    Sfx,
+    Bgm,
+    StopBgm,
 };
 
 // Operadores de comparacion de JumpIf y de las condiciones opcionales de @choice
@@ -61,15 +64,28 @@ struct Cmd {
         struct { u32 first_option; u8 option_count; }             choice;
         struct { u32 target_pc; }                                 call;
         struct { u32 fn_id; }                                     lua_call;
+        // text_id: indice en el string_pool con la ruta del archivo (p. ej.
+        // "assets_src/ogg/puerta_cierra.ogg"). A diferencia de actor/pose/fondo (interning
+        // numerico) o de var/flag (hash, ADR-0029), un efecto de sonido no necesita
+        // sobrevivir a un guardado ni resolverse sin el guion que lo emitio, asi que
+        // reusa la misma infraestructura que Say en vez de anadir una tabla nueva al
+        // .vnc (ver ADR de M6).
+        struct { u32 text_id; }                                   sfx;
+        // track_id: SPEC.md #8.2 fija GameState.bgm_track_id en u16, asi que a
+        // diferencia de sfx esto NO es un text_id de este guion (no sobreviviria a
+        // cargar una partida guardada por un guion distinto): es fnv1a_u32(nombre) %
+        // 65536, resuelto contra el catalogo de audio_load_track() en runtime (ver ADR
+        // de M6).
+        struct { u16 track_id; f32 fade; }                        bgm;
+        struct { f32 fade; }                                      stop_bgm;
     };
 };
 
 static_assert(std::is_trivially_copyable_v<Cmd>);
-// Sigue en 16 bytes: aunque M5 anade jump_if (el miembro mas grande de la union, con
-// var_id+op+rhs+target_pc), su relleno de alineacion cabe en el mismo tamano que ya
-// ocupaba show en M3. No es el 20 final de SPEC.md #8.1 todavia (M6 anadira Move con
-// tres f32, que si lo hara crecer). Verificado compilando, no asumido (ver
-// docs/DECISIONS.md).
+// Tamano verificado compilando, no asumido (ver docs/DECISIONS.md): jump_if sigue siendo
+// el miembro mas grande de la union tras M6, asi que el tamano de Cmd no cambio desde
+// M5. No es el 20 final de SPEC.md #8.1 todavia (Move, con tres f32, si lo hara crecer
+// cuando le toque).
 static_assert(sizeof(Cmd) == 16);
 
 // Una opcion de un comando Choice (SPEC.md #9.1: texto, condicion opcional, etiqueta

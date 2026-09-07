@@ -101,6 +101,20 @@ if(stb_ADDED)
   target_include_directories(stb_image INTERFACE ${stb_SOURCE_DIR})
 endif()
 
+# miniaudio.h (dominio publico / MIT-0): decodifica OGG/WAV/FLAC y mezcla, SPEC.md #3/#7.3.
+# Cabecera unica, igual que qoi.h/stb_image.h: STB_IMPLEMENTATION-style, un solo .cpp
+# (src/audio/audio.cpp) define MINIAUDIO_IMPLEMENTATION.
+CPMAddPackage(
+  NAME miniaudio
+  GITHUB_REPOSITORY mackron/miniaudio
+  GIT_TAG 0.11.21
+  DOWNLOAD_ONLY YES
+)
+if(miniaudio_ADDED)
+  add_library(miniaudio INTERFACE)
+  target_include_directories(miniaudio INTERFACE ${miniaudio_SOURCE_DIR})
+endif()
+
 # FreeType antes que HarfBuzz: el CMakeLists.txt de HarfBuzz detecta el target "freetype"
 # ya existente y activa HB_HAVE_FREETYPE automaticamente (ver docs/DECISIONS.md M2).
 CPMAddPackage(
@@ -246,12 +260,19 @@ add_library(vne_base STATIC
   src/vm/rollback.cpp
   src/vm/save.cpp
   src/script/lua_bindings.cpp
+  src/audio/audio.cpp
   ${VNE_GFX_BACKEND_SOURCES}
 )
 target_include_directories(vne_base PUBLIC src)
+if(WIN32)
+  # El backend WASAPI de miniaudio en Windows usa COM.
+  set(VNE_AUDIO_BACKEND_LIBS ole32)
+else()
+  set(VNE_AUDIO_BACKEND_LIBS "")
+endif()
 target_link_libraries(vne_base
   PUBLIC ${VNE_SDL3_TARGET} HandmadeMath
-  PRIVATE sokol_gfx qoi freetype harfbuzz ${VNE_GFX_BACKEND_LIBS} lua_static sol2
+  PRIVATE sokol_gfx qoi freetype harfbuzz ${VNE_GFX_BACKEND_LIBS} lua_static sol2 miniaudio ${VNE_AUDIO_BACKEND_LIBS}
 )
 target_compile_definitions(vne_base PRIVATE ${VNE_GFX_BACKEND_DEFINE})
 # El backend de sokol_gfx solo debe estar activo en la unidad de traduccion que hace
@@ -327,6 +348,27 @@ add_custom_target(vne_bake_assets
 add_dependencies(vne_bake_assets vne_copy_png_assets)
 add_dependencies(vne_game vne_bake_assets)
 
+# assets_src/ogg/ (M6, audio): audio_init() escanea este directorio con una ruta relativa
+# a su propio CWD para armar el catalogo de musica (ver ADR de M6 en docs/DECISIONS.md),
+# igual que vne_bake con los PNG arriba. Sonidos placeholder generados (tonos sinteticos,
+# no assets de terceros): puerta_cierra.wav (sfx) y tema_a.wav/tema_b.wav (musica, para
+# probar el crossfade con dos pistas distintas de verdad).
+file(GLOB VNE_OGG_ASSETS ${CMAKE_SOURCE_DIR}/assets_src/ogg/*)
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/.vne_ogg_assets_copied
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ogg
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          ${CMAKE_SOURCE_DIR}/assets_src/ogg
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ogg
+  COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/.vne_ogg_assets_copied
+  DEPENDS ${VNE_OGG_ASSETS}
+  COMMENT "Copiando assets_src/ogg/ (audio de prueba, tonos sinteticos) al directorio de build"
+)
+add_custom_target(vne_copy_ogg_assets
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/.vne_ogg_assets_copied
+)
+add_dependencies(vne_game vne_copy_ogg_assets)
+
 # Fuente de prueba para la demo de M2 (ADR pendiente de registrar: Noto Sans JP, OFL,
 # descargada para tener CJK real que probar; ver docs/DECISIONS.md). Se copia al
 # directorio de build para que vne_game la encuentre con una ruta relativa a su propio
@@ -372,6 +414,20 @@ add_custom_command(
 add_custom_target(vne_bake_script_branching
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_branching.vnc)
 add_dependencies(vne_game vne_bake_script_branching)
+
+# Guion de prueba de M6 (audio): @bgm/@sfx/@stopbgm (docs/DECISIONS.md).
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_audio.vnc
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
+  COMMAND vne_bake script
+          ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_audio.vns
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_audio.vnc
+  DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_audio.vns
+  COMMENT "vne_bake: compilando demo_audio.vns a demo_audio.vnc"
+)
+add_custom_target(vne_bake_script_audio
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_audio.vnc)
+add_dependencies(vne_game vne_bake_script_audio)
 
 enable_testing()
 add_subdirectory(tests)

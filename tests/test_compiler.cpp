@@ -6,8 +6,10 @@
 
 #include <cstdio>
 
+#include "base/hash.h"
 #include "script/compiler.h"
 #include "script/parser.h"
+#include "vm/state.h"
 
 TEST_CASE("compiler: resuelve Jump a pc y anade End implicito si falta") {
     ParseResult parsed = parse_script(":: a\n@wait 1.0\n@jump a\n", "t.vns");
@@ -37,6 +39,27 @@ TEST_CASE("compiler: interna nombres de actor repetidos al mismo id") {
     REQUIRE(compiled.ok());
     CHECK(compiled.data.cmds[0].show.actor_id == compiled.data.cmds[1].show.actor_id);
     CHECK(compiled.data.cmds[0].show.pose_id != compiled.data.cmds[1].show.pose_id);
+}
+
+TEST_CASE("compiler: Sfx guarda la ruta completa en el string_pool; Bgm usa hash de catalogo") {
+    ParseResult parsed = parse_script(
+        "@sfx puerta_cierra.wav\n@bgm tema_a fade 0.5\n@stopbgm fade 1.0\n@end\n", "t.vns");
+    REQUIRE(parsed.ok());
+    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns");
+    REQUIRE(compiled.ok());
+
+    REQUIRE(compiled.data.cmds.size() == 4);
+    CHECK(compiled.data.cmds[0].kind == CmdKind::Sfx);
+    std::string path(compiled.data.string_pool.data() + compiled.data.cmds[0].sfx.text_id);
+    CHECK(path == "assets_src/ogg/puerta_cierra.wav");
+
+    CHECK(compiled.data.cmds[1].kind == CmdKind::Bgm);
+    CHECK(compiled.data.cmds[1].bgm.track_id ==
+          static_cast<u16>(fnv1a_u32("tema_a") % 65536u));
+    CHECK(compiled.data.cmds[1].bgm.fade == doctest::Approx(0.5f));
+
+    CHECK(compiled.data.cmds[2].kind == CmdKind::StopBgm);
+    CHECK(compiled.data.cmds[2].stop_bgm.fade == doctest::Approx(1.0f));
 }
 
 TEST_CASE("compiler + write_vnc: el formato binario coincide con SPEC.md #9.3") {

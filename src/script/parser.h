@@ -30,6 +30,9 @@ enum class InstrKind : u8 {
     Call,
     Return,
     Lua,
+    Sfx,
+    Bgm,
+    StopBgm,
 };
 
 // Una condicion simple var-OP-valor (SPEC.md #9.1: "confianza >= 3", "valor > 2"). Usada
@@ -57,6 +60,7 @@ struct ParsedInstr {
     std::string actor;    // Show: nombre de actor
     std::string pose;     // Show: nombre de pose
     std::string bg;       // Bg: nombre de fondo
+    std::string sound;    // Sfx/Bgm: nombre logico del sonido/pista
     u8          slot    = 0;
     f32         fade    = 0.0f;
     f32         seconds = 0.0f;

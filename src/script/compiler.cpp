@@ -178,6 +178,23 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                 cmd.kind            = CmdKind::LuaCall;
                 cmd.lua_call.fn_id = push_string(&data, instr.text);
                 break;
+            case InstrKind::Sfx:
+                // instr.sound debe incluir la extension (p. ej. "@sfx puerta_cierra.wav"):
+                // a diferencia de @bgm (que resuelve por catalogo, ADR de M6), Sfx guarda
+                // la ruta completa directo en el string_pool, asi que no hay forma de
+                // adivinar el formato del archivo.
+                cmd.kind        = CmdKind::Sfx;
+                cmd.sfx.text_id = push_string(&data, "assets_src/ogg/" + instr.sound);
+                break;
+            case InstrKind::Bgm:
+                cmd.kind           = CmdKind::Bgm;
+                cmd.bgm.track_id   = static_cast<u16>(fnv1a_u32(instr.sound) % 65536u);
+                cmd.bgm.fade       = instr.fade;
+                break;
+            case InstrKind::StopBgm:
+                cmd.kind          = CmdKind::StopBgm;
+                cmd.stop_bgm.fade = instr.fade;
+                break;
         }
         data.cmds.push_back(cmd);
     }

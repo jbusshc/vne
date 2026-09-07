@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "audio/audio.h"
 #include "base/arena.h"
 #include "base/heap_guard.h"
 #include "base/log.h"
@@ -128,6 +129,7 @@ static int run_autoplay(const char* script_path) {
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
     lua_init();
+    audio_init();
 
     CompiledScript script{};
     if (script_load(script_path, &g_arena_scene, &script) != ScriptLoadResult::Ok) {
@@ -170,6 +172,7 @@ int main(int argc, char** argv) {
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
     lua_init();
+    audio_init();
 
     PlatformWindow window{};
     if (!platform_window_create(&window, "vne \xe2\x80\x94 M2", 1280, 720)) {
@@ -259,6 +262,7 @@ int main(int argc, char** argv) {
         }
 
         f32 dt = clock_tick(&clock);
+        audio_update(dt, &demo_state.bgm_position);
 
         for (u32 i = 0; i < k_stress_sprite_count; ++i) {
             AtlasSpriteRect rect =
@@ -335,6 +339,7 @@ int main(int argc, char** argv) {
         }
     }
 
+    audio_shutdown();
     gfx_shutdown();
     platform_window_destroy(&window);
     arena_destroy(&g_arena_frame);

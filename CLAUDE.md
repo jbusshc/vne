@@ -5,8 +5,32 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno (M5 implementado, pendiente de confirmación para cerrar)
-**Último hito completado:** M5 — Ramificación. `CmdKind` amplia con `SetVar`, `AddVar`,
+**Hito activo:** ninguno (M6 implementado, pendiente de confirmación para cerrar)
+**Último hito completado:** M6 — Audio. `audio/audio.{h,cpp}` envuelve miniaudio con la
+API exacta de SPEC.md #7.3 (`Bus`, `audio_init/load/play/stop/set_bus_volume/
+crossfade_music`). `CmdKind` gana `Sfx`, `Bgm`, `StopBgm` (`sizeof(Cmd)` sigue en 16
+bytes). `Sfx.sound_id` reutiliza el `string_pool` del guion (misma ruta que `Say`);
+`Bgm.track_id` en cambio es `fnv1a % 65536` contra un catalogo escaneado de
+`assets_src/ogg/` en `audio_init()`, porque `GameState.bgm_track_id` (u16, fijo por
+SPEC.md #8.2) tiene que sobrevivir a un guardado sin depender del `string_pool` de un
+guion concreto (ADR-0034). `vm_resync_after_state_change` (M4, vacía hasta ahora) cobra
+su primer uso real: restaura la pista de música, su posición aproximada y los volúmenes
+de bus tras cargar o hacer rollback (criterio de M6). Mismo patrón de excepción a
+heap_guard que Lua (ADR-0032) extendido a la primera carga de un sonido nuevo
+(ADR-0035, sin volver a preguntar: es el mismo problema ya resuelto, no uno nuevo). Un
+test bajo ASan encontró un bug real de miniaudio 0.11.21 (use-after-free al cargar un
+archivo inexistente); se evita comprobando con `fopen` antes de llamar a la librería
+(ADR-0036). Guion de prueba nuevo `demo_audio.vns` (`@bgm`/`@sfx`/`@stopbgm`). 85/85
+tests en Ship; en Debug+ASan 85/86 (el de rendimiento de M2 no representativo sin
+optimizar, ADR-0018), sin ningún reporte de memoria tras el fix del bug de miniaudio.
+Sonidos de prueba: tonos sintéticos generados (no assets de terceros). No se verificó con
+un contador de heap real que la excepción de heap_guard cubra el caso de un `@bgm`/`@sfx`
+disparado dentro de una partida interactiva real (solo se probó vía `--autoplay-script`,
+sin bucle de frame) — se apoya en la simetría de código con el caso de Lua, ya probado.
+Windows sigue siendo la única plataforma verificada (ADR-0013). Detalle completo en
+docs/DECISIONS.md.
+
+M5 — Ramificación (hito anterior). `CmdKind` amplia con `SetVar`, `AddVar`,
 `JumpIf`, `Choice`, `ChoiceEnd`, `Call`, `Return`, `LuaCall` (`sizeof(Cmd)` sigue en 16
 bytes, verificado compilando). Parser reescrito con pila de bloques e indentacion
 significativa (`script/lexer.h` gana un campo `indent`): `@if/@else/@end` se traduce a

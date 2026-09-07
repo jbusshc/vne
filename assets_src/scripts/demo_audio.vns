@@ -1,0 +1,20 @@
+# Guion de prueba de M6 (audio): @bgm/@sfx/@stopbgm. Nombres de sonido son los tonos
+# sinteticos placeholder de assets_src/ogg/ (ver CMakeLists.txt), no assets de terceros
+# (SPEC.md #6: "no inventes contenido de juego").
+
+:: inicio
+
+@bgm tema_a fade 0.0
+narrador: Empieza la musica de prueba.
+
+@sfx puerta_cierra.wav
+narrador: Efecto de sonido disparado.
+
+@bgm tema_b fade 1.0
+narrador: Fundido cruzado a la segunda pista.
+
+@stopbgm fade 0.5
+narrador: La musica se apaga.
+
+@wait 0.1
+@end

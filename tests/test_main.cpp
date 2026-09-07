@@ -7,6 +7,7 @@
 #include "test_config.h"
 #include "test_fonts.h"
 #include "text/font.h"
+#include "audio/audio.h"
 #include "script/lua_bindings.h"
 #include "vm/backlog.h"
 #include "vm/rollback.h"
@@ -29,6 +30,7 @@ int main(int argc, char** argv) {
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
     lua_init();
+    audio_init();
 
     PlatformWindow window{};
     bool           have_window = platform_window_create(&window, "vne tests", 64, 64);
@@ -48,6 +50,7 @@ int main(int argc, char** argv) {
         return result;
     }
 
+    audio_shutdown();
     if (have_gfx) {
         gfx_shutdown();
     }

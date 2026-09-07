@@ -3,10 +3,12 @@
 #include <cstdio>
 #include <string>
 
+#include "audio/audio.h"
 #include "base/hash.h"
 #include "script/compiler.h"
 #include "script/parser.h"
 #include "test_config.h"
+#include "vm/save.h"
 #include "vm/vm.h"
 
 TEST_CASE("vm: Wait no completa antes de tiempo y completa exactamente al llegar") {
@@ -120,6 +122,60 @@ TEST_CASE("vm: el guion de prueba de 200+ lineas se ejecuta completo (SPEC.md #1
 
     CHECK(finished);
     CHECK(steps == script.cmd_count);
+}
+
+TEST_CASE("vm: Bgm actualiza bgm_track_id/bgm_position; StopBgm los resetea (SPEC.md #12)") {
+    std::string path = std::string(VNE_SOURCE_DIR) + "/assets_src/scripts/demo_audio.vns";
+    std::FILE*  f    = std::fopen(path.c_str(), "rb");
+    REQUIRE(f != nullptr);
+    std::fseek(f, 0, SEEK_END);
+    long size = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    std::string source(static_cast<usize>(size), '\0');
+    REQUIRE(std::fread(source.data(), 1, static_cast<usize>(size), f) ==
+            static_cast<usize>(size));
+    std::fclose(f);
+
+    ParseResult parsed = parse_script(source, "demo_audio.vns");
+    REQUIRE(parsed.ok());
+    CompileResult compiled = compile_instructions(parsed.instructions, "demo_audio.vns");
+    REQUIRE(compiled.ok());
+    CompiledScript script{compiled.data.cmds.data(),
+                           static_cast<u32>(compiled.data.cmds.size()),
+                           compiled.data.string_pool.data(),
+                           static_cast<u32>(compiled.data.string_pool.size())};
+
+    GameState state{};
+    bool      finished = false;
+    u32       steps    = 0;
+    u16       track_id_after_bgm = 0;
+    while (!finished && steps < script.cmd_count + 1) {
+        CmdKind kind = script.cmds[state.vm.pc].kind;
+        vm_skip_current(&state.vm, &state, script);
+        steps += 1;
+        if (kind == CmdKind::Bgm && track_id_after_bgm == 0) {
+            track_id_after_bgm = state.bgm_track_id;
+        }
+        if (kind == CmdKind::End) {
+            finished = true;
+        }
+    }
+    REQUIRE(finished);
+    CHECK(track_id_after_bgm != 0);
+    // El guion termina con @stopbgm: bgm_track_id debe quedar en 0.
+    CHECK(state.bgm_track_id == 0);
+}
+
+TEST_CASE("vm: vm_resync_after_state_change restaura la pista de musica y su posicion "
+          "tras cargar una partida (criterio de M6, SPEC.md #12)") {
+    GameState state{};
+    state.bgm_track_id = static_cast<u16>(fnv1a_u32("tema_a") % 65536u);
+    state.bgm_position  = 1.5f;
+    state.bus_volume[1]  = 0.25f;  // Bus::Music
+
+    vm_resync_after_state_change(&state);
+
+    CHECK(audio_music_position() == doctest::Approx(1.5f).epsilon(0.1));
 }
 
 TEST_CASE("vm: JumpIf salta solo cuando la condicion se cumple") {

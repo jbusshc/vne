@@ -994,6 +994,111 @@ enforcement automático de esto todavía.
 
 ---
 
+## ADR-0034 — `Bgm.track_id` se resuelve contra un catalogo escaneado, no via el string_pool del guion
+
+**Fecha:** 2026-09-07
+**Hito:** M6
+**Estado:** aceptada
+
+**Contexto.** `Sfx.sound_id` se resolvió por el mismo camino que `Say.text_id`: un
+`text_id` (u32) apuntando al `string_pool` del guion compilado, con la ruta completa del
+archivo (`assets_src/ogg/nombre.wav`). Eso funciona porque el estado de un efecto de
+sonido no sobrevive a un guardado. `Bgm.track_id`, en cambio, **sí** tiene que
+sobrevivir: `GameState.bgm_track_id` (SPEC.md #8.2) es un `u16` fijo por la especificación
+del estado serializable, y el criterio de M6 exige que cargar una partida restaure la
+pista de música — pero un `text_id` solo es válido dentro del `string_pool` del guion
+concreto que lo compiló, y una partida guardada se puede cargar sin que ese guion (o
+siquiera ese `.vnc`) esté presente todavía.
+
+**Decision.** `Cmd::bgm.track_id` y `GameState.bgm_track_id` son
+`fnv1a_u32(nombre_logico) % 65536`, el mismo esquema de hash-sin-tabla de ADR-0029 pero
+aplicado a un catálogo real: `audio_init()` escanea `assets_src/ogg/` (copiado al
+directorio de build igual que las fuentes y los PNG) y arma `{hash del nombre de archivo
+sin extensión -> ruta}`. `audio_load_track()` resuelve el id contra ese catálogo tanto
+al ejecutar un `Bgm` normal como al restaurar tras cargar (`vm_resync_after_state_change`).
+
+**Alternativas descartadas.** Guardar el `text_id` del guion original en `GameState` de
+todas formas: rompe en cuanto la partida se carga con la aplicación reiniciada (el
+`string_pool` del guion vive en una arena que se resetea, ADR-0004) o con un guion
+distinto activo. Ampliar `GameState.bgm_track_id` a un `text_id`-like más grande: viola
+SPEC.md #8.2, que fija el campo en `u16`.
+
+**Consecuencias.** Mismo riesgo de colisión de hash que ADR-0029 (dos nombres de pista
+distintos cayendo en el mismo id), mitigado por ser un catálogo pequeño (assets de
+música, no cientos de variables). El catálogo se reconstruye escaneando el disco en cada
+`audio_init()`: si `assets_src/ogg/` cambia entre partidas guardadas (se borra o renombra
+un archivo), una partida vieja con ese `track_id` simplemente no encuentra música al
+cargar (se degrada a silencio, `audio_load_track` devuelve `false` y se registra con
+`log_error`, nunca crashea).
+
+---
+
+## ADR-0035 — `heap_guard_suspend`/`resume` tambien exceptua la primera carga de un sonido nuevo
+
+**Fecha:** 2026-09-07
+**Hito:** M6
+**Estado:** aceptada — extiende el precedente de ADR-0032, no una decision nueva desde cero
+
+**Contexto.** Igual que ejecutar Lua (ADR-0032), decodificar un archivo de audio nuevo
+(`ma_sound_init_from_file`) asigna heap por como funciona miniaudio, y `CmdKind::Sfx`/
+`Bgm` pueden ejecutarse dentro del bucle de frame la primera vez que el guion los alcanza.
+
+**Decision.** Se aplicó el mismo patrón ya aceptado por el usuario en ADR-0032:
+`heap_guard_suspend()`/`heap_guard_resume()` rodean exactamente la llamada a
+`ma_sound_init_from_file` dentro de `audio_load()`, y en ningún otro punto de
+`audio/audio.cpp`. Cargas repetidas del mismo `path` usan una cache interna
+(`{hash de la ruta -> SoundHandle}`) y no vuelven a pasar por ahí, así que el coste real
+solo ocurre una vez por sonido distinto, no en cada `@sfx`/`@bgm`.
+
+**Alternativas descartadas.** Las mismas que en ADR-0032 y por las mismas razones:
+precargar todo el audio del guion al cargar el `.vnc` reduciría pero no eliminaría el
+problema (miniaudio puede seguir asignando durante la reproducción, no solo al decodificar),
+y restringir `@sfx`/`@bgm` a fuera del bucle de frame cambiaría su alcance funcional sin
+necesidad.
+
+**Consecuencias.** No se pidió confirmación explícita al usuario esta vez porque ya es
+literalmente el mismo mecanismo aprobado en ADR-0032, aplicado al mismo tipo de problema
+(un tercero que no puede evitar asignar heap la primera vez que se usa un recurso nuevo);
+extenderlo aquí es la aplicación directa de esa decisión, no una nueva. Si aparece un
+tercer caso que no encaje en este patrón (p. ej. algo que asigne heap en *cada* llamada,
+no solo la primera vez que se ve un recurso), eso sí necesitaría pararse a preguntar de
+nuevo.
+
+---
+
+## ADR-0036 — Bug real en miniaudio 0.11.21: cargar un archivo inexistente crashea, se evita comprobando antes
+
+**Fecha:** 2026-09-07
+**Hito:** M6
+**Estado:** aceptada
+
+**Contexto.** `tests/test_audio.cpp` (bajo ASan) detectó un `heap-use-after-free` real
+dentro de `ma_resource_manager_data_buffer_node_acquire` (miniaudio.h:68596) al llamar a
+`ma_sound_init_from_file` sobre una ruta que no existe: el gestor de recursos de
+miniaudio libera un nodo y lo vuelve a leer en su propia ruta de manejo de error. No es
+un bug de este proyecto (confirmado con el stack trace completo de ASan, enteramente
+dentro de `miniaudio.h`), pero sí hay que evitarlo.
+
+**Decision.** `audio_load()` comprueba con `fopen`/`fclose` que el archivo existe *antes*
+de llamar a `ma_sound_init_from_file`, y devuelve `AudioLoadResult::NotFound`
+inmediatamente si no. Esto evita por completo la ruta de fallo de miniaudio donde vive el
+bug, en vez de intentar recuperarse después de que ya ocurrió.
+
+**Alternativas descartadas.** Envolver la llamada en algún mecanismo de recuperación
+después del hecho: no existe tal mecanismo fiable para un use-after-free ya disparado
+(el daño de memoria ya ocurrió antes de que `ma_sound_init_from_file` devuelva el código
+de error). Fijar una versión distinta de miniaudio: no investigado a fondo (podría no
+tener el bug), pero la comprobación previa es más simple, más barata, y de todas formas
+es una buena práctica independiente del bug (evita gastar un slot del pool en una carga
+que se sabe de antemano que va a fallar).
+
+**Consecuencias.** Si en un hito futuro se actualiza la versión de miniaudio, vale la
+pena probar si el bug sigue presente (podría eliminarse la comprobación extra si ya no
+hace falta) — pero quitar la comprobación no aporta nada mientras tanto, así que no hay
+prisa. Anotado también en "Pendientes observados".
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -1071,3 +1176,28 @@ desviarte.
   SDL desde aqui. Si algo en el cableado de `input.key_pressed[...]` especifico de M4
   estuviera mal (a diferencia de la logica que envuelve, que si esta probada), no se
   detectaria hasta una prueba manual real.
+- Miniaudio 0.11.21 tiene un bug real (use-after-free al cargar un archivo inexistente,
+  ADR-0036): revisar si sigue presente si se actualiza la version en un hito futuro; la
+  comprobacion previa con `fopen` que lo evita puede quedarse de todas formas.
+  Tambien no fue probado si el mismo problema aparece al cargar un archivo que existe
+  pero esta corrupto/no es audio valido — el `fopen` previo no lo detectaria, solo
+  ausencia del archivo.
+- `audio_stop`/`audio_play` identifican una voz por `voice_id = handle.index + 1` sin
+  comprobar la generacion del `Pool` (a diferencia de `pool_resolve`, que si la
+  comprueba): si un slot se libera y se reutiliza para otro sonido antes de que el
+  `voice_id` viejo se use, `audio_stop` podria actuar sobre el sonido equivocado.
+  Simplificacion deliberada de M6 (documentada en audio.h); revisar si algun hito futuro
+  necesita voces con vida mas larga que se solapen de verdad.
+- El polifonismo de un mismo `SoundHandle` esta limitado a una instancia sonando a la vez
+  (repetir `audio_play` sobre el mismo handle lo reinicia desde el principio en vez de
+  superponer una segunda copia, ver `audio_play` en audio.h). Si un guion futuro dispara
+  el mismo `@sfx` muy seguido (p. ej. pasos rapidos), se oira como si se cortara en vez de
+  superponerse. Revisar si esto molesta en la practica antes de construir un pool de voces
+  real.
+- No se verifico con un contador de asignaciones real que `heap_guard_suspend/resume` de
+  `audio_load()` (ADR-0035) efectivamente evite que el criterio de cero heap por frame
+  falle cuando un `@bgm`/`@sfx` se dispara por primera vez dentro de una partida
+  interactiva real (los guiones de demo que se ejecutan en la ventana interactiva de
+  `main.cpp` no disparan audio todavia, solo `demo_audio.vns` via `--autoplay-script`,
+  que no tiene bucle de frame). La correccion se apoya en la simetria de codigo con
+  ADR-0032 (ya probado), no en una medicion directa de este caso concreto.

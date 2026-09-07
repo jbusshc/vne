@@ -1,5 +1,6 @@
 #include "vm/vm.h"
 
+#include "audio/audio.h"
 #include "base/log.h"
 #include "script/lua_bindings.h"
 #include "vm/backlog.h"
@@ -103,6 +104,28 @@ void cmd_start(const Cmd& cmd, GameState* state, const CompiledScript& script) {
         case CmdKind::LuaCall:
             lua_run(script_string(script, cmd.lua_call.fn_id), state, &script);
             break;
+        case CmdKind::Sfx: {
+            SoundHandle h{};
+            if (audio_load(script_string(script, cmd.sfx.text_id), false, &h) ==
+                AudioLoadResult::Ok) {
+                audio_play(h, Bus::Sfx, 1.0f, false);
+            }
+            break;
+        }
+        case CmdKind::Bgm: {
+            SoundHandle h{};
+            if (audio_load_track(cmd.bgm.track_id, &h)) {
+                audio_crossfade_music(h, cmd.bgm.fade);
+                state->bgm_track_id = cmd.bgm.track_id;
+                state->bgm_position = 0.0f;
+            }
+            break;
+        }
+        case CmdKind::StopBgm:
+            audio_stop_music(cmd.stop_bgm.fade);
+            state->bgm_track_id = 0;
+            state->bgm_position = 0.0f;
+            break;
     }
 }
 
@@ -121,6 +144,9 @@ bool cmd_update(const Cmd& cmd, GameState* state, f32 dt) {
         case CmdKind::Call:
         case CmdKind::Return:
         case CmdKind::LuaCall:
+        case CmdKind::Sfx:
+        case CmdKind::Bgm:
+        case CmdKind::StopBgm:
             return true;
         case CmdKind::Say:
             // Instantaneo en M3: no hay todavia una UI real que espere un clic (M7).
@@ -188,6 +214,9 @@ void cmd_skip_to_end(const Cmd& cmd, GameState* state, const CompiledScript& scr
         case CmdKind::Call:
         case CmdKind::Return:
         case CmdKind::LuaCall:
+        case CmdKind::Sfx:
+        case CmdKind::Bgm:
+        case CmdKind::StopBgm:
             break;
         case CmdKind::Say:
             state->vm.waiting_for_input = 0;
