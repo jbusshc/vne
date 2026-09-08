@@ -17,12 +17,18 @@ UI (ratón, grabar/reproducir input, arte de UI real, visor de atlas). El siguie
 defecto es M11: M15 lo necesita, M12 se apoya en él y el 3D de §13.2 también lo da por
 supuesto.
 
-**Compilar en Linux y macOS no es un hito** (decisión del usuario, ADR-0050): vive en
-SPEC.md §13.1 como trabajo futuro junto con el backend Metal, la captura de miniatura en
-GL, `sokol-shdc` y UBSan, porque está bloqueado por no haber esas máquinas, no por falta de
-trabajo. No lo propongas como hito ni lo des por verificado: sigue diciendo explícitamente
-en cada cierre que Windows es lo único comprobado. §13.2 (3D) sigue fuera de alcance hasta
-que el usuario lo pida.
+**Portabilidad: se programa siempre, se verifica cuando haya máquinas.** Son dos cosas
+distintas y no hay que confundirlas. La portabilidad es la prioridad 2 de SPEC.md §1 y
+condiciona cada línea que escribes hoy: lo específico del SO va tras `platform/` (SDL3
+cubre también filesystem), lo específico de GPU tras `gfx.h`, y todo `#if` de plataforma
+lleva su rama no-Windows escrita aunque nadie la compile. Las reglas concretas están en
+SPEC.md §2, "Cómo se programa la portabilidad". Nunca escribas código solo-Windows con la
+excusa de que las demás plataformas son trabajo futuro.
+
+Lo único aplazado (SPEC.md §13.1, ADR-0050) es **compilar y verificar** en Linux y macOS,
+más escribir el backend Metal: falta el hardware, no el trabajo, así que no es un hito ni lo
+propongas como tal. Y sigue diciendo explícitamente en cada cierre que Windows es lo único
+comprobado. §13.2 (3D) sigue fuera de alcance hasta que el usuario lo pida.
 
 **Revisión posterior a M10** (a petición del usuario: completar documentación y arreglar
 lo que quedó suelto, sin entrar en §13). Documentación: `README.md` reescrito (estaba

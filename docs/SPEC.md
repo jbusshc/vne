@@ -77,6 +77,31 @@ existe porque el juego la necesita.
 
 Requisito mínimo de hardware: GPU compatible con OpenGL 3.3 o D3D11 nivel 10_0.
 
+### Cómo se programa la portabilidad
+
+La prioridad 2 de §1 ("desde el principio; web y móvil sin reescribir") es una restricción sobre
+cómo se escribe el código **ahora**, no una tarea futura. En la práctica significa:
+
+- Todo lo específico del sistema operativo vive detrás de `platform/`, que es la única capa que
+  habla con SDL3 para ventana, input, audio, **filesystem**, hilos y tiempo (§3). Ningún otro
+  módulo incluye `<windows.h>` ni `<dirent.h>`.
+- Todo lo específico de la GPU vive detrás de `gfx.h`. El resto del motor no sabe qué backend
+  hay debajo.
+- Un `#if` de plataforma lleva **siempre** escrita su rama no-Windows, aunque nadie la compile
+  todavía. Código que solo existe para Windows no se acepta con la excusa de que las otras
+  plataformas se verán más adelante.
+- Nada asume endianness, tamaño de `long`, separador de rutas ni orden de enumeración de
+  directorios. Los formatos en disco (`.vnc`, `.vnsave`, `.vnm`, `.vnl`, `.pak`) se leen y
+  escriben con tipos de tamaño fijo.
+
+Estado real: se ha cumplido. Solo tres archivos tienen un `#if` de plataforma
+(`gfx_backend_d3d11.cpp`, que es el backend; `audio/audio.cpp` y `editor/editor.cpp`, ambos con
+su rama POSIX escrita). La deuda conocida es que `audio/audio.cpp` enumera un directorio con la
+API del sistema en lugar de hacerlo a través de `platform/`, lo que M11 corrige al necesitar esa
+misma operación para el sistema de assets.
+
+Lo que **no** se puede hacer aquí es compilar y verificar fuera de Windows: ver §13.1.
+
 ---
 
 ## 3. Stack tecnológico (cerrado)
@@ -822,8 +847,10 @@ de esta especificación que ningún hito pedía explícitamente y por eso nunca 
 cuando el proyecto crezca, y criterios que se verificaron por la lógica interna en vez de
 end-to-end. Los hitos siguientes cierran esa deuda. Se pueden reordenar salvo por dos
 dependencias reales: **M15 necesita M11** (no hay arte de UI sin sistema de assets) y **M12 se
-apoya en M11** para las máscaras de transición. Compilar en Linux y macOS **no** es uno de estos
-hitos: está bloqueado por falta de hardware, no por falta de trabajo, así que vive en §13.1.
+apoya en M11** para las máscaras de transición. Compilar y verificar en Linux y macOS **no** es
+uno de estos hitos: está bloqueado por falta de hardware, no por falta de trabajo, así que vive
+en §13.1 — lo que no exime de escribir todo el código de estos hitos de forma portable, según
+las reglas de §2.
 
 ### M11 — Sistema de assets y empaquetado
 
@@ -915,15 +942,19 @@ esperado. El visor de atlas muestra la textura real, no un recuento de sprites.
 No implementar hasta que los hitos de §12 estén completos. Reservado aquí para que las
 decisiones previas no lo bloqueen.
 
-### 13.1 Portabilidad a Linux y macOS
+### 13.1 Verificación en Linux y macOS
 
-Windows es la única plataforma verificada (ADR-0013) y esto no es un hito: no hay máquinas
-Linux ni macOS en el entorno de desarrollo, así que el trabajo está bloqueado por hardware, no
-por esfuerzo. Un hito de §12 tiene que poder empezarse y cerrarse; este no, y por eso vive aquí.
+**La portabilidad no es trabajo futuro: es la prioridad 2 de §1 y se aplica a cada línea que se
+escribe hoy.** Lo único que está aplazado es *comprobarla*, porque no hay máquinas Linux ni
+macOS en el entorno de desarrollo. Esa distinción es la que decide si algo se puede hacer ahora
+o no, y no debe difuminarse: escribir código solo-Windows nunca está justificado por esta
+sección. Las reglas activas están en §2.
 
-Lo que hace falta cuando llegue el momento:
+Bloqueado por falta de hardware, no por esfuerzo — por eso no es un hito de §12, que exige
+poder empezarse y cerrarse:
 - Compilar y verificar el backend GL 3.3, escrito desde M1 y nunca compilado.
-- Escribir el backend Metal, que no existe (ADR-0009).
+- Escribir el backend Metal, que no existe (ADR-0009). Es lo único de esta lista que además es
+  trabajo de programación real y no solo verificación, y necesita una Mac para probarse.
 - `gfx_backend_capture_thumbnail` en GL, hoy implementado solo en D3D11 (ADR-0038).
 - Migrar los shaders a `sokol-shdc`: escribir MSL a mano para Metal es exactamente el coste que
   ADR-0010 aplazó y que la herramienta existe para evitar.
@@ -933,9 +964,6 @@ Consecuencia mientras tanto: el criterio de M0 "compila en Windows, Linux y macO
 de §15 no se pueden cumplir tal cual. Se leen acotados a las plataformas verificadas, y todo
 resumen de cierre de hito debe decir explícitamente que Linux y macOS no se comprobaron en vez
 de darlos por buenos.
-
-Lo que ya está preparado: el RHI aísla el backend tras `gfx.h`, así que el trabajo está
-contenido en `gfx/` y no se derrama al resto del motor.
 
 ### 13.2 3D
 

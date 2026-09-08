@@ -24,12 +24,12 @@ que M0–M10 dejó fuera: el sistema de assets de §7.4 y el `game.pak` de §11 
 `src/assets/` está vacío y hoy toda carga es síncrona—, los comandos `Move` y `Transition`,
 la validación de identificadores al compilar, `config.ini` y el soporte de ratón.
 
-Solo Windows está verificado. Linux y macOS no se han compilado nunca (no hay esas
-plataformas en el entorno de desarrollo): el backend GL está escrito pero sin compilar y
-el de Metal no existe. Portarlo es **trabajo futuro** (`docs/SPEC.md` §13.1), no un hito
-pendiente, precisamente porque lo bloquea la falta de máquinas y no la falta de trabajo.
-Ver "Pendientes observados" al final de `docs/DECISIONS.md` para la lista completa de
-limitaciones conocidas.
+Solo Windows está **verificado**. El código se escribe portable desde el principio —es la
+prioridad 2 de `docs/SPEC.md` §1, con reglas concretas en §2— pero Linux y macOS no se han
+compilado nunca porque no hay esas máquinas en el entorno de desarrollo: el backend GL está
+escrito y sin compilar, y el de Metal no existe. Lo aplazado es comprobarlo, no programarlo
+(`docs/SPEC.md` §13.1). Ver "Pendientes observados" al final de `docs/DECISIONS.md` para la
+lista completa de limitaciones conocidas.
 
 ## Compilar y ejecutar
 

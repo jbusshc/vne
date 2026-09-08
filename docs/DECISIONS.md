@@ -1564,11 +1564,25 @@ las cargas pasan por él", lo cual es falso: no hay ningún hilo en el proyecto.
 con criterios medibles al mismo estilo que M0–M10. Se agrupan por área afectada, no por orden de
 descubrimiento, de forma que cada hito siga terminando en un ejecutable que funciona.
 
-La portabilidad a Linux y macOS se propuso inicialmente como un sexto hito ("M16 — Portabilidad
-real") y **el usuario decidió que fuera trabajo futuro** (§13.1) en vez de un hito numerado: no
-hay máquinas Linux ni macOS en el entorno, así que estaría bloqueada por hardware y no por
-esfuerzo, y un hito de §12 tiene que poder empezarse y cerrarse. Se agrupa allí con el backend
-Metal, la captura de miniatura en GL, `sokol-shdc` y UBSan.
+La portabilidad se propuso inicialmente como un sexto hito ("M16 — Portabilidad real") y el
+usuario lo corrigió en dos pasos, porque la propuesta confundía dos cosas distintas. Primero:
+**compilar y verificar** en Linux y macOS no puede ser un hito, porque no hay esas máquinas en
+el entorno y un hito de §12 tiene que poder empezarse y cerrarse; eso pasa a §13.1 junto con el
+backend Metal, la captura de miniatura en GL, `sokol-shdc` y UBSan. Segundo, y más importante:
+al moverlo entero yo había degradado **la portabilidad como tal** a trabajo futuro, cuando la
+consigna del proyecto es la contraria — §1 la lista como prioridad 2 ("desde el principio; web y
+móvil sin reescribir"), es decir, una restricción sobre cómo se escribe cada línea hoy, no una
+funcionalidad pendiente. Para que esa distinción no se vuelva a perder, las reglas activas se
+escriben explícitamente en §2 ("Cómo se programa la portabilidad": lo específico del SO tras
+`platform/`, lo de GPU tras `gfx.h`, todo `#if` con su rama no-Windows escrita, nada que asuma
+endianness o separador de rutas) y §13.1 empieza declarando que no exime de nada.
+
+Auditoría hecha al escribir esa sección: la disciplina se había respetado. Solo tres archivos
+tienen un `#if` de plataforma (`gfx_backend_d3d11.cpp`, que es el backend por definición, más
+`audio/audio.cpp` y `editor/editor.cpp`, ambos con su rama POSIX ya escrita). La única deuda
+encontrada es que `audio/audio.cpp` enumera un directorio con la API del sistema en vez de
+hacerlo tras `platform/`, pese a que §3 asigna el filesystem a SDL3; queda asignada a M11, que
+necesita esa misma operación para el backend de directorio suelto.
 
 Se corrige además la fila falsa de §14 y se marcan como resueltas las dos decisiones de §14 que
 ya se tomaron (QOI en ADR-0008, catálogo horneado en ADR-0046), añadiendo una nueva que tampoco
@@ -1615,9 +1629,12 @@ pulsaciones reales a M15.
 
 Lo relacionado con Linux y macOS (compilar el backend GL, escribir Metal, la captura de
 miniatura en GL, `sokol-shdc` y UBSan) **no** es un hito: por decisión del usuario vive en
-SPEC.md §13.1 como trabajo futuro, porque está bloqueado por falta de máquinas y no por
-falta de trabajo. Lo que sigue aquí sin destino es lo que no es trabajo de programación (la
-traducción real de `ja.csv` necesita una persona) o lo que solo es una nota de contexto.
+SPEC.md §13.1, porque está bloqueado por falta de máquinas y no por falta de trabajo. Ojo a
+la distinción: lo aplazado es *verificar* la portabilidad, no *programarla* — escribir el
+código de forma portable es la prioridad 2 de §1 y aplica a todo lo que se escriba desde
+hoy, con las reglas concretas en §2. Lo que sigue aquí sin destino es lo que no es trabajo
+de programación (la traducción real de `ja.csv` necesita una persona) o lo que solo es una
+nota de contexto.
 
 - ~~Instalar el componente "C++ AddressSanitizer" del VS Installer~~ — resuelto: instalado
   el 2026-09-06 con permisos de administrador. Ver ADR-0007.
@@ -1812,6 +1829,12 @@ traducción real de `ja.csv` necesita una persona) o lo que solo es una nota de 
   la necesita (`MenuMode::update`, comentario "un unico caso especial"): si se anade un
   tercer idioma con un alfabeto distinto (p. ej. coreano), hay que ampliar esa logica a
   una tabla idioma->fuente en vez de un booleano.
+- `audio/audio.cpp` enumera `assets_src/ogg/` incluyendo `<windows.h>`/`<dirent.h>`
+  directamente, cuando SPEC.md #3 asigna el filesystem a SDL3 y #2 exige que lo especifico
+  del SO viva tras `platform/`. Las dos ramas estan escritas, asi que no rompe la
+  portabilidad, pero pone codigo de plataforma en un modulo que no deberia tenerlo.
+  Asignado a M11: el backend de directorio suelto y el watcher necesitan exactamente esa
+  misma operacion, asi que es el momento de consolidarla en `platform/` y que audio la use.
 - `@move` aparece en el ejemplo de sintaxis de SPEC.md #9.1 y en el skill
   `vne-script-dsl`, pero no existe: ni en `CmdKind` ni en el parser (escribirlo da
   "comando desconocido"). `Transition` tampoco tiene sintaxis asignada. Documentado como
