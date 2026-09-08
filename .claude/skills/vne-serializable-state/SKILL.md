@@ -32,28 +32,44 @@ struct VmState {
     u32 call_stack[k_max_call_depth];
     u8  call_depth;
     u8  cmd_phase;          // 0 = sin iniciar, 1 = en curso
+    u8  _pad0[2];           // explicito, ver ADR-0028
     f32 cmd_timer;
     u32 visible_glyphs;
     u8  waiting_for_input;
+    u8  _pad1[3];
 };
 
 struct GameState {
-    u32       version;
+    u32       version;      // 2 hoy
     VmState   vm;
     ActorSlot actors[k_max_actor_slots];
     u16       bg_id;
+    u8        _pad0[2];
     i32       vars[k_max_vars];
     u8        flags[k_max_flags / 8];
     u32       rng_state;
     u16       bgm_track_id;
+    u8        _pad1[2];
     f32       bgm_position;
     f32       bus_volume[4];
     char      player_name[32];
     u32       playtime_seconds;
+    // M9 (MapMode), anadidos al final: una v1 solo necesita rellenarlos con su valor
+    // por defecto en migrate_v1_to_v2, sin reordenar nada existente.
+    u16       map_id;
+    u8        _pad2[2];
+    f32       player_x;
+    f32       player_y;
 };
 
 static_assert(std::is_trivially_copyable_v<GameState>);
 ```
+
+Los campos `_pad` **no son decorativos**: bajo MSVC el relleno de alineación implícito no se
+preserva de forma fiable a través de copias y escrituras parciales, así que dos estados
+lógicamente iguales producían bytes distintos y el test obligatorio de M4 fallaba de forma
+intermitente. Convertir cada hueco en un campo real con valor por defecto lo arregló
+(ADR-0028). Al añadir un campo aquí, deja el hueco explícito tú, no el compilador.
 
 ## Prohibido dentro de GameState
 
@@ -93,13 +109,19 @@ De lo contrario el rollback produce resultados distintos y el jugador lo nota.
 ```
 Formato .vnsave
   0       4   magic 'VNSV'
-  4       4   version (u32)
+  4       4   version (u32), 2 hoy
   8       4   sizeof(GameState) (validacion)
   12      4   CRC32 del bloque de estado
   16      N   GameState (volcado crudo)
   16+N    4   tamano de la miniatura
-  20+N    M   miniatura PNG 384x216
+  20+N    M   miniatura QOI 384x216
+  20+N+M      Backlog (ver seccion Backlog)
 ```
+
+La miniatura es **QOI, no PNG** como decía SPEC.md §8.3: no hay codificador PNG en runtime y
+QOI ya estaba en el stack para las texturas horneadas, así que añadir uno solo para guardar
+una miniatura no se justificaba. Fue decisión del usuario (ADR-0037). La captura del
+framebuffer está implementada solo en el backend D3D11 (ADR-0038).
 
 Guardar es un `memcpy` más una captura del framebuffer. Cargar es la operación inversa más
 validación de magic, versión, tamaño y checksum. Si algo no cuadra, el archivo se rechaza con

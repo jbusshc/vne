@@ -44,8 +44,9 @@ Un asset que falla se sustituye por el placeholder magenta y el juego continúa.
 `std::vector` (con allocator del proyecto), `std::span`, `std::string_view`, `constexpr`,
 inicializadores designados, `[[nodiscard]]`, `static_assert` en abundancia.
 
-Un `virtual` está permitido en un solo sitio: la interfaz `Mode` de `src/modes/mode.h`, que
-se llama tres o cuatro veces por frame. Nada más.
+Un `virtual` está permitido en un solo sitio: la interfaz `Mode` de `src/game/mode.h`, que
+se llama tres o cuatro veces por frame. Nada más. (SPEC.md la sitúa en `modes/`, pero ese
+directorio quedó vacío y los modos viven en `src/game/`.)
 
 ## Nombres
 
@@ -83,7 +84,12 @@ void foo_shutdown();
 
 Sin `#include` de conveniencia. Cada archivo incluye exactamente lo que usa. Prohibido
 incluir headers de una capa superior desde una inferior (ver jerarquía en `docs/SPEC.md` §5):
-`gfx` no puede incluir nada de `vm`, `modes` ni `editor`.
+`gfx` no puede incluir nada de `vm`, `game` ni `editor`.
+
+Un caso concreto que ya estuvo a punto de romperse: **`text/` depende de `gfx/`, nunca al
+revés.** Cablear el ciclo de vida del caché de glifos dentro de `gfx_init`/`gfx_shutdown`
+parece natural y crearía una dependencia circular entre módulos; va en la capa de aplicación
+(`main.cpp`), que es la que puede ver ambos.
 
 ## Structs de datos
 

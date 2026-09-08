@@ -32,9 +32,13 @@ Los criterios de aceptación están en `docs/SPEC.md` §12 y son medibles, no op
 
 Un hito está cerrado cuando **todas** estas condiciones se cumplen:
 
-1. Compila limpio con `-Wall -Wextra -Werror` en las plataformas de prioridad 1 y 2
-   (Windows, Linux, macOS).
-2. Pasa bajo AddressSanitizer y UndefinedBehaviorSanitizer sin reportes.
+1. Compila limpio con `-Wall -Wextra -Werror`. En la práctica esto significa **Windows**, la
+   única plataforma disponible en este entorno: compilar en Linux y macOS está aplazado por
+   falta de máquinas (SPEC.md §13.1, ADR-0013). Eso **no** rebaja la exigencia de escribir el
+   código de forma portable, que es la prioridad 2 de SPEC.md §1 y se aplica siempre — ver las
+   reglas de §2.
+2. Pasa bajo AddressSanitizer sin reportes. UBSan no tiene equivalente en MSVC, así que aquí no
+   se puede verificar; dilo en vez de darlo por bueno.
 3. Cumple todos los criterios de aceptación del hito, **verificados de forma explícita**, no
    asumidos.
 4. Sus tests están en `tests/` y pasan.

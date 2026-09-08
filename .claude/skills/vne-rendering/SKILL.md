@@ -64,16 +64,27 @@ después toca cada archivo del proyecto. Esto es lo que mantiene abierta la puer
 
 ## Shaders
 
-GLSL fuente en `shaders/`, compilado offline por **sokol-shdc** a headers C. Nunca escribas
-HLSL o MSL a mano, y nunca compiles shaders en runtime.
+SPEC.md §11 dice "GLSL fuente en `shaders/`, compilado offline por **sokol-shdc** a headers C".
+**Eso no es lo que hace el proyecto hoy:** ADR-0010 decidió escribir los shaders a mano por
+backend (HLSL para D3D11, GLSL para el backend GL) en vez de arrastrar el binario de
+`sokol-shdc` al build, porque hay dos shaders y uno solo de ellos se compila de verdad. Están
+en `src/gfx/shaders.h`.
+
+Sigue siendo cierto lo importante: **nunca compiles shaders en runtime**. Y si el número de
+shaders crece, o cuando haya que escribir MSL para Metal, la decisión se revisa: escribir MSL a
+mano es justo el coste que `sokol-shdc` evita (ver SPEC.md §13.1).
 
 ## Texto
 
 El sistema de texto es la parte más subestimada del motor. Se hace bien desde M2 porque no se
 puede retrofitear.
 
+`GlyphQuad` lleva tres campos más que el struct ilustrativo de SPEC.md §7.2 (`atlas_page`,
+`color`, `is_ruby`): hacen falta para que el atlas multi-página, el marcado `{color=}` y el
+furigana funcionen de verdad. Ver el comentario en `src/text/layout.h`.
+
 ```cpp
-struct GlyphQuad { f32 x, y, w, h; f32 u0, v0, u1, v1; };
+struct GlyphQuad { f32 x, y, w, h; f32 u0, v0, u1, v1; u32 atlas_page, color; u8 is_ruby; };
 struct TextLayout {
     GlyphQuad* quads;
     u32        count;
@@ -105,9 +116,14 @@ común en motores de VN.
 
 ## Transiciones
 
-Se implementan como un shader de pantalla completa en la capa `Transition`, con una textura
-de máscara y un umbral animado. Cubre fade, wipe y disolución con la misma ruta de código. No
-escribas un sistema de transiciones por comando.
+**No implementadas todavía: las añade M12.** La capa `Transition` (7) existe en `gfx.h` pero
+nadie dibuja en ella, y `CmdKind` no tiene `Transition`. Cuando toque, se implementan como un
+shader de pantalla completa sobre esa capa, con una textura de máscara y un umbral animado, de
+forma que fade, wipe y disolución compartan la misma ruta de código. No escribas un sistema de
+transiciones por comando.
+
+Ojo: los `fade` que ya aceptan `@bg`, `@show` y `@hide` son interpolaciones de alfa por sprite,
+que es otra cosa y ya funciona. Lo que falta es la transición de pantalla completa.
 
 ## Placeholder
 

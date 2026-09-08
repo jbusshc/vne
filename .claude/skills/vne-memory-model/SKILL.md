@@ -121,9 +121,32 @@ offline, pero **no** dentro del frame. Para arrays dinámicos por frame, usa
 `arena_alloc_n<T>(&g_arena_frame, count)` con un tamaño calculado por adelantado, o un
 array de capacidad fija con `VN_ASSERT` sobre el límite.
 
+### Las tres excepciones documentadas
+
+La regla tiene tres excepciones acotadas, todas por código de terceros que asigna por su
+cuenta y que no se puede reescribir. Se marcan con `heap_guard_suspend()` / `heap_guard_resume()`
+alrededor de la llamada, nunca más ancho que eso:
+
+| Dónde | Por qué | ADR |
+|---|---|---|
+| Ejecución de un `LuaCall` | El intérprete de Lua asigna al evaluar. | ADR-0032 |
+| Primera carga de un sonido | miniaudio decodifica al abrir el archivo. | ADR-0035 |
+| Lanzar `vne_bake` desde el editor | `system()` asigna; solo en builds `Dev`. | M8 |
+
+La primera la decidió el usuario tras pararse a preguntar, porque era un conflicto real entre
+dos reglas del proyecto. **No amplíes esta lista por tu cuenta**: si encuentras un cuarto caso,
+párate y pregunta, igual que se hizo con el primero. Suspender el guard para tapar una
+asignación propia sería exactamente el abuso que la regla existe para impedir.
+
 ## Hilos
 
-Solo hay dos hilos: el principal y el de carga de assets. Cada uno tiene su propia arena de
-scratch; **las arenas no son thread-safe y no se comparten**. El hilo de IO comunica
-resultados por una cola con un mutex, y el hilo principal los integra en
-`assets_process_completed_loads()`.
+**Hoy el motor es de un solo hilo.** El hilo de carga de assets que describe SPEC.md §7.4 no
+existe todavía: `src/assets/` está vacío y toda carga es síncrona. Lo construye M11, así que
+hasta entonces no hay ninguna cola ni `assets_process_completed_loads()` al que llamar, por
+mucho que otras partes de la documentación lo den por hecho.
+
+Cuando exista, el diseño es: solo dos hilos, el principal y el de carga. Cada uno con su propia
+arena de scratch — **las arenas no son thread-safe y no se comparten**. El hilo de IO comunica
+resultados por una cola con un mutex y el principal los integra en
+`assets_process_completed_loads()`, que es el único punto donde un asset cargado entra en el
+mundo del juego.

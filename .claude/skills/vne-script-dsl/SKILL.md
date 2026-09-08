@@ -23,8 +23,7 @@ marta: Buenas noches. {w=0.4} No esperaba visita.
 "Una linea sin hablante."
 
 @wait 0.5
-@sfx puerta_cierra
-@move slot 1 to 0.7 0.5 in 0.4
+@sfx puerta_cierra.wav
 @hide slot 1 fade 0.3
 
 @set confianza = 0
@@ -55,33 +54,60 @@ comillas es diálogo sin hablante, los comandos empiezan por `@`.
 Marcado inline dentro del texto: `{b}`, `{color=#rrggbb}`, `{ruby=lectura}`, `{w=segundos}`,
 `{speed=n}`.
 
+**Lo que este ejemplo describe pero todavía no existe** (verificado contra
+`src/script/parser.cpp`; la referencia completa y al día para escribir guiones es
+`docs/SCRIPT_LANGUAGE.md`):
+
+- `@move` y `@transition` no están implementados: el parser responde "comando desconocido".
+  Los añade M12, y `@move` hará crecer `sizeof(Cmd)` de 16 a 20.
+- `{b}` se parsea pero no cambia el dibujado (no hay fuente negrita cargada), y `{w=}` /
+  `{speed=}` se reconocen y se descartan sin efecto. También los arregla M12.
+- `@sfx` necesita el nombre **con extensión** (se resuelve como `assets_src/ogg/<nombre>`),
+  mientras que `@bgm` va **sin extensión** porque resuelve por catálogo (ADR-0034). La
+  asimetría es deliberada: la pista de música tiene que sobrevivir a un guardado.
+- No hay sintaxis de flags: `GameState.flags` solo se toca desde Lua hasta que M13 añada
+  `@flag`.
+
 **Un identificador desconocido es error de compilación**, con archivo y línea. Nunca un
 fallo silencioso en runtime.
 
 ## Comandos: tagged union
 
+Estado real hoy (`src/vm/cmd.h`). `Move` y `Transition` **no** están en el enum todavía: los
+`switch` sin `default` del intérprete obligan a cubrir exactamente lo que existe, así que
+declararlos antes de implementarlos rompería el build.
+
 ```cpp
 enum class CmdKind : u8 {
-    Nop, Say, Show, Hide, Move, Bg, Wait, Sfx, Bgm, StopBgm,
-    SetVar, AddVar, Jump, JumpIf, Choice, ChoiceEnd, Call, Return,
-    LuaCall, Transition, Label, End,
+    Nop, Say, Show, Hide, Bg, Wait, Jump, Label, End,
+    SetVar, AddVar, JumpIf, Choice, ChoiceEnd, Call, Return, LuaCall,
+    Sfx, Bgm, StopBgm,
 };
 
 struct Cmd {
     CmdKind kind;
     u8      _pad[3];
     union {
-        struct { u16 speaker_id; u32 text_id; }                   say;
+        // key_hash: fnv1a del texto original, clave de localización (M10, ADR-0047).
+        struct { u16 speaker_id; u32 text_id; u32 key_hash; }     say;
         struct { u16 actor_id; u16 pose_id; u8 slot; f32 fade; }  show;
         // ...
     };
 };
 
-static_assert(sizeof(Cmd) == 20);
+static_assert(sizeof(Cmd) == 16);
 static_assert(std::is_trivially_copyable_v<Cmd>);
 ```
 
 Sin vtables. Sin asignación. Tamaño fijo. El guion completo es un array contiguo.
+
+El `sizeof` es **16**, no los 20 de SPEC.md §8.1: ese valor lo fijaba `Move` con sus tres
+`f32`, y `Move` no existe todavía. Cuando M12 lo añada, el `static_assert` pasará a 20 y habrá
+que subir la versión del `.vnc` con su migración.
+
+Todo campo que se serialice lleva su relleno explícito (`_pad`): el relleno implícito del
+compilador no se preserva de forma fiable a través de copias bajo MSVC, lo que rompía el
+`memcmp` del test obligatorio de M4 (ADR-0028). No lo omitas al añadir un `struct` a la unión.
 
 ## Cómo añadir un comando nuevo
 
@@ -111,14 +137,21 @@ vez de un parche que acelera el `dt`. Impleméntala a la vez que las otras dos, 
 
 ```
 magic 'VNCS' (4)
-version (4)
+version (4)             v3 hoy (v2 anadio ChoiceOption[], v3 anadio key_hash)
 cmd_count (4)
 string_pool_size (4)
 label_count (4)
+option_count (4)        ADR-0030
 Cmd[cmd_count]
-string_pool          bytes UTF-8 terminados en \0, indexados por offset
-Label[label_count]   { u32 name_hash; u32 pc; }
+string_pool             bytes UTF-8 terminados en \0, indexados por offset
+Label[label_count]      { u32 name_hash; u32 pc; }
+ChoiceOption[option_count]
 ```
+
+Las opciones de un `@choice` viven en su propia tabla, no en la unión de `Cmd`, porque su
+cardinalidad es variable; `Cmd::choice` guarda `first_option` y `option_count` como índices
+(ADR-0030). Las etiquetas (`Label[]`) existen desde M3 pero solo se usan de verdad desde M5,
+para resolver `vn.jump()` en runtime (ADR-0031).
 
 El runtime lo carga con un solo `read` y apunta punteros a las regiones. **Cero parsing en
 release.** Si te encuentras escribiendo un parser que corre en el juego, algo va mal.
