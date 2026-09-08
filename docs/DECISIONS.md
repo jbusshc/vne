@@ -1541,10 +1541,83 @@ que debería seguir cualquier herramienta offline futura con lógica no trivial.
 
 ---
 
+## ADR-0050 — La hoja de ruta se amplía con M11–M15, y la portabilidad pasa a trabajo futuro
+
+**Fecha:** 2026-09-07
+**Hito:** posterior a M10
+**Estado:** aceptada
+
+**Contexto.** Con M10 cerrado, los diez hitos numerados de SPEC.md §12 estaban completos, pero
+el motor no cumplía la especificación entera. La revisión posterior a M10 destapó tres clases de
+deuda distintas: (a) secciones de la especificación que ningún hito pedía explícitamente y que
+por eso nunca se implementaron — §7.4 completo (`src/assets/` está literalmente vacío) y el
+`game.pak` de §11; (b) simplificaciones aceptadas en su momento con un ADR que se vuelven un
+problema real al crecer (ADR-0022 no valida actores, ADR-0029/0034/0047 aceptan colisiones de
+hash sin detectarlas, ADR-0040 deja la UI sin ratón); y (c) criterios verificados por la lógica
+interna en vez de end-to-end, arrastrados desde M4 por no poder inyectar pulsaciones de teclado
+en este entorno. Además, §14 afirmaba como mitigación que "el hilo de IO existe desde M1 y todas
+las cargas pasan por él", lo cual es falso: no hay ningún hilo en el proyecto.
+
+**Decisión.** Se añaden cinco hitos a §12 — M11 (sistema de assets y empaquetado), M12
+(presentación y jugabilidad completas), M13 (integridad de datos y herramientas offline), M14
+(configuración y localización completas) y M15 (interacción y testabilidad de la UI) — cada uno
+con criterios medibles al mismo estilo que M0–M10. Se agrupan por área afectada, no por orden de
+descubrimiento, de forma que cada hito siga terminando en un ejecutable que funciona.
+
+La portabilidad a Linux y macOS se propuso inicialmente como un sexto hito ("M16 — Portabilidad
+real") y **el usuario decidió que fuera trabajo futuro** (§13.1) en vez de un hito numerado: no
+hay máquinas Linux ni macOS en el entorno, así que estaría bloqueada por hardware y no por
+esfuerzo, y un hito de §12 tiene que poder empezarse y cerrarse. Se agrupa allí con el backend
+Metal, la captura de miniatura en GL, `sokol-shdc` y UBSan.
+
+Se corrige además la fila falsa de §14 y se marcan como resueltas las dos decisiones de §14 que
+ya se tomaron (QOI en ADR-0008, catálogo horneado en ADR-0046), añadiendo una nueva que tampoco
+corresponde al agente: si `game.pak` admite archivos sueltos que lo sobrescriban (modding y
+parches de traducción).
+
+**Alternativas descartadas.** Dejar la deuda solo en "Pendientes observados": esa lista ya tiene
+más de cuarenta entradas de granularidad muy desigual, sin criterios de aceptación ni orden, y
+había demostrado no ser accionable — varias entradas resueltas seguían marcadas como abiertas
+hitos después. Abrir un hito por cada pendiente: habría dado una veintena de hitos que no
+terminan en un ejecutable que funcione, rompiendo la regla que estructura §12. Ampliar el alcance
+de los hitos existentes reescribiendo M0–M10: la especificación describe lo que se construyó y
+sirve de registro histórico; reescribirla borraría la traza de qué se verificó y cuándo.
+
+**Consecuencias.** El proyecto deja de estar "terminado" tras M10 y pasa a tener cinco hitos por
+delante antes de que §13 sea siquiera considerable — la frase "no implementar hasta M10
+completo" de §13 se ajusta en consecuencia. Dos dependencias reales condicionan el orden: M15
+necesita M11 (no hay arte de UI sin sistema de assets) y M12 se apoya en M11 para las máscaras
+de transición; el resto se puede reordenar. M11 es con diferencia el más caro, porque toca cómo
+carga sus archivos cada módulo del motor, y además desbloquea el 3D de §13.2, cuya nota de "lo
+que ya está preparado" daba por hecho un sistema de assets que no existe.
+
+Al sacar la portabilidad de §12, el criterio de M0 "compila en Windows, Linux y macOS con
+`-Werror`" y el punto 1 de §15 quedan permanentemente sin cumplir mientras no haya hardware. Se
+leen acotados a las plataformas verificadas, y queda escrito en §13.1 que todo resumen de cierre
+de hito debe seguir diciendo explícitamente que Linux y macOS no se comprobaron, en vez de
+omitirlo y dar la impresión de que sí.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
 desviarte.
+
+La mayoría de las entradas abiertas de esta lista quedaron asignadas a un hito concreto de
+SPEC.md §12 al ampliar la hoja de ruta con M11–M15 (ADR-0050): el sistema de assets y el
+`.pak` a M11; `Move`/`Transition`, `{b}`/`{w=}`/`{speed=}`, la polifonía de audio, el modo
+auto proporcional y la colisión AABB a M12; la validación de actores, las colisiones de
+hash, `vne_bake font`, el subconjunto de glifos, el escáner de TMX, la migración de `.vnm`,
+el catálogo de mapas y `@flag` a M13; `config.ini`, el backlog relocalizable y la tabla
+idioma→fuente a M14; y el ratón, el arte de UI, el visor de atlas y todo lo verificado sin
+pulsaciones reales a M15.
+
+Lo relacionado con Linux y macOS (compilar el backend GL, escribir Metal, la captura de
+miniatura en GL, `sokol-shdc` y UBSan) **no** es un hito: por decisión del usuario vive en
+SPEC.md §13.1 como trabajo futuro, porque está bloqueado por falta de máquinas y no por
+falta de trabajo. Lo que sigue aquí sin destino es lo que no es trabajo de programación (la
+traducción real de `ja.csv` necesita una persona) o lo que solo es una nota de contexto.
 
 - ~~Instalar el componente "C++ AddressSanitizer" del VS Installer~~ — resuelto: instalado
   el 2026-09-06 con permisos de administrador. Ver ADR-0007.

@@ -15,14 +15,21 @@ portabilidad y una ruta abierta a 3D simple en el futuro.
 
 ## Estado
 
-Los diez hitos numerados de `docs/SPEC.md` §12 están implementados y cerrados (M0–M10):
-esqueleto, renderizado 2D, texto, VM y DSL, guardado/rollback, ramificación, audio, UI de
-novela visual, editor, MapMode y localización.
+M0–M10 están implementados y cerrados: esqueleto, renderizado 2D, texto, VM y DSL,
+guardado/rollback, ramificación, audio, UI de novela visual, editor, MapMode y
+localización. El motor se juega de principio a fin.
+
+Quedan cinco hitos por delante (M11–M15, ver `docs/SPEC.md` §12 y ADR-0050), que cierran lo
+que M0–M10 dejó fuera: el sistema de assets de §7.4 y el `game.pak` de §11 —
+`src/assets/` está vacío y hoy toda carga es síncrona—, los comandos `Move` y `Transition`,
+la validación de identificadores al compilar, `config.ini` y el soporte de ratón.
 
 Solo Windows está verificado. Linux y macOS no se han compilado nunca (no hay esas
 plataformas en el entorno de desarrollo): el backend GL está escrito pero sin compilar y
-el de Metal no existe. Ver "Pendientes observados" al final de `docs/DECISIONS.md` para la
-lista completa de limitaciones conocidas.
+el de Metal no existe. Portarlo es **trabajo futuro** (`docs/SPEC.md` §13.1), no un hito
+pendiente, precisamente porque lo bloquea la falta de máquinas y no la falta de trabajo.
+Ver "Pendientes observados" al final de `docs/DECISIONS.md` para la lista completa de
+limitaciones conocidas.
 
 ## Compilar y ejecutar
 

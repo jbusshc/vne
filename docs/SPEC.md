@@ -816,10 +816,128 @@ catálogo.
 
 ---
 
-## 13. Trabajo futuro: 3D
+M0–M10 dejaron el motor funcionando de principio a fin, pero con tres clases de deuda: partes
+de esta especificación que ningún hito pedía explícitamente y por eso nunca se implementaron
+(§7.4 entero, el `.pak` de §11), simplificaciones aceptadas con un ADR que hay que revertir
+cuando el proyecto crezca, y criterios que se verificaron por la lógica interna en vez de
+end-to-end. Los hitos siguientes cierran esa deuda. Se pueden reordenar salvo por dos
+dependencias reales: **M15 necesita M11** (no hay arte de UI sin sistema de assets) y **M12 se
+apoya en M11** para las máscaras de transición. Compilar en Linux y macOS **no** es uno de estos
+hitos: está bloqueado por falta de hardware, no por falta de trabajo, así que vive en §13.1.
 
-No implementar hasta M10 completo. Reservado aquí para que las decisiones previas no lo
-bloqueen.
+### M11 — Sistema de assets y empaquetado
+
+`src/assets/` está vacío: §7.4 nunca se implementó y hoy cada módulo abre sus archivos por su
+cuenta con rutas relativas al directorio de build. Implementar `assets_init`/`assets_texture`/
+`assets_font`/`assets_sound`/`assets_process_completed_loads`, el hilo de IO con cola, los dos
+backends de §7.4 (directorio suelto para desarrollo y `game.pak` de §11 para release),
+`atlas.bin` con nombres lógicos y sub-páginas (cierra ADR-0025) y el watcher genérico de mtimes
+por tipo de asset, que sustituye al de un solo archivo fijo de M8.
+
+**Criterios:** `assets_texture` de un asset aún no cargado devuelve en menos de 0.1 ms un handle
+válido que dibuja el placeholder magenta, y la textura real aparece más tarde sin que ningún
+frame supere 16.6 ms. Una build `Ship` arranca y se juega completa desde `game.pak` con el
+directorio `assets_src/` renombrado. Un nombre lógico inexistente dibuja el placeholder y no
+crashea nunca. Tocar un `.png`, un `.ttf` y un `.vns` en `Dev` recarga los tres en caliente.
+
+### M12 — Presentación y jugabilidad completas
+
+`Move` y `Transition` son los dos únicos valores de `CmdKind` de §8.1 que nunca se
+implementaron; `Move` lleva `sizeof(Cmd)` de 16 a 20 bytes, lo que obliga a subir el `.vnc` a v4
+con su migración. Las transiciones se implementan una sola vez como shader de pantalla completa
+sobre la capa 7 con textura de máscara y umbral animado — la misma ruta de código para fade,
+wipe y disolución, nunca un sistema por comando. `{w=n}` y `{speed=n}` pasan de reconocerse y
+descartarse a tener efecto real sobre la máquina de escribir, y `{b}` a dibujarse con una
+`FontHandle` de negrita de verdad. Modo auto proporcional a la longitud de la línea en vez del
+temporizador fijo de 1.2 s. Polifonía real de efectos: hoy repetir `audio_play` sobre el mismo
+handle reinicia el sonido en vez de superponer una segunda voz. Colisión por AABB en MapMode, no
+por punto.
+
+**Criterios:** un guion de demo ejecuta fade, wipe y disolución con la misma ruta de código sin
+que `draw_calls` suba más de 1. `sizeof(Cmd) == 20` y una partida guardada con un `.vnc` v3 se
+migra y carga. `{w=0.5}` retrasa el texto 0.5 s ±50 ms medidos. El modo skip sigue por debajo de
+1 s por cada 1000 comandos. El mismo `@sfx` disparado 5 veces en 100 ms produce 5 voces
+simultáneas.
+
+### M13 — Integridad de datos y herramientas offline
+
+Registro de assets real que permita validar actor, pose y fondo en tiempo de compilación —
+cierra ADR-0022, que desde M3 deja pasar cualquier nombre mal escrito porque solo se validan
+etiquetas. Detección de colisiones de hash al hornear para variables, flags, pistas de música y
+claves de catálogo: ADR-0029, ADR-0034 y ADR-0047 aceptaron ese riesgo sin ninguna detección, y
+una colisión hoy se manifestaría como un bug de lógica imposible de rastrear. `vne_bake font` de
+§11, que no existe (las fuentes se rasterizan enteras en runtime). Subconjunto de glifos, para
+dejar de arrastrar los 9.5 MB de `NotoSansJP.ttf` en el repositorio. Escáner TMX: validar
+`width`/`height` del `<map>` contra las celdas reales del CSV, y rechazar con un mensaje que
+nombre la causa lo que no entiende (compresión zlib, varios tilesets) en vez de producir un
+`.vnm` silenciosamente incorrecto. Migración de versión de `.vnm`, que tiene `k_vnm_version`
+pero ninguna función de migración. Catálogo de mapas por `map_id`, hoy fijo a mano en
+`main.cpp`. `@flag` en el DSL, para no tener que bajar a Lua solo para leer una flag. Mensaje de
+error útil ante indentación irregular en vez del genérico "inesperado aquí".
+
+**Criterios:** `@show` con un actor que no está en el registro falla la compilación con archivo y
+línea, igual que ya hace una etiqueta desconocida. Dos nombres de variable que colisionan en el
+mismo `var_id` producen un error al hornear. Un TMX con capas comprimidas se rechaza nombrando
+la compresión como causa. El repositorio deja de contener una fuente de 9.5 MB.
+
+### M14 — Configuración y localización completas
+
+`config.ini` no existe, pese a que el modelo de estado exige que las preferencias del jugador
+vivan fuera de `GameState`: idioma, pantalla completa y volúmenes de bus deben persistir entre
+sesiones. El backlog no se relocaliza porque `BacklogEntry` guarda `text_id` y no `key_hash`;
+añadirlo sube `.vnsave` de v2 a v3, con la migración escrita en el mismo commit. Tabla
+idioma→fuente en lugar del booleano actual, que asume que cualquier idioma que no sea español es
+japonés.
+
+**Criterios:** cambiar el idioma, cerrar el proceso y volver a abrirlo mantiene el idioma
+elegido. Las entradas del backlog cambian de idioma junto con el diálogo en curso. Las tres
+versiones de guardado (v1, v2, v3) cargan correctamente desde `tests/saves/` en un test.
+
+### M15 — Interacción y testabilidad de la UI
+
+Soporte de ratón en la UI de novela visual: ADR-0040 lo dejó fuera y M8 lo añadió solo para el
+editor. Grabación y reproducción de input (`--record-input` / `--replay-input`), que cierra de
+una vez la limitación arrastrada desde M4 — F5/F9, el rollback, `SaveLoadMode`, `BacklogMode`,
+`MenuMode`, el movimiento con WASD y el cambio de idioma se han verificado siempre por su lógica
+interna, nunca pulsando teclas de verdad. Arte de UI real en lugar de los rectángulos sólidos de
+`gfx_white_texture()`. Visor de atlas visual en el editor, que es un criterio de M8 que quedó
+sin cumplir. Elegir desde el editor qué guion vigilar, en vez del `demo.vns` fijo.
+
+**Criterios:** una partida completa se juega de principio a fin solo con el ratón. Una sesión
+grabada que abre el menú, baja un volumen, guarda, carga, hace rollback y cambia de idioma se
+reproduce dentro de la suite de tests y termina con un `GameState` byte a byte igual al
+esperado. El visor de atlas muestra la textura real, no un recuento de sprites.
+
+---
+
+## 13. Trabajo futuro
+
+No implementar hasta que los hitos de §12 estén completos. Reservado aquí para que las
+decisiones previas no lo bloqueen.
+
+### 13.1 Portabilidad a Linux y macOS
+
+Windows es la única plataforma verificada (ADR-0013) y esto no es un hito: no hay máquinas
+Linux ni macOS en el entorno de desarrollo, así que el trabajo está bloqueado por hardware, no
+por esfuerzo. Un hito de §12 tiene que poder empezarse y cerrarse; este no, y por eso vive aquí.
+
+Lo que hace falta cuando llegue el momento:
+- Compilar y verificar el backend GL 3.3, escrito desde M1 y nunca compilado.
+- Escribir el backend Metal, que no existe (ADR-0009).
+- `gfx_backend_capture_thumbnail` en GL, hoy implementado solo en D3D11 (ADR-0038).
+- Migrar los shaders a `sokol-shdc`: escribir MSL a mano para Metal es exactamente el coste que
+  ADR-0010 aplazó y que la herramienta existe para evitar.
+- Verificar con UBSan, que MSVC no tiene.
+
+Consecuencia mientras tanto: el criterio de M0 "compila en Windows, Linux y macOS" y el punto 1
+de §15 no se pueden cumplir tal cual. Se leen acotados a las plataformas verificadas, y todo
+resumen de cierre de hito debe decir explícitamente que Linux y macOS no se comprobaron en vez
+de darlos por buenos.
+
+Lo que ya está preparado: el RHI aísla el backend tras `gfx.h`, así que el trabajo está
+contenido en `gfx/` y no se derrama al resto del motor.
+
+### 13.2 3D
 
 El objetivo estético es PlayStation 2: baja resolución de textura, filtrado point, iluminación
 por vértice, sin sombras dinámicas. Técnicamente es **más simple** que el 2D moderno.
@@ -830,8 +948,9 @@ Lo que hace falta cuando llegue el momento:
 - Una cámara con matriz de proyección perspectiva.
 - Ordenación por profundidad con depth buffer para geometría opaca.
 
-Lo que ya está preparado: la matemática es `vec3`/`mat4` desde M0, el RHI abstrae el backend,
-y el sistema de assets ya maneja handles genéricos.
+Lo que ya está preparado: la matemática es `vec3`/`mat4` desde M0 y el RHI abstrae el backend.
+El sistema de assets con handles genéricos que esto da por supuesto **no existe todavía**: lo
+construye M11 (§7.4 nunca se implementó), así que 3D depende de ese hito además de los demás.
 
 ---
 
@@ -843,14 +962,19 @@ y el sistema de assets ya maneja handles genéricos.
 | Furigana y CJK retrofiteados | Se diseñan en M2, no después. Es el punto de no retorno del sistema de texto. |
 | `GameState` de capacidad fija se queda corto | Las constantes están en un solo header. Ampliarlas es un cambio de versión de guardado, no un rediseño. |
 | sokol_gfx sin soporte de consolas | Si algún día importa, el RHI está aislado tras `gfx.h` y se puede portar. |
-| Cargas síncronas causando tirones | El hilo de IO existe desde M1 y todas las cargas pasan por él. |
+| Cargas síncronas causando tirones | **Riesgo materializado, no mitigado.** Esta fila afirmaba que "el hilo de IO existe desde M1 y todas las cargas pasan por él": es falso, `src/assets/` está vacío y no hay ningún hilo de IO en el proyecto. Hoy toda carga es síncrona. Lo corrige M11. |
 
 **Decisiones que aún no se han tomado y que el agente NO debe tomar solo:**
-1. Formato final de compresión de texturas (QOI vs. BCn/ASTC). Decidir en M1.
-2. Si el catálogo de localización se empaqueta o queda suelto para permitir parches de
-   traducción de la comunidad. Decidir en M10.
+1. ~~Formato final de compresión de texturas (QOI vs. BCn/ASTC). Decidir en M1.~~ Decidido en
+   M1: QOI (ADR-0008). Reconsiderar solo si el tamaño de los assets llega a importar.
+2. ~~Si el catálogo de localización se empaqueta o queda suelto para permitir parches de
+   traducción de la comunidad. Decidir en M10.~~ Decidido por el usuario en M10: horneado a
+   binario (ADR-0046).
 3. Estrategia de firmado o verificación de archivos de guardado. Decidir cuando exista un
    riesgo real.
+4. Si `game.pak` (§11, M11) debe permitir cargar archivos sueltos que lo sobrescriban, que es
+   lo que haría posible el modding y los parches de traducción de la comunidad. Tiene las
+   mismas implicaciones que la decisión 2 y por eso tampoco es del agente. Decidir en M11.
 
 ---
 

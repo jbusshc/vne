@@ -5,9 +5,24 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno. Los diez hitos numerados de SPEC.md §12 están cerrados; lo
-único que queda en la especificación es el trabajo futuro de §13 (3D), fuera de alcance
-hasta que el usuario lo pida.
+**Hito activo:** ninguno. M0–M10 están cerrados. La hoja de ruta se amplió con **M11–M15**
+(ADR-0050) tras comprobar que cerrar en M10 dejaba fuera partes enteras de la
+especificación: M11 sistema de assets y empaquetado (§7.4 nunca se implementó, `src/assets/`
+está vacío, y el `game.pak` de §11 tampoco existe), M12 presentación y jugabilidad
+completas (`Move`/`Transition`, `{w=}`/`{speed=}`/`{b}` con efecto real, polifonía, AABB),
+M13 integridad de datos y herramientas offline (validar actores, detectar colisiones de
+hash, `vne_bake font`, TMX robusto), M14 configuración y localización completas
+(`config.ini`, backlog relocalizable, `.vnsave` v3) y M15 interacción y testabilidad de la
+UI (ratón, grabar/reproducir input, arte de UI real, visor de atlas). El siguiente por
+defecto es M11: M15 lo necesita, M12 se apoya en él y el 3D de §13.2 también lo da por
+supuesto.
+
+**Compilar en Linux y macOS no es un hito** (decisión del usuario, ADR-0050): vive en
+SPEC.md §13.1 como trabajo futuro junto con el backend Metal, la captura de miniatura en
+GL, `sokol-shdc` y UBSan, porque está bloqueado por no haber esas máquinas, no por falta de
+trabajo. No lo propongas como hito ni lo des por verificado: sigue diciendo explícitamente
+en cada cierre que Windows es lo único comprobado. §13.2 (3D) sigue fuera de alcance hasta
+que el usuario lo pida.
 
 **Revisión posterior a M10** (a petición del usuario: completar documentación y arreglar
 lo que quedó suelto, sin entrar en §13). Documentación: `README.md` reescrito (estaba
