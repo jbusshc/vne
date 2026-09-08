@@ -292,15 +292,22 @@ Consúltalos antes de tocar el área correspondiente. Están en `.claude/skills/
 ## Estructura
 
 ```
-docs/SPEC.md         especificación completa (fuente de verdad)
-docs/DECISIONS.md    registro de decisiones, se actualiza en cada hito
-src/                 código del motor y del juego
-tools/bake/          herramientas offline de horneado de assets
-shaders/             GLSL fuente, compilado por sokol-shdc
-assets_src/          assets en formato de autoría
-assets_baked/        generado, en .gitignore
-tests/               tests con doctest
+docs/SPEC.md            especificación completa (fuente de verdad)
+docs/DECISIONS.md       registro de decisiones, se actualiza en cada hito
+docs/SCRIPT_LANGUAGE.md referencia del DSL, para quien escribe guiones
+src/                    código del motor y del juego (los modos viven en src/game/)
+tools/bake/             herramientas offline de horneado de assets
+assets_src/             assets en formato de autoría
+assets_baked/           generado, en .gitignore
+tests/                  tests con doctest
+.claude/skills/         guías por área, léelas antes de tocar la suya
 ```
+
+Dos directorios existen pero están **vacíos**, y conviene saberlo antes de buscar algo
+dentro: `shaders/` (SPEC.md §11 los quería en GLSL compilados por `sokol-shdc`, pero
+ADR-0010 decidió escribirlos a mano por backend y viven en `src/gfx/shaders.h`) y
+`src/assets/` (SPEC.md §7.4 nunca se implementó; lo construye M11). `src/modes/` tampoco
+tiene nada: los modos acabaron en `src/game/`.
 
 ## Comunicación
 

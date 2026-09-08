@@ -20,7 +20,9 @@ sugerencias. Antes de escribir código, lee las secciones 1 a 8 completas.
    improvises un rediseño.
 3. **Trabaja hito a hito** (sección 12). No empieces el hito N+1 hasta que el hito N cumpla
    todos sus criterios de aceptación.
-4. **Todo hito debe compilar limpio** con `-Wall -Wextra -Werror` en GCC, Clang y MSVC.
+4. **Todo hito debe compilar limpio** con `-Wall -Wextra -Werror`. En la práctica eso es MSVC:
+   no hay máquinas Linux ni macOS en el entorno, así que compilar con GCC y Clang está
+   aplazado (§13.1). Escribir el código de forma portable **no** lo está: ver §2.
 5. **Registra cada decisión no trivial** en `docs/DECISIONS.md` con fecha, contexto y
    alternativas descartadas.
 6. Si algo de este documento es ambiguo, elige la opción **más simple** y anótalo en
@@ -110,7 +112,7 @@ Lo que **no** se puede hacer aquí es compilar y verificar fuera de Windows: ver
 |---|---|---|
 | Plataforma | **SDL3** | Ventana, input, gamepad, dispositivo de audio, filesystem, hilos, tiempo |
 | RHI gráfico | **sokol_gfx** | Abstracción de GL / GLES3 / D3D11 / Metal / WebGL2 |
-| Shaders | **sokol-shdc** | Compilación offline de GLSL al backend de destino |
+| Shaders | ~~**sokol-shdc**~~ | Previsto para compilar GLSL offline, **no se usa**: ADR-0010 los escribe a mano por backend (`src/gfx/shaders.h`). Reconsiderar al escribir MSL para Metal (§13.1). |
 | Editor / herramientas | **Dear ImGui** (rama docking) | Toda la UI de desarrollo |
 | Rasterizado de fuentes | **FreeType** | Glifos a bitmap |
 | Shaping de texto | **HarfBuzz** | Kerning, ligaduras, escrituras complejas |
@@ -200,6 +202,11 @@ Las capas superiores conocen a las inferiores. Nunca al revés. Esta regla no se
 
 `gfx` no sabe qué es un personaje. `vm` no sabe qué es una textura: solo maneja handles.
 
+La regla de capas se ha respetado, con dos precisiones aprendidas sobre la marcha: la pila de
+estados vive en `src/game/`, no en `modes/` (que quedó vacío), y dentro de la fila de servicios
+**`text/` depende de `gfx/` y nunca al revés** — cablear el caché de glifos desde `gfx_init`
+parece natural y crearía una dependencia circular, así que va en la capa de aplicación.
+
 ### Estructura de carpetas
 
 ```
@@ -229,6 +236,17 @@ vne/
   tests/
 ```
 
+Este árbol es el plan original. Dónde difiere hoy la realidad, para que nadie busque en vano:
+
+| En el plan | En el repositorio |
+|---|---|
+| `modes/` | Vacío. Los modos y `mode.h` están en `src/game/`, junto a `map_format.h`. |
+| `assets/` | Vacío. §7.4 no se implementó; lo construye M11. |
+| `shaders/sprite.glsl` | Vacío. Los shaders se escriben a mano por backend en `src/gfx/shaders.h` (ADR-0010). |
+| `tools/bake/` con cinco `.cpp` | Solo `main.cpp`. El horneado de mapas vive en `src/script/map_bake.cpp` para que los tests lo alcancen (ADR-0049), y `font_bake` no existe (M13). |
+| `CPM.cmake` en la raíz | En `cmake/CPM.cmake`. |
+| `assets_src/` sin `locale/` | Existe `assets_src/locale/` desde M10. |
+
 ### Objetivos de CMake
 
 - `vne_base` — biblioteca estática con `base/`, `platform/`, `gfx/`, `text/`, `audio/`,
@@ -236,6 +254,12 @@ vne/
 - `vne_game` — ejecutable, enlaza `vne_base` + `modes/` + `editor/` (condicional).
 - `vne_bake` — ejecutable de herramientas offline.
 - `vne_tests` — ejecutable de tests con doctest.
+
+Falta en esa lista `vne_script_tools`, una biblioteca estática con el lexer, el parser, el
+compilador del DSL y el horneado de mapas. Existe para que ese código **nunca** entre en
+`vne_game` (SPEC §9.3, cero parsing en release) y a la vez sea alcanzable por los tests; `vne_bake`
+y `vne_tests` enlazan contra ella. En la práctica `vne_game` enlaza `vne_base` + `main.cpp` +
+`editor/`, y los modos ya están dentro de `vne_base` al vivir en `src/game/`.
 
 Dependencias traídas con CPM.cmake. Sin vcpkg ni Conan.
 
@@ -721,16 +745,18 @@ Modos previstos: `VnMode`, `MapMode`, `MenuMode`, `BacklogMode`, `SaveLoadMode`.
 
 ## 11. Pipeline de assets
 
-| Origen (`assets_src/`) | Herramienta | Destino (`assets_baked/`) |
-|---|---|---|
-| `png/*.png` | `vne_bake atlas` | `atlas_NN.qoi` + `atlas.bin` |
-| `ttf/*.ttf` | `vne_bake font` | `font_*.atlas` + métricas |
-| `scripts/*.vns` | `vne_bake script` | `*.vnc` |
-| `maps/*.tmx` | `vne_bake map` | `*.vnm` |
-| `shaders/*.glsl` | `sokol-shdc` | `*.glsl.h` |
-| `ogg/*.ogg` | copia directa | `*.ogg` |
+| Origen (`assets_src/`) | Herramienta | Destino (`assets_baked/`) | Estado |
+|---|---|---|---|
+| `png/*.png` | `vne_bake atlas` | `atlas_NN.qoi` + `atlas.bin` | parcial: `atlas.bin` sin nombres ni sub-páginas (ADR-0025), lo completa M11 |
+| `ttf/*.ttf` | `vne_bake font` | `font_*.atlas` + métricas | **no existe**: las fuentes se rasterizan en runtime. M13 |
+| `scripts/*.vns` | `vne_bake script` | `*.vnc` | hecho (M3) |
+| `maps/*.tmx` | `vne_bake map` | `*.vnm` | hecho (M9) |
+| `locale/*.csv` | `vne_bake catalog-compile` | `*.vnl` | hecho (M10, ADR-0046). No estaba en esta tabla |
+| `shaders/*.glsl` | ~~`sokol-shdc`~~ | ~~`*.glsl.h`~~ | **no se usa**: escritos a mano en `src/gfx/shaders.h` (ADR-0010); `shaders/` está vacío |
+| `ogg/*.ogg` | copia directa | `*.ogg` | hecho (M6) |
 
-Todo se empaqueta en `game.pak`:
+Todo se empaqueta en `game.pak`. **Nada de esto existe todavía** — no hay `.pak`, y el juego
+lee los assets sueltos del directorio de build. Lo construye M11 junto con §7.4:
 
 ```
 Formato .pak

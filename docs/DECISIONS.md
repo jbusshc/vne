@@ -1541,7 +1541,7 @@ que debería seguir cualquier herramienta offline futura con lógica no trivial.
 
 ---
 
-## ADR-0050 — La hoja de ruta se amplía con M11–M15, y la portabilidad pasa a trabajo futuro
+## ADR-0050 — La hoja de ruta se amplía con M11–M15; *verificar* en Linux/macOS pasa a §13
 
 **Fecha:** 2026-09-07
 **Hito:** posterior a M10
