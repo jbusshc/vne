@@ -9,6 +9,7 @@
 
 #include "game/map_format.h"
 #include "script/compiler.h"
+#include "script/map_bake.h"
 #include "script/parser.h"
 
 #if defined(_WIN32)
@@ -305,104 +306,10 @@ int bake_catalog_compile(const char* in_path, const char* out_path) {
     return 0;
 }
 
-// --- Mapas: TMX (Tiled) -> .vnm (ADR de M9 en docs/DECISIONS.md: SPEC.md #11 no da el
-// layout binario, asi que se diseña la version mas simple). Subconjunto deliberado de
-// TMX: una sola capa de tiles ("tiles"), una sola capa de colision ("collision", 0/1),
-// ambas con encoding="csv" sin comprimir, y un objectgroup ("triggers") con rectangulos
-// y una <property name="script" value="..."/>. Tiled exporta CSV sin comprimir por
-// defecto, asi que un .tmx real autorado con cuidado encaja aqui: no es un parser XML
-// general (sin dependencia nueva, SPEC.md #3), es lo minimo para este subconjunto.
-namespace {
-
-std::string_view find_tag_attr(std::string_view tag, std::string_view attr) {
-    std::string needle = std::string(attr) + "=\"";
-    usize        pos    = tag.find(needle);
-    if (pos == std::string_view::npos) {
-        return {};
-    }
-    usize start = pos + needle.size();
-    usize end   = tag.find('"', start);
-    if (end == std::string_view::npos) {
-        return {};
-    }
-    return tag.substr(start, end - start);
-}
-
-i64 find_tag_attr_int(std::string_view tag, std::string_view attr, i64 fallback = 0) {
-    std::string_view v = find_tag_attr(tag, attr);
-    if (v.empty()) {
-        return fallback;
-    }
-    i64 value = 0;
-    auto res = std::from_chars(v.data(), v.data() + v.size(), value);
-    return res.ec == std::errc() ? value : fallback;
-}
-
-std::vector<u16> parse_csv_u16(std::string_view csv) {
-    std::vector<u16> values;
-    usize             i = 0;
-    while (i < csv.size()) {
-        while (i < csv.size() && (csv[i] == ',' || csv[i] == ' ' || csv[i] == '\n' ||
-                                    csv[i] == '\r' || csv[i] == '\t')) {
-            i += 1;
-        }
-        usize start = i;
-        while (i < csv.size() && csv[i] >= '0' && csv[i] <= '9') {
-            i += 1;
-        }
-        if (i > start) {
-            i64 v = 0;
-            std::from_chars(csv.data() + start, csv.data() + i, v);
-            values.push_back(static_cast<u16>(v));
-        } else if (i == start) {
-            i += 1;  // caracter inesperado: se salta para no colgarse
-        }
-    }
-    return values;
-}
-
-// Extrae el contenido de <data encoding="csv">...</data> dentro de la primera capa cuyo
-// atributo name coincida, buscando desde `from`. Devuelve el offset justo despues de
-// </layer> en *out_layer_end, para que el llamante siga buscando la siguiente capa a
-// partir de ahi.
-bool extract_layer_csv(std::string_view xml, std::string_view layer_name, usize from,
-                        std::vector<u16>* out_values, usize* out_layer_end) {
-    usize search_from = from;
-    for (;;) {
-        usize layer_start = xml.find("<layer", search_from);
-        if (layer_start == std::string_view::npos) {
-            return false;
-        }
-        usize header_end = xml.find('>', layer_start);
-        if (header_end == std::string_view::npos) {
-            return false;
-        }
-        std::string_view header = xml.substr(layer_start, header_end - layer_start);
-        usize             layer_close = xml.find("</layer>", header_end);
-        if (layer_close == std::string_view::npos) {
-            return false;
-        }
-        *out_layer_end = layer_close + std::string_view("</layer>").size();
-
-        if (find_tag_attr(header, "name") == layer_name) {
-            usize data_open = xml.find("<data", header_end);
-            usize data_gt    = xml.find('>', data_open);
-            usize data_close = xml.find("</data>", data_gt);
-            if (data_open == std::string_view::npos || data_open > layer_close ||
-                data_gt == std::string_view::npos || data_close == std::string_view::npos) {
-                return false;
-            }
-            *out_values =
-                parse_csv_u16(xml.substr(data_gt + 1, data_close - (data_gt + 1)));
-            return true;
-        }
-        search_from = layer_close + 1;
-    }
-}
-
-}  // namespace
-
-// vne_bake map <entrada.tmx> <salida.vnm> (SPEC.md #11).
+// vne_bake map <entrada.tmx> <salida.vnm> (SPEC.md #11). El escaner de TMX vive en
+// script/map_bake.cpp (vne_script_tools) y no aqui, para que los tests puedan
+// ejercitarlo con un TMX literal sin archivos ni subprocesos: esta funcion es solo la
+// capa de E/S y de mensajes.
 int bake_map(const char* in_path, const char* out_path) {
     std::string xml;
     if (!read_whole_file(in_path, &xml)) {
@@ -410,115 +317,20 @@ int bake_map(const char* in_path, const char* out_path) {
         return 1;
     }
 
-    usize map_start = xml.find("<map");
-    usize map_end    = map_start == std::string::npos ? std::string::npos : xml.find('>', map_start);
-    if (map_start == std::string::npos || map_end == std::string::npos) {
-        log_error("vne_bake: '%s' no tiene una etiqueta <map>", in_path);
-        return 1;
-    }
-    std::string_view map_tag = std::string_view(xml).substr(map_start, map_end - map_start);
-    i64               grid_w   = find_tag_attr_int(map_tag, "width");
-    i64               grid_h   = find_tag_attr_int(map_tag, "height");
-    i64               tile_size = find_tag_attr_int(map_tag, "tilewidth");
-    if (grid_w <= 0 || grid_h <= 0 || tile_size <= 0) {
-        log_error("vne_bake: '%s' <map> sin width/height/tilewidth validos", in_path);
-        return 1;
-    }
-    usize tile_count = static_cast<usize>(grid_w * grid_h);
-
-    std::vector<u16> tiles, collision;
-    usize             layer_end = map_end;
-    if (!extract_layer_csv(xml, "tiles", map_end, &tiles, &layer_end) ||
-        tiles.size() != tile_count) {
-        log_error("vne_bake: '%s' capa 'tiles' ausente o de tamano incorrecto", in_path);
-        return 1;
-    }
-    usize collision_end = 0;
-    if (!extract_layer_csv(xml, "collision", map_end, &collision, &collision_end) ||
-        collision.size() != tile_count) {
-        log_error("vne_bake: '%s' capa 'collision' ausente o de tamano incorrecto", in_path);
+    ParsedMap   map;
+    std::string error;
+    if (!tmx_parse(xml, &map, &error)) {
+        log_error("vne_bake: '%s': %s", in_path, error.c_str());
         return 1;
     }
 
-    std::vector<MapTrigger> triggers;
-    std::string              string_pool;
-    usize                    group_start = xml.find("<objectgroup");
-    if (group_start != std::string::npos) {
-        usize group_close = xml.find("</objectgroup>", group_start);
-        usize object_from  = xml.find('>', group_start) + 1;  // tras el <objectgroup ...>
-        while (object_from < group_close) {
-            // "<object " (con el espacio) para no volver a encontrar el propio
-            // "<objectgroup": "<object" es un prefijo de esa palabra.
-            usize object_start = xml.find("<object ", object_from);
-            if (object_start == std::string::npos || object_start > group_close) {
-                break;
-            }
-            usize object_hdr_end = xml.find('>', object_start);
-            std::string_view obj_tag =
-                std::string_view(xml).substr(object_start, object_hdr_end - object_start);
-
-            MapTrigger trig{};
-            trig.tile_x = static_cast<u16>(find_tag_attr_int(obj_tag, "x") / tile_size);
-            trig.tile_y = static_cast<u16>(find_tag_attr_int(obj_tag, "y") / tile_size);
-            trig.tile_w = static_cast<u16>(find_tag_attr_int(obj_tag, "width", tile_size) / tile_size);
-            trig.tile_h = static_cast<u16>(find_tag_attr_int(obj_tag, "height", tile_size) / tile_size);
-
-            usize object_end = xml.find("</object>", object_hdr_end);
-            usize search_bound = object_end == std::string::npos ? group_close : object_end;
-            usize prop_start   = xml.find("<property", object_hdr_end);
-            std::string script_path;
-            if (prop_start != std::string::npos && prop_start < search_bound) {
-                usize prop_hdr_end = xml.find('>', prop_start);
-                std::string_view prop_tag =
-                    std::string_view(xml).substr(prop_start, prop_hdr_end - prop_start);
-                script_path = std::string(find_tag_attr(prop_tag, "value"));
-            }
-            trig.script_path_offset = static_cast<u32>(string_pool.size());
-            string_pool.insert(string_pool.end(), script_path.begin(), script_path.end());
-            string_pool.push_back('\0');
-            triggers.push_back(trig);
-
-            object_from = (object_end == std::string::npos ? group_close : object_end + 1);
-        }
-    }
-
-    std::FILE* out = std::fopen(out_path, "wb");
-    if (out == nullptr) {
+    if (!write_vnm(out_path, map)) {
         log_error("vne_bake: no se pudo escribir '%s'", out_path);
         return 1;
     }
-    u32 header[7] = {
-        k_vnm_magic, k_vnm_version, static_cast<u32>(grid_w), static_cast<u32>(grid_h),
-        static_cast<u32>(tile_size), static_cast<u32>(triggers.size()),
-        static_cast<u32>(string_pool.size()),
-    };
-    bool ok = std::fwrite(header, sizeof(header), 1, out) == 1;
-    ok = ok && std::fwrite(tiles.data(), sizeof(u16), tiles.size(), out) == tiles.size();
 
-    usize collision_bytes = (tile_count + 7) / 8;
-    std::vector<u8> collision_bits(collision_bytes, 0);
-    for (usize i = 0; i < tile_count; ++i) {
-        if (collision[i] != 0) {
-            collision_bits[i / 8] = static_cast<u8>(collision_bits[i / 8] | (1u << (i % 8)));
-        }
-    }
-    ok = ok && std::fwrite(collision_bits.data(), 1, collision_bytes, out) == collision_bytes;
-    if (!triggers.empty()) {
-        ok = ok && std::fwrite(triggers.data(), sizeof(MapTrigger), triggers.size(), out) ==
-                       triggers.size();
-    }
-    if (!string_pool.empty()) {
-        ok = ok && std::fwrite(string_pool.data(), 1, string_pool.size(), out) ==
-                       string_pool.size();
-    }
-    std::fclose(out);
-    if (!ok) {
-        log_error("vne_bake: escritura incompleta de '%s'", out_path);
-        return 1;
-    }
-
-    log_info("vne_bake: %s -> %s (%lldx%lld tiles, %zu triggers)", in_path, out_path, grid_w,
-              grid_h, triggers.size());
+    log_info("vne_bake: %s -> %s (%ux%u tiles, %zu triggers)", in_path, out_path, map.grid_w,
+              map.grid_h, map.triggers.size());
     return 0;
 }
 

@@ -104,7 +104,8 @@ bool pack_rect(i32 w, i32 h, u32* out_page, i32* out_x, i32* out_y) {
 }  // namespace
 
 void glyph_cache_init() {
-    g_page_count = 0;
+    g_page_count         = 0;
+    g_flushed_this_frame = false;
     for (auto& entry : g_table) {
         entry.used = false;
     }
@@ -112,7 +113,23 @@ void glyph_cache_init() {
 }
 
 void glyph_cache_shutdown() {
-    g_page_count = 0;
+    // Simetrico con glyph_cache_init(): deja el modulo como si nunca se hubiera usado.
+    // No libera nada de la GPU (los sg_image de las paginas los libera sg_shutdown(), y
+    // no destruye los cpu_pixels (viven en g_arena_perm, que no se resetea nunca): es
+    // exactamente el mismo contrato que texture_system_shutdown().
+    //
+    // Limpiar la tabla aqui, y no solo en init(), importa porque sus GlyphInfo apuntan a
+    // paginas de atlas que dejan de ser validas en cuanto se destruye el contexto
+    // grafico: si alguien reinicializara gfx en el mismo proceso, servir esas entradas
+    // viejas dibujaria glifos desde texturas ya destruidas.
+    for (auto& entry : g_table) {
+        entry.used = false;
+    }
+    for (auto& page : g_pages) {
+        page = AtlasPage{};
+    }
+    g_page_count         = 0;
+    g_flushed_this_frame = false;
 }
 
 void glyph_cache_begin_frame() {

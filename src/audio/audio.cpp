@@ -64,6 +64,35 @@ u32        g_cache_count = 0;
 
 SoundHandle g_current_music;
 
+// voice_id empaqueta indice + generacion del Pool en el u32 que SPEC.md #7.3 fija como
+// tipo de retorno de audio_play: los 16 bits bajos son indice+1 (0 = voz invalida), los
+// 16 altos son los 16 bits bajos de la generacion del slot. Sin la generacion, un
+// voice_id viejo podia acabar parando un sonido distinto si su slot se habia liberado y
+// reutilizado entre medias — pool_resolve() ya protege de eso para los SoundHandle, y
+// esto le da la misma proteccion a las voces.
+constexpr u32 k_voice_index_mask = 0xFFFFu;
+
+u32 voice_id_pack(SoundHandle h) {
+    return ((h.gen & k_voice_index_mask) << 16) | ((h.index + 1) & k_voice_index_mask);
+}
+
+// Devuelve nullptr si el voice_id es 0, esta fuera de rango, o su generacion ya no
+// coincide con la del slot (la voz que representaba ya no existe).
+SoundSlot* voice_resolve(u32 voice_id) {
+    u32 index_plus_one = voice_id & k_voice_index_mask;
+    if (index_plus_one == 0 || index_plus_one - 1 >= k_max_sounds) {
+        return nullptr;
+    }
+    SoundHandle h{};
+    h.index = index_plus_one - 1;
+    h.gen   = g_pool.gens[h.index];
+    if ((h.gen & k_voice_index_mask) != ((voice_id >> 16) & k_voice_index_mask)) {
+        return nullptr;
+    }
+    SoundSlot* slot = pool_resolve<SoundTag>(&g_pool, h);
+    return (slot != nullptr && slot->initialized) ? slot : nullptr;
+}
+
 f32 effective_volume(Bus bus, f32 volume) {
     f32 master = g_bus_volume[static_cast<u32>(Bus::Master)];
     f32 busv   = g_bus_volume[static_cast<u32>(bus)];
@@ -241,26 +270,23 @@ u32 audio_play(SoundHandle s, Bus bus, f32 volume, bool loop) {
     ma_sound_set_volume(&slot->sound, effective_volume(bus, volume));
     ma_sound_set_looping(&slot->sound, loop ? MA_TRUE : MA_FALSE);
     ma_sound_start(&slot->sound);
-    return s.index + 1;
+    return voice_id_pack(s);
 }
 
 void audio_stop(u32 voice_id, f32 fade_seconds) {
-    if (voice_id == 0 || voice_id - 1 >= k_max_sounds) {
-        return;
-    }
-    SoundSlot& slot = g_pool.items[voice_id - 1];
-    if (!slot.initialized) {
+    SoundSlot* slot = voice_resolve(voice_id);
+    if (slot == nullptr) {
         return;
     }
     if (fade_seconds <= 0.0f) {
-        ma_sound_stop(&slot.sound);
+        ma_sound_stop(&slot->sound);
         return;
     }
     ma_uint64 fade_frames =
         static_cast<ma_uint64>(fade_seconds * static_cast<f32>(ma_engine_get_sample_rate(&g_engine)));
-    ma_sound_set_fade_in_pcm_frames(&slot.sound, -1.0f, 0.0f, fade_frames);
+    ma_sound_set_fade_in_pcm_frames(&slot->sound, -1.0f, 0.0f, fade_frames);
     ma_sound_set_stop_time_in_pcm_frames(
-        &slot.sound, ma_engine_get_time_in_pcm_frames(&g_engine) + fade_frames);
+        &slot->sound, ma_engine_get_time_in_pcm_frames(&g_engine) + fade_frames);
 }
 
 void audio_set_bus_volume(Bus b, f32 v) {
@@ -271,8 +297,7 @@ void audio_set_bus_volume(Bus b, f32 v) {
 
 void audio_crossfade_music(SoundHandle next, f32 seconds) {
     if (g_current_music.valid()) {
-        u32 voice_id = g_current_music.index + 1;
-        audio_stop(voice_id, seconds);
+        audio_stop(voice_id_pack(g_current_music), seconds);
     }
 
     SoundSlot* slot = pool_resolve<SoundTag>(&g_pool, next);
@@ -294,7 +319,7 @@ void audio_stop_music(f32 fade_seconds) {
     if (!g_current_music.valid()) {
         return;
     }
-    audio_stop(g_current_music.index + 1, fade_seconds);
+    audio_stop(voice_id_pack(g_current_music), fade_seconds);
     g_current_music = SoundHandle{};
 }
 

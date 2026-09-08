@@ -8,6 +8,9 @@
 
 #include <sol/sol.hpp>
 
+#include <cstdio>
+
+#include "audio/audio.h"
 #include "base/hash.h"
 #include "base/heap_guard.h"
 #include "base/log.h"
@@ -89,9 +92,16 @@ void lua_init() {
         }
     });
     vn.set_function("play_sfx", [](const std::string& name) {
-        // Sfx no existe todavia como CmdKind (M6): placeholder deliberado (skill
-        // vne-milestone-workflow, "no inventes contenido"), ver docs/DECISIONS.md.
-        log_info("vn.play_sfx('%s'): no-op, el audio llega en M6", name.c_str());
+        // Misma convencion que el comando @sfx del DSL (script/compiler.cpp): el nombre
+        // incluye la extension y se resuelve contra assets_src/ogg/, porque un efecto de
+        // sonido no pasa por el catalogo por id (eso es solo para la musica, que si
+        // sobrevive a un guardado, ADR-0034).
+        char path[256];
+        std::snprintf(path, sizeof(path), "assets_src/ogg/%s", name.c_str());
+        SoundHandle handle{};
+        if (audio_load(path, false, &handle) == AudioLoadResult::Ok) {
+            audio_play(handle, Bus::Sfx, 1.0f, false);
+        }
     });
     vn.set_function("random", []() -> u32 {
         if (g_active_state == nullptr) {

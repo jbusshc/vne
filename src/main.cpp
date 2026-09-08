@@ -192,6 +192,12 @@ int main(int argc, char** argv) {
         log_error("gfx_init fallo");
         return 1;
     }
+    // Despues de gfx_init (su primera pagina de atlas usa texture_create_dynamic, que
+    // necesita el sistema de texturas ya en pie) y desde aqui, no desde gfx_init: gfx no
+    // depende de text en ninguna otra parte y meterle este include invertiria las capas
+    // (text/ ya depende de gfx/). Es la misma capa que ya llama a
+    // glyph_cache_begin_frame() cada frame.
+    glyph_cache_init();
 
 #if defined(VN_EDITOR)
     editor_init();
@@ -472,6 +478,7 @@ int main(int argc, char** argv) {
     editor_shutdown();
 #endif
     audio_shutdown();
+    glyph_cache_shutdown();  // antes de gfx_shutdown, simetrico con el init de arriba
     gfx_shutdown();
     platform_window_destroy(&window);
     arena_destroy(&g_arena_frame);

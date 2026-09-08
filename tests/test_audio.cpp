@@ -60,3 +60,25 @@ TEST_CASE("audio: un track_id que no esta en el catalogo se rechaza sin crashear
     SoundHandle h{};
     CHECK_FALSE(audio_load_track(0xFFFFu, &h));
 }
+
+TEST_CASE("audio: el voice_id lleva la generacion del slot, no solo el indice") {
+    SoundHandle h{};
+    REQUIRE(audio_load("assets_src/ogg/puerta_cierra.wav", false, &h) == AudioLoadResult::Ok);
+    u32 voice_id = audio_play(h, Bus::Sfx, 1.0f, false);
+    REQUIRE(voice_id != 0);
+
+    // Antes el voice_id era literalmente indice+1, asi que un id viejo podia acabar
+    // parando el sonido de otro handle si su slot se reutilizaba. Ahora los 16 bits
+    // altos llevan la generacion del Pool, que para un slot recien cogido es 1.
+    CHECK((voice_id & 0xFFFFu) == h.index + 1);
+    CHECK((voice_id >> 16) == (h.gen & 0xFFFFu));
+    CHECK(voice_id != h.index + 1);
+
+    audio_stop(voice_id, 0.0f);
+}
+
+TEST_CASE("audio: audio_stop con un voice_id invalido no hace nada (y no crashea)") {
+    audio_stop(0, 0.0f);                 // id nulo
+    audio_stop(0xFFFFFFFFu, 0.0f);       // indice fuera de rango
+    audio_stop(0x00FF0001u, 0.5f);       // indice valido, generacion que no coincide
+}

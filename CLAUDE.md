@@ -5,8 +5,34 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno (M10 implementado, pendiente de confirmación para cerrar —
-último hito numerado de SPEC.md §12)
+**Hito activo:** ninguno. Los diez hitos numerados de SPEC.md §12 están cerrados; lo
+único que queda en la especificación es el trabajo futuro de §13 (3D), fuera de alcance
+hasta que el usuario lo pida.
+
+**Revisión posterior a M10** (a petición del usuario: completar documentación y arreglar
+lo que quedó suelto, sin entrar en §13). Documentación: `README.md` reescrito (estaba
+parado en "M0 no iniciado, `src/` está vacío") y `docs/SCRIPT_LANGUAGE.md` escrito de
+verdad — era un stub que prometía "se completa en M3" y siguió así hasta M10; se verificó
+comando a comando contra `parser.cpp`/`lexer.cpp`/`compiler.cpp` en vez de copiar el
+ejemplo de la especificación, lo que destapó que `@move` y `@transition` aparecen en
+SPEC.md §9.1 y en el skill pero no existen en el parser (dan "comando desconocido").
+Seis bugs reales arreglados, todos con test donde era posible: `glyph_cache_init/shutdown`
+no los llamaba nadie y `shutdown` además dejaba la tabla apuntando a páginas de atlas
+destruidas (se cablearon desde `main.cpp`, no desde `gfx_init`, porque eso habría
+invertido las capas: `text/` depende de `gfx/` y nunca al revés); `vn.play_sfx` seguía
+siendo el no-op de M5 pese a que `Sfx` existe desde M6; el `voice_id` de audio era
+`índice + 1` sin validar generación (ahora la empaqueta en los 16 bits altos, +2 tests);
+y tres defectos del escáner de TMX (`npos + 1` desbordando a 0, una `<property>`
+filtrándose al objeto anterior, y un `<object/>` autocerrado comiéndose el siguiente).
+Los tres de TMX no se podían testear porque el código vivía en el `main()` de `vne_bake`:
+se movió a `src/script/map_bake.{h,cpp}` dentro de `vne_script_tools` con seis tests de
+regresión (ADR-0049, única decisión nueva de esta fase). 113/113 tests en Ship, 114/114 en
+Dev, 113/114 en Debug+ASan (el de rendimiento de M2, no representativo sin optimizar,
+ADR-0018), sin ningún reporte de memoria. Los tres guiones de demo siguen ejecutándose
+completos vía `--autoplay-script` (185/20/11 comandos, exit 0) y el juego arranca con
+`heap_allocs_frame_max=0` y `text_layout_calls=1`. Varias entradas de "Pendientes
+observados" que ya no eran ciertas quedaron marcadas como resueltas.
+
 **Último hito completado:** M10 — Localización. `Cmd::say`/`ChoiceOption` ganan
 `key_hash` (`fnv1a_u32` del texto original en español, SPEC.md #9.2 "clave estable...
 hash"; `sizeof(Cmd)` sigue en 16 bytes). `vne_bake catalog-extract` recorre los guiones

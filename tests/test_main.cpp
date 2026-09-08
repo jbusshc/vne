@@ -7,6 +7,7 @@
 #include "test_config.h"
 #include "test_fonts.h"
 #include "text/font.h"
+#include "text/glyph_cache.h"
 #include "audio/audio.h"
 #include "script/lua_bindings.h"
 #include "vm/backlog.h"
@@ -39,6 +40,7 @@ int main(int argc, char** argv) {
         // Algunos tests de M2 llaman a text_draw() (que llama a gfx_draw_sprite()), asi
         // que hace falta al menos un gfx_begin_frame() para que la cola de sprites de
         // g_arena_frame este inicializada.
+        glyph_cache_init();
         gfx_begin_frame();
         g_test_font_latin = text_load_font(VNE_SOURCE_DIR "/assets_src/ttf/NotoSans.ttf", 32);
         g_test_font_cjk   = text_load_font(VNE_SOURCE_DIR "/assets_src/ttf/NotoSansJP.ttf", 32);
@@ -52,6 +54,7 @@ int main(int argc, char** argv) {
 
     audio_shutdown();
     if (have_gfx) {
+        glyph_cache_shutdown();
         gfx_shutdown();
     }
     if (have_window) {

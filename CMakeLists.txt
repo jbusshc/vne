@@ -357,13 +357,16 @@ add_executable(vne_game src/main.cpp)
 target_link_libraries(vne_game PRIVATE vne_base)
 vne_apply_project_flags(vne_game)
 
-# Lexer/parser/compilador del DSL (SPEC.md #9.3): solo se linkan en herramientas
-# offline. vne_game nunca los ve — "cero parsing en release". std::string/vector son
-# aceptables aqui porque este codigo jamas corre en el bucle de frame del juego.
+# Codigo de herramientas offline: lexer/parser/compilador del DSL (SPEC.md #9.3) y el
+# escaner de TMX de los mapas (ADR-0044). Solo se linkan en vne_bake y en los tests;
+# vne_game nunca los ve — "cero parsing en release". std::string/vector son aceptables
+# aqui porque este codigo jamas corre en el bucle de frame del juego. El escaner de mapas
+# vive aqui, y no dentro de vne_bake, precisamente para que los tests puedan ejercitarlo.
 add_library(vne_script_tools STATIC
   src/script/lexer.cpp
   src/script/parser.cpp
   src/script/compiler.cpp
+  src/script/map_bake.cpp
 )
 target_include_directories(vne_script_tools PUBLIC src)
 vne_apply_project_flags(vne_script_tools)

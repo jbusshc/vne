@@ -22,8 +22,11 @@ AudioLoadResult audio_load(const char* path, bool streaming, SoundHandle* out);
 
 // Simplificacion deliberada de M6 (ver ADR en docs/DECISIONS.md): cada SoundHandle tiene
 // como mucho UNA instancia sonando a la vez. Volver a reproducirlo mientras ya suena lo
-// reinicia desde el principio en vez de superponer una segunda copia. Devuelve un
-// voice_id valido (el propio indice del handle) o 0 si el handle no resuelve a nada.
+// reinicia desde el principio en vez de superponer una segunda copia.
+//
+// Devuelve un voice_id (indice del slot + generacion empaquetados, ver voice_id_pack en
+// audio.cpp) o 0 si el handle no resuelve a nada. audio_stop() valida esa generacion, asi
+// que un voice_id de una voz ya liberada no puede acabar parando el sonido equivocado.
 u32  audio_play(SoundHandle s, Bus bus, f32 volume, bool loop);
 void audio_stop(u32 voice_id, f32 fade_seconds);
 void audio_set_bus_volume(Bus b, f32 v);

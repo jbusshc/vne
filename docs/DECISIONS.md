@@ -1504,6 +1504,43 @@ no cambia cuando eso ocurra, solo el contenido del `.csv`.
 
 ---
 
+## ADR-0049 — El escáner de TMX se muda a `vne_script_tools` para poder tener tests
+
+**Fecha:** 2026-09-07
+**Hito:** revisión posterior a M10
+**Estado:** aceptada
+
+**Contexto.** El escáner de TMX de M9 (ADR-0044) vivía entero dentro de
+`tools/bake/main.cpp`, mezclado con la lectura y escritura de archivos. Al revisarlo
+aparecieron tres bugs reales de parseo — `find` devolviendo `npos` y `npos + 1`
+desbordando a 0 (el escaneo reempezaba desde el principio del archivo en vez de fallar),
+un `<object/>` autocerrado que se comía el objeto siguiente, y una `<property>` que se
+filtraba hacia atrás al objeto anterior. Ninguno se podía cubrir con un test: el código
+estaba dentro del `main()` de un ejecutable, y ningún test podía enlazar contra él.
+Arreglarlos a ciegas y volver a dejarlos sin cobertura habría repetido exactamente la
+situación que los produjo.
+
+**Decisión.** El parseo se separa de la E/S y se muda a `src/script/map_bake.{h,cpp}`,
+dentro de la librería `vne_script_tools`: `tmx_parse(xml, ParsedMap*, error*)` es una
+función pura sobre una `std::string_view` y `write_vnm(path, ParsedMap)` hace la
+escritura. `tools/bake/main.cpp` queda como un envoltorio fino que lee el archivo, llama a
+las dos y reporta el error. `tests/test_map_bake.cpp` añade seis tests de regresión, uno
+por bug, cada uno documentando el fallo que vigila.
+
+**Alternativas descartadas.** Arreglar los bugs en el sitio y añadir un test de
+integración que invoque `vne_bake.exe` sobre TMX de prueba: mucho más lento, depende de
+rutas y del directorio de trabajo (ya dio problemas en M8), y no permite comprobar la
+estructura resultante, solo el código de salida. Mover todo `tools/bake/main.cpp` a la
+librería: innecesario, el resto ya es E/S trivial sin lógica que testear.
+
+**Consecuencias.** `vne_script_tools` deja de ser "solo el compilador de guiones" y pasa a
+ser "el código offline que merece tests", que es la razón por la que la librería existe.
+El horneado de mapas sigue sin entrar en el juego (`vne_script_tools` no se enlaza en
+`vne_game`), así que la regla de cero parsing en release no se toca. El mismo patrón es el
+que debería seguir cualquier herramienta offline futura con lógica no trivial.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -1529,11 +1566,14 @@ desviarte.
 - El componente "C++ AddressSanitizer" no cubre el componente separado "Graphics Tools" de
   Windows: la capa de depuracion D3D11 sigue sin poder probarse aqui (ADR-0012). No bloquea
   ningun criterio de aceptacion, solo reduce la validacion extra disponible en Debug.
-- `glyph_cache_init()`/`glyph_cache_shutdown()` existen pero no los llama nadie (ni
-  `gfx_init`/`gfx_shutdown` ni `main.cpp`): funciona por casualidad porque los arrays
-  globales de `glyph_cache.cpp` se ponen a cero solos al arrancar el proceso. Cablearlos
-  correctamente al ciclo de vida de `gfx_init`/`gfx_shutdown` antes de que un hito futuro
-  necesite reiniciar el atlas de glifos (p. ej. al cambiar de idioma en M10).
+- ~~`glyph_cache_init()`/`glyph_cache_shutdown()` existen pero no los llama nadie~~ —
+  resuelto en la revision posterior a M10: se cablearon en `main.cpp` y en
+  `tests/test_main.cpp`, justo despues de `gfx_init` y justo antes de `gfx_shutdown`.
+  **No** en `gfx_init`/`gfx_shutdown` como decia esta nota original: `text/` depende de
+  `gfx/` y nunca al reves, asi que incluir `text/glyph_cache.h` desde `gfx.cpp` habria
+  invertido las capas. De paso se arreglo `glyph_cache_shutdown()`, que solo ponia
+  `g_page_count = 0` y dejaba la tabla de entradas marcada como usada apuntando a paginas
+  de atlas ya destruidas.
 - `{b}` se parsea correctamente (marca `bold` en el `Segment`) pero no tiene ningun efecto
   visual: no hay una variante bold cargada ni negrita sintetica. Falta decidir si M7 (UI de
   VN) carga una segunda `FontHandle` para negrita o si se sintetiza.
@@ -1545,12 +1585,14 @@ desviarte.
   choca con algo mas adelante, es la primera pista a revisar.
 - La fuente de prueba `NotoSansJP.ttf` (~9.5 MB, ADR-0017) infla el repositorio; considerar
   Git LFS o un subconjunto de glifos si llega a molestar.
-- `parse_script` es linea a linea (ADR-0024): necesita reescritura real cuando lleguen
-  `@if`/`@choice` en M5 (bloques indentados).
+- ~~`parse_script` es linea a linea (ADR-0024): necesita reescritura real cuando lleguen
+  `@if`/`@choice` en M5~~ — resuelto en M5: parser reescrito con pila de bloques e
+  indentacion significativa (`SourceLine.indent`, `parse_block`/`parse_if`/`parse_choice`).
 - Validacion de identificadores desconocidos limitada a etiquetas (ADR-0022): actores,
   poses y fondos se internan sin validar. Ampliar cuando exista un registro real de
   assets.
-- `Say` no bloquea esperando input (ADR-0023): revisar en cuanto exista `VnMode` (M7).
+- ~~`Say` no bloquea esperando input (ADR-0023): revisar en cuanto exista `VnMode` (M7)~~
+  — resuelto en M7: `Say` bloquea de verdad esperando confirmacion del jugador (ADR-0039).
 - Al usar `CHECK()`/`REQUIRE()` de doctest sobre un `std::string`/`std::string_view`, el
   STL de MSVC dispara C4530 (excepcion usada sin `/EHsc`) dentro de su propio
   `basic_ostream::operator<<`; se silencio con `/wd4530` solo en `vne_tests` (mismo patron
@@ -1562,8 +1604,10 @@ desviarte.
   `GameState.flags` solo se pueden leer/escribir desde Lua (`vn.get_flag`/`vn.set_flag`,
   ADR-0029). Si un hito futuro quiere condicionar el DSL a una flag directamente (no via
   variable), hara falta anadir esa sintaxis.
-- `vn.play_sfx()` (SPEC.md #9.4) es un no-op que solo hace `log_info`: `Sfx` no existe
-  como `CmdKind` hasta M6 (audio). Revisar en cuanto exista.
+- ~~`vn.play_sfx()` (SPEC.md #9.4) es un no-op que solo hace `log_info`~~ — resuelto en la
+  revision posterior a M10: se quedo como no-op durante M6-M10 pese a que `Sfx` ya existia
+  desde M6. Ahora carga y reproduce de verdad con la misma convencion que el comando
+  `@sfx` del DSL (nombre con extension, resuelto contra `assets_src/ogg/`).
 - El riesgo de colision de hash de ADR-0029 (nombres de variable/flag distintos cayendo
   en el mismo `var_id`/`flag_id`) no tiene ninguna deteccion automatica todavia. Si algun
   guion futuro se comporta de forma rara con una variable, es la primera sospecha antes
@@ -1587,12 +1631,12 @@ desviarte.
   Tambien no fue probado si el mismo problema aparece al cargar un archivo que existe
   pero esta corrupto/no es audio valido — el `fopen` previo no lo detectaria, solo
   ausencia del archivo.
-- `audio_stop`/`audio_play` identifican una voz por `voice_id = handle.index + 1` sin
-  comprobar la generacion del `Pool` (a diferencia de `pool_resolve`, que si la
-  comprueba): si un slot se libera y se reutiliza para otro sonido antes de que el
-  `voice_id` viejo se use, `audio_stop` podria actuar sobre el sonido equivocado.
-  Simplificacion deliberada de M6 (documentada en audio.h); revisar si algun hito futuro
-  necesita voces con vida mas larga que se solapen de verdad.
+- ~~`audio_stop`/`audio_play` identifican una voz por `voice_id = handle.index + 1` sin
+  comprobar la generacion del `Pool`~~ — resuelto en la revision posterior a M10: el
+  `voice_id` ahora empaqueta la generacion en los 16 bits altos y el indice+1 en los
+  bajos (`voice_id_pack`), y `audio_stop` resuelve por `voice_resolve`, que valida rango y
+  generacion igual que `pool_resolve`. Un `voice_id` de un slot ya reutilizado se ignora
+  en vez de parar el sonido equivocado. Cubierto por dos tests en `test_audio.cpp`.
 - El polifonismo de un mismo `SoundHandle` esta limitado a una instancia sonando a la vez
   (repetir `audio_play` sobre el mismo handle lo reinicia desde el principio en vez de
   superponer una segunda copia, ver `audio_play` en audio.h). Si un guion futuro dispara
@@ -1695,6 +1739,22 @@ desviarte.
   la necesita (`MenuMode::update`, comentario "un unico caso especial"): si se anade un
   tercer idioma con un alfabeto distinto (p. ej. coreano), hay que ampliar esa logica a
   una tabla idioma->fuente en vez de un booleano.
+- `@move` aparece en el ejemplo de sintaxis de SPEC.md #9.1 y en el skill
+  `vne-script-dsl`, pero no existe: ni en `CmdKind` ni en el parser (escribirlo da
+  "comando desconocido"). `Transition` tampoco tiene sintaxis asignada. Documentado como
+  hueco conocido en `docs/SCRIPT_LANGUAGE.md`. Cuando se implemente `@move`, sus tres
+  `f32` haran crecer `sizeof(Cmd)` de 16 a 20 bytes (el valor que SPEC.md #8.1 fija), lo
+  que obliga a subir la version del `.vnc`.
+- El archivo intermedio de catalogo que produce `vne_bake catalog-extract` se llama
+  `.csv` por costumbre pero no es CSV: son dos lineas por entrada (clave, texto). Se
+  eligio asi para no implementar escapado de comas/comillas sobre dialogo arbitrario. Si
+  algun dia se quiere abrir en una hoja de calculo, hara falta un formato de verdad y una
+  conversion.
+- El escaner de TMX no valida que `width`/`height` del `<map>` cuadren con el numero de
+  celdas del CSV de cada capa: un TMX inconsistente produciria un `.vnm` con menos tiles
+  de los que la rejilla dice tener. No ocurre con archivos que exporta Tiled, solo con
+  archivos editados a mano; anotado tras los arreglos de ADR-0049 por si conviene añadir
+  la comprobacion.
 - El cambio de idioma en caliente (M10) se verifico con tests automatizados sobre
   `text/catalog.cpp` (carga, resolucion por hash, generacion que fuerza relayout) pero no
   pulsando las flechas en el `MenuMode` real dentro de la ventana interactiva en este
