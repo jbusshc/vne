@@ -5,8 +5,31 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno (M8 implementado, pendiente de confirmación para cerrar)
-**Último hito completado:** M8 — Editor. Dear ImGui (rama docking) integrado vía
+**Hito activo:** ninguno (M9 implementado, pendiente de confirmación para cerrar)
+**Último hito completado:** M9 — MapMode. `src/game/map_format.h` define un formato
+`.vnm` propio (ADR-0043: SPEC.md #11 no da el layout, a diferencia de `.vnc`/`.vnsave`) —
+rejilla de tiles, bits de colisión, triggers con ruta a un `.vnc`. `tools/bake/main.cpp`
+(`vne_bake map`) escanea el subconjunto de TMX que este proyecto autora (una capa
+"tiles", una "collision", ambas CSV sin comprimir, un `objectgroup` de rectángulos) con
+un escáner de subcadenas, sin parser XML general ni dependencia nueva (ADR-0044) — un bug
+real (`"<object"` encontraba `"<objectgroup"` por ser prefijo) se detectó con un test y
+se corrigió antes de cerrar el hito. `GameState` sube de v1 a v2 (`map_id`,
+`player_x/player_y`, añadidos al final; migración `migrate_v1_to_v2` escrita en el mismo
+commit, ADR-0045) para que guardar/cargar dentro del mapa funcione. `src/game/map_mode.*`
+implementa colisión por rejilla (sin motor de físicas), movimiento con WASD (las flechas
+las usa el rollback en la base de la pila desde M4), y triggers que apilan una `VnMode`
+nueva; volver de esa escena repone `MapMode` con la posición del jugador intacta (ya vive
+en `GameState`). La pila de modos ahora empieza en `MapMode`, no en `VnMode` directamente
+— "caminar por un mapa" es el punto de entrada que pide el criterio de M9. 98/99 tests en
+Debug+ASan (el de rendimiento de M2 no representativo sin optimizar, ADR-0018) y 98/98 en
+Ship, sin ningún reporte de memoria. El flujo completo (caminar, pisar el trigger, jugar
+la escena, volver al mapa) se verificó con tests automatizados sobre la lógica de
+`MapMode` y un arranque sin crashear (`heap_allocs_frame_max=0`), no con WASD real en la
+ventana interactiva (misma limitación de siempre en este entorno). Solo hay un mapa
+(`map_id` fijo a mano, sin catálogo por id como el de música de M6). Windows sigue siendo
+la única plataforma verificada (ADR-0013). Detalle completo en docs/DECISIONS.md.
+
+M8 — Editor (hito anterior). Dear ImGui (rama docking) integrado vía
 `util/sokol_imgui.h` de sokol (ya en el pin de M1, sin dependencia nueva). `src/editor/`
 y la propia librería de ImGui se excluyen del build por completo en Ship a nivel de
 CMake (`CMAKE_BUILD_TYPE STREQUAL "Ship"`), no solo con un `#ifdef` vacío (ADR-0041):

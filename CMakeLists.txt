@@ -296,6 +296,7 @@ add_library(vne_base STATIC
   src/game/backlog_mode.cpp
   src/game/menu_mode.cpp
   src/game/save_load_mode.cpp
+  src/game/map_mode.cpp
   ${VNE_GFX_BACKEND_SOURCES}
 )
 target_include_directories(vne_base PUBLIC src)
@@ -488,6 +489,20 @@ add_custom_command(
 add_custom_target(vne_bake_script_audio
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_audio.vnc)
 add_dependencies(vne_game vne_bake_script_audio)
+
+# Mapa de prueba de M9 (TMX -> .vnm, ADR de M9 en docs/DECISIONS.md).
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_map.vnm
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
+  COMMAND vne_bake map
+          ${CMAKE_SOURCE_DIR}/assets_src/maps/demo_map.tmx
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_map.vnm
+  DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/maps/demo_map.tmx
+  COMMENT "vne_bake: compilando demo_map.tmx a demo_map.vnm"
+)
+add_custom_target(vne_bake_map
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_map.vnm)
+add_dependencies(vne_game vne_bake_map)
 
 enable_testing()
 add_subdirectory(tests)

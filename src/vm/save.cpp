@@ -1,6 +1,8 @@
 #include "vm/save.h"
 
+#include <cstddef>
 #include <cstdio>
+#include <cstring>
 
 #include "audio/audio.h"
 #include "base/crc32.h"
@@ -8,6 +10,21 @@
 
 namespace {
 constexpr u32 k_vnsave_magic = 0x56534E56u;  // 'VNSV'
+
+// Tamano de GameState en la version 1 del formato (M4-M8, antes de MapMode): map_id es
+// el primer campo que M9 anadio al final de la struct (ver state.h), asi que todo lo que
+// viene antes tiene exactamente el mismo layout que en v1 — no hace falta un struct
+// GameStateV1 aparte, el propio offsetof marca la frontera.
+constexpr usize k_gamestate_v1_size = offsetof(GameState, map_id);
+
+// SPEC.md #8.3: "las funciones migrate_vN_to_vN+1 se escriben en cuanto se rompe
+// compatibilidad, nunca despues". v1 no tenia mapa activo: migrar es simplemente dejar
+// map_id/player_x/player_y en su valor por defecto (0, "sin mapa activo"), ya
+// garantizado por el zero-init de *out antes de copiar el prefijo v1 encima.
+void migrate_v1_to_v2(const u8* v1_bytes, GameState* out) {
+    *out = GameState{};
+    std::memcpy(out, v1_bytes, k_gamestate_v1_size);
+}
 }  // namespace
 
 SaveResult save_game(const char* path, const GameState& state, const Backlog& backlog,
@@ -65,32 +82,57 @@ LoadResult load_game(const char* path, GameState* out_state, Backlog* out_backlo
         log_error("load_game: '%s' no es un .vnsave valido (magic incorrecto)", path);
         return LoadResult::BadFormat;
     }
-    if (version != k_savegame_version) {
-        // No hay ninguna migracion escrita todavia (esta es la v1, SPEC.md #8.3: las
-        // funciones migrate_vN_to_vN+1 se escriben en cuanto se rompe compatibilidad,
-        // nunca antes). Cuando exista una v2 real, aqui se encadenan las migraciones.
+    if (version != k_savegame_version && version != 1u) {
+        // Solo se encadena la migracion v1->v2 (SPEC.md #8.3): version 1 es la unica que
+        // existio antes de que este commit anadiera v2. Cuando exista una v3 real, aqui
+        // se encadena migrate_v2_to_v3 igual que esta.
         std::fclose(file);
-        log_error("load_game: '%s' es version %u, se esperaba %u (sin migracion todavia)",
+        log_error("load_game: '%s' es version %u, se esperaba %u (sin migracion desde ahi)",
                   path, version, k_savegame_version);
         return LoadResult::UnsupportedVersion;
     }
-    if (state_size != sizeof(GameState)) {
-        std::fclose(file);
-        log_error("load_game: '%s' tiene un GameState de %u bytes, se esperaban %zu", path,
-                  state_size, sizeof(GameState));
-        return LoadResult::BadFormat;
-    }
 
     GameState state{};
-    if (std::fread(&state, sizeof(GameState), 1, file) != 1) {
-        std::fclose(file);
-        log_error("load_game: '%s' esta truncado (bloque de estado)", path);
-        return LoadResult::BadFormat;
-    }
-    if (crc32(&state, sizeof(GameState)) != checksum) {
-        std::fclose(file);
-        log_error("load_game: '%s' no supero el checksum (archivo corrupto)", path);
-        return LoadResult::ChecksumMismatch;
+    if (version == 1u) {
+        if (state_size != static_cast<u32>(k_gamestate_v1_size)) {
+            std::fclose(file);
+            log_error("load_game: '%s' dice ser v1 pero su GameState mide %u bytes, se "
+                      "esperaban %zu",
+                      path, state_size, k_gamestate_v1_size);
+            return LoadResult::BadFormat;
+        }
+        u8 v1_bytes[k_gamestate_v1_size];
+        if (std::fread(v1_bytes, 1, k_gamestate_v1_size, file) != k_gamestate_v1_size) {
+            std::fclose(file);
+            log_error("load_game: '%s' esta truncado (bloque de estado v1)", path);
+            return LoadResult::BadFormat;
+        }
+        if (crc32(v1_bytes, k_gamestate_v1_size) != checksum) {
+            std::fclose(file);
+            log_error("load_game: '%s' no supero el checksum (archivo corrupto)", path);
+            return LoadResult::ChecksumMismatch;
+        }
+        migrate_v1_to_v2(v1_bytes, &state);
+        log_info("load_game: '%s' migrado de v1 a v2 (map_id/player_x/player_y a su "
+                  "valor por defecto)",
+                  path);
+    } else {
+        if (state_size != sizeof(GameState)) {
+            std::fclose(file);
+            log_error("load_game: '%s' tiene un GameState de %u bytes, se esperaban %zu", path,
+                      state_size, sizeof(GameState));
+            return LoadResult::BadFormat;
+        }
+        if (std::fread(&state, sizeof(GameState), 1, file) != 1) {
+            std::fclose(file);
+            log_error("load_game: '%s' esta truncado (bloque de estado)", path);
+            return LoadResult::BadFormat;
+        }
+        if (crc32(&state, sizeof(GameState)) != checksum) {
+            std::fclose(file);
+            log_error("load_game: '%s' no supero el checksum (archivo corrupto)", path);
+            return LoadResult::ChecksumMismatch;
+        }
     }
 
     u32 thumbnail_size = 0;
@@ -139,7 +181,7 @@ LoadResult load_save_thumbnail(const char* path, u8* out_qoi, u32 cap, u32* out_
     ok &= std::fread(&state_size, sizeof(u32), 1, file) == 1;
     ok &= std::fread(&checksum, sizeof(u32), 1, file) == 1;
     (void)checksum;
-    if (!ok || magic != k_vnsave_magic || version != k_savegame_version) {
+    if (!ok || magic != k_vnsave_magic || (version != k_savegame_version && version != 1u)) {
         std::fclose(file);
         return LoadResult::BadFormat;
     }

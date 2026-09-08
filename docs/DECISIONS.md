@@ -1305,6 +1305,109 @@ verdad ahí — la excepción no es teórica en este caso.
 
 ---
 
+## ADR-0043 — Formato `.vnm` propio: SPEC.md no especifica el layout binario del mapa
+
+**Fecha:** 2026-09-07
+**Hito:** M9
+**Estado:** aceptada
+
+**Contexto.** SPEC.md #11 lista el pipeline `maps/*.tmx -> vne_bake map -> *.vnm` pero, a
+diferencia de `.vnc` (SPEC.md #9.3) y `.vnsave` (SPEC.md #8.3), no da el layout binario
+exacto. Hacía falta diseñar uno.
+
+**Decision.** `src/game/map_format.h` (compartido entre `tools/bake/main.cpp`, que
+escribe, y `game/map_mode.cpp`, que lee — mismo patrón que `vm/cmd.h` comparte `Cmd`
+entre `compiler.cpp` y `vm.cpp`): cabecera con magic/version/dimensiones/tamaño de tile/
+número de triggers/tamaño del pool de strings, seguida de un array `u16` de gids de tile
+(para render), un array de bits de colisión (1 bit por tile, 1 = bloqueado), un array de
+`MapTrigger` (rectángulo en coordenadas de tile + offset al string_pool), y el
+string_pool con las rutas `.vnc` de cada trigger. Es la versión más simple que cubre el
+criterio de M9 (rejilla + colisión + triggers), sin nada que M9 no necesite (sin
+capas múltiples, sin tilesets con más de una imagen, sin objetos que no sean
+rectángulos).
+
+**Alternativas descartadas.** Reutilizar JSON (Tiled también exporta a JSON, SPEC.md #11
+lo menciona junto a TMX): añadiría una dependencia de parseo JSON solo para esto, cuando
+XML ya se lee con un escáner mínimo sin dependencia nueva (ver ADR-0044). Guardar el TMX
+tal cual y parsearlo en runtime: rompería "cero parsing en release" (SPEC.md #9.3, mismo
+principio que ya aplica a los guiones).
+
+**Consecuencias.** El formato no es forward-compatible con nada todavía (`k_vnm_version`
+existe pero no hay migración escrita, no hace falta hasta que se rompa compatibilidad,
+mismo principio que `.vnsave` en M4). Si M9 necesitara más de una capa de tiles (fondo +
+decoración) en un hito futuro, el formato tendría que crecer — anotado en "Pendientes
+observados".
+
+---
+
+## ADR-0044 — Parser de TMX propio: un escáner de subconjunto, no un parser XML general
+
+**Fecha:** 2026-09-07
+**Hito:** M9
+**Estado:** aceptada
+
+**Contexto.** TMX es XML. La lista cerrada de dependencias (SPEC.md #3) no incluye
+ninguna librería XML, y añadir una solo para leer mapas de Tiled en una herramienta
+offline sería una dependencia nueva sin preguntar primero (regla no negociable de
+`CLAUDE.md`).
+
+**Decision.** `tools/bake/main.cpp` (`bake_map`) escanea texto plano en vez de parsear
+XML de verdad: busca subcadenas literales (`<map`, `<layer`, `<data encoding="csv">`,
+`<objectgroup`, `<object `, `<property`) y extrae atributos con una búsqueda de
+`nombre="valor"`. Cubre exactamente el subconjunto de TMX que este proyecto autora: una
+capa de tiles llamada "tiles", una de colisión llamada "collision", ambas con
+`encoding="csv"` sin comprimir (el valor por defecto de Tiled), y un `objectgroup` con
+rectángulos y una propiedad `script`. Un TMX real exportado por Tiled con ese subconjunto
+concreto (sin compresión, sin múltiples tilesets) encaja aquí sin cambios.
+
+**Alternativas descartadas.** Un parser XML general de bolsillo (manejo de anidamiento
+arbitrario, entidades, CDATA, atributos multilinea): mucho más código para casos que este
+proyecto no necesita — los mapas los autora el propio proyecto con Tiled configurado de
+una forma conocida, no se reciben TMX arbitrarios de terceros.
+
+**Consecuencias.** Un bug real apareció durante el desarrollo (y se corrigió antes de
+cerrar el hito): buscar la subcadena `"<object"` encontraba `"<objectgroup"` primero (es
+un prefijo), haciendo que el primer trigger heredara los atributos de su propio grupo
+contenedor en vez de los suyos — detectado por un test (`trigger_at` devolvía la
+posición equivocada), corregido buscando `"<object "` (con el espacio) en su lugar. Si
+Tiled cambia su formato de exportación por defecto (p. ej. a compresión zlib) en una
+versión futura, este escáner no lo entenderá; revisar si eso ocurre.
+
+---
+
+## ADR-0045 — `GameState` v1→v2: `map_id`/`player_x`/`player_y` añadidos al final, migración escrita en el mismo commit
+
+**Fecha:** 2026-09-07
+**Hito:** M9
+**Estado:** aceptada
+
+**Contexto.** El criterio de M9 "guardar y cargar dentro del mapa funciona" exige que la
+posición del jugador y el mapa activo sobrevivan a un guardado — son exactamente el tipo
+de dato que el skill `vne-serializable-state` dice que va en `GameState` ("cambia lo que
+el jugador ve o puede hacer al cargar la partida"). `GameState` no tenía estos campos
+(SPEC.md #8.2 no los preveía, es lógico: MapMode es un hito posterior).
+
+**Decision.** `map_id` (u16, 0 = sin mapa activo), `player_x`/`player_y` (f32) se
+añadieron al final de `GameState` (extensión aditiva: no se reordenó nada existente,
+así que el mismo desplazamiento (`offsetof`) sirve de frontera entre el layout v1 y v2
+sin necesitar una struct `GameStateV1` duplicada). `k_savegame_version` subió de 1 a 2, y
+`migrate_v1_to_v2` se escribió en el mismo commit (regla explícita de SPEC.md #8.3: "se
+escriben en cuanto se rompe compatibilidad, nunca después"): copia el prefijo v1 sobre un
+`GameState{}` nuevo ya puesto a cero, así que los campos nuevos quedan en su valor por
+defecto sin necesitar lógica especial.
+
+**Alternativas descartadas.** Insertar los campos nuevos en medio de la struct (p. ej.
+junto a `bg_id`, temáticamente más cercano): habría requerido una migración campo a
+campo en vez de un simple `memcpy` del prefijo, por una ganancia estética nula (el orden
+de los campos no importa a nadie fuera de la propia struct).
+
+**Consecuencias.** Cualquier `.vnsave` de M4-M8 (v1) sigue cargando: se migra
+automáticamente y queda como v2 en memoria (no se reescribe a disco solo por cargarse,
+solo al volver a guardar). Verificado con un test que fabrica a mano el formato v1 exacto
+byte a byte (no hay ningún binario v1 real disponible ya para generar uno).
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -1455,3 +1558,26 @@ desviarte.
 - El editor solo vigila y recarga `demo.vns`; no hay forma de cambiarlo a otro guion
   desde la UI del editor todavia (seria trivial de anadir, un campo de texto mas, pero no
   se hizo por no ampliar el alcance de M8 mas de lo que pedia el criterio de aceptacion).
+- El escaner de TMX (ADR-0044) es un subconjunto deliberado: una sola capa de tiles y una
+  de colision con encoding="csv" sin comprimir, un solo tileset implicito, objetos solo
+  rectangulos. Si un mapa futuro necesita mas capas (fondo+decoracion), compresion zlib
+  (Tiled la usa por defecto en exportaciones recientes segun la version), o multiples
+  tilesets, el escaner actual no lo entendera y hay que ampliarlo primero.
+- El formato `.vnm` (ADR-0043) no tiene migracion de version escrita (`k_vnm_version`
+  existe pero solo hay una version). Si crece a mas de una capa de tiles, escribir la
+  migracion en el mismo commit que rompa el formato (mismo principio que `.vnsave`).
+- MapMode trata al jugador como un punto (sin AABB real) para la colision: cada eje se
+  prueba por separado contra un solo tile de destino, lo que permite deslizarse a lo
+  largo de una pared pero no detecta colision si el jugador es mas grande que un tile.
+  Sin motor de fisicas (SPEC.md #10 lo dice explicito), asi que esto es intencional, no
+  un descuido — anotado por si un mapa futuro con pasillos estrechos lo hace notorio.
+- El flujo completo de M9 (caminar, pisar el trigger, jugar la escena de VN, volver al
+  mapa con la posicion correcta) se verifico con tests automatizados sobre la logica de
+  MapMode (carga, colision, deteccion de trigger) y con un smoke test de arranque sin
+  crashear (heap_allocs_frame_max en 0), pero no se probo pulsando WASD de verdad en la
+  ventana interactiva en este entorno (misma limitacion que el resto de UI desde M4): no
+  hay forma de inyectar input real contra una ventana SDL aqui.
+- Solo hay un mapa (`demo_map.tmx`, `map_id=1` fijo a mano en `main.cpp`): no existe
+  todavia un catalogo de mapas por id como el de musica de M6 (ADR-0034). Si un hito
+  futuro necesita mas de un mapa, hara falta resolver `map_id` a una ruta `.vnm` de la
+  misma forma que `Bgm.track_id` se resuelve a un archivo de audio.

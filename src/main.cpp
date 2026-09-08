@@ -11,6 +11,7 @@
 #include "editor/editor.h"
 #endif
 #include "game/backlog_mode.h"
+#include "game/map_mode.h"
 #include "game/menu_mode.h"
 #include "game/mode.h"
 #include "game/save_load_mode.h"
@@ -220,7 +221,15 @@ int main(int argc, char** argv) {
     TextLayout demo_layout = text_layout(demo_font, demo_text, 1700.0f, &g_arena_scene);
     f32        visible_glyphs_f = 0.0f;
 
-    GameState     demo_state{};
+    GameState demo_state{};
+    // Posicion inicial dentro de assets_src/maps/demo_map.tmx (M9): el centro de la sala
+    // abierta, no (0,0) (que cae en la pared del borde y dejaria al jugador atascado si
+    // esta es una partida nueva, no una cargada). map_id=1: unico mapa del proyecto por
+    // ahora, cualquier valor distinto de 0 basta para "hay un mapa activo".
+    demo_state.map_id   = 1;
+    demo_state.player_x = 4.0f * 64.0f + 32.0f;
+    demo_state.player_y = 3.0f * 64.0f + 32.0f;
+
     CompiledScript demo_script{};
     if (script_load("assets_baked/demo.vnc", &g_arena_scene, &demo_script) !=
         ScriptLoadResult::Ok) {
@@ -251,8 +260,23 @@ int main(int argc, char** argv) {
     save_load_mode.font          = demo_font;
     save_load_mode.scratch_arena = &g_arena_scene;
 
+    // MapMode (M9, SPEC.md #10): la base de la pila ahora es el mapa, no la escena de VN
+    // directamente — "caminar por un mapa, pisar un trigger, jugar una escena de VN,
+    // volver al mapa" es el criterio de aceptacion. WASD mueve al jugador (las flechas
+    // ya las usa el rollback de M4 en la base de la pila).
+    MapMode map_mode{};
+    map_mode.state = &demo_state;
+    bool have_map  = map_mode.load("assets_baked/demo_map.vnm", &g_arena_scene);
+    if (!have_map) {
+        log_error("No se pudo cargar assets_baked/demo_map.vnm; ejecuta vne_bake map primero.");
+    }
+
     ModeStack mode_stack{};
-    mode_stack_push(&mode_stack, &vn_mode);
+    if (have_map) {
+        mode_stack_push(&mode_stack, &map_mode);
+    } else {
+        mode_stack_push(&mode_stack, &vn_mode);
+    }
 
     InputState input{};
     Clock      clock = clock_create();
@@ -325,6 +349,30 @@ int main(int argc, char** argv) {
         }
         if (save_load_mode.wants_close) {
             save_load_mode.wants_close = false;
+            mode_stack_pop(&mode_stack);
+        }
+
+        // MapMode <-> VnMode (M9, SPEC.md #10): pisar un trigger apila una VnMode nueva
+        // con el guion de ese trigger; cuando esa escena termina, se vuelve al mapa con
+        // la posicion correcta (ya vive en GameState, no hay que restaurar nada aparte).
+        if (have_map && map_mode.pending_trigger_script != nullptr) {
+            CompiledScript triggered_script{};
+            if (script_load(map_mode.pending_trigger_script, &g_arena_scene,
+                             &triggered_script) == ScriptLoadResult::Ok) {
+                vn_mode.script    = triggered_script;
+                vn_mode.finished  = false;
+                vn_mode.layout_pc = 0xFFFFFFFFu;
+                demo_state.vm.pc         = 0;
+                demo_state.vm.cmd_phase = 0;
+                mode_stack_push(&mode_stack, &vn_mode);
+            } else {
+                log_error("MapMode: no se pudo cargar el guion del trigger '%s'",
+                          map_mode.pending_trigger_script);
+            }
+            map_mode.pending_trigger_script = nullptr;
+        }
+        if (have_map && mode_stack.count == 2 && mode_stack.modes[1] == &vn_mode &&
+            vn_mode.finished) {
             mode_stack_pop(&mode_stack);
         }
 

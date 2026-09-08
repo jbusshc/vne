@@ -1,8 +1,10 @@
 #include <doctest/doctest.h>
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 
+#include "base/crc32.h"
 #include "vm/save.h"
 
 TEST_CASE("save_game/load_game: round-trip preserva el estado y el backlog exactos") {
@@ -74,6 +76,49 @@ TEST_CASE("load_save_thumbnail: un .vnsave sin miniatura (M4-M6) devuelve tamano
     u32 out_size = 123;
     REQUIRE(load_save_thumbnail(path, out, sizeof(out), &out_size) == LoadResult::Ok);
     CHECK(out_size == 0);
+
+    std::remove(path);
+}
+
+TEST_CASE("load_game: migra un .vnsave v1 (M4-M8, sin map_id/player_x/player_y) a v2 "
+          "(M9, SPEC.md #8.3)") {
+    // Construye a mano un .vnsave v1 (el prefijo de GameState antes de que M9 anadiera
+    // map_id/player_x/player_y, ver offsetof(GameState, map_id) en save.cpp): no hay
+    // ningun archivo v1 real que se pueda generar ya con este binario, asi que se
+    // fabrica el formato exacto que un binario v1 habria escrito.
+    GameState state{};
+    state.bg_id   = 7;
+    state.vars[3] = 99;
+
+    usize v1_size = offsetof(GameState, map_id);
+    u32   checksum = crc32(&state, v1_size);
+
+    const char*  path    = "test_save_v1_migration.vnsave";
+    std::FILE*   f       = std::fopen(path, "wb");
+    REQUIRE(f != nullptr);
+    u32 magic       = 0x56534E56u;  // 'VNSV', ver save.cpp
+    u32 old_version = 1;
+    u32 state_size  = static_cast<u32>(v1_size);
+    std::fwrite(&magic, sizeof(u32), 1, f);
+    std::fwrite(&old_version, sizeof(u32), 1, f);
+    std::fwrite(&state_size, sizeof(u32), 1, f);
+    std::fwrite(&checksum, sizeof(u32), 1, f);
+    std::fwrite(&state, 1, v1_size, f);  // solo el prefijo v1, no la struct v2 completa
+    u32 thumbnail_size = 0;
+    std::fwrite(&thumbnail_size, sizeof(u32), 1, f);
+    u32 backlog_count = 0;
+    std::fwrite(&backlog_count, sizeof(u32), 1, f);
+    std::fclose(f);
+
+    GameState migrated{};
+    Backlog   migrated_backlog{};
+    REQUIRE(load_game(path, &migrated, &migrated_backlog) == LoadResult::Ok);
+
+    CHECK(migrated.bg_id == 7);
+    CHECK(migrated.vars[3] == 99);
+    CHECK(migrated.map_id == 0);  // valor por defecto: "sin mapa activo"
+    CHECK(migrated.player_x == doctest::Approx(0.0f));
+    CHECK(migrated.player_y == doctest::Approx(0.0f));
 
     std::remove(path);
 }

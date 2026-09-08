@@ -8,7 +8,10 @@
 // la pila cerrada desde ADR-0008 y no hace falta un codificador nuevo en runtime, cosa
 // que PNG si necesitaria).
 
-constexpr u32 k_savegame_version = 1;
+// v2 (M9): GameState anadio map_id/player_x/player_y al final (extension aditiva, ver
+// state.h). load_game migra v1 -> v2 automaticamente (SPEC.md #8.3: la migracion se
+// escribe en el mismo commit que rompe compatibilidad, nunca despues).
+constexpr u32 k_savegame_version = 2;
 constexpr i32 k_thumbnail_width  = 384;
 constexpr i32 k_thumbnail_height = 216;
 // Cota generosa: un QOI de 384x216 en la practica pesa unos pocos KB salvo contenido muy

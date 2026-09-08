@@ -57,6 +57,17 @@ struct GameState {
     f32       bus_volume[4]     = {1.0f, 1.0f, 1.0f, 1.0f};
     char      player_name[32]   = {};
     u32       playtime_seconds  = 0;
+
+    // M9 (MapMode, SPEC.md #10): mapa activo y posicion del jugador dentro de el. 0 =
+    // sin mapa activo (todavia en una escena de VN pura, nunca se piso un MapMode).
+    // Anadido al final de GameState a proposito: extension aditiva (skill
+    // vne-serializable-state, "amplia la constante y sube la version del formato"), asi
+    // que una partida v1 solo necesita rellenar estos campos con su valor por defecto en
+    // la migracion (ver save.cpp migrate_v1_to_v2), no reordenar nada existente.
+    u16       map_id    = 0;
+    u8        _pad2[2]  = {};
+    f32       player_x  = 0.0f;
+    f32       player_y  = 0.0f;
 };
 
 static_assert(std::is_trivially_copyable_v<GameState>);

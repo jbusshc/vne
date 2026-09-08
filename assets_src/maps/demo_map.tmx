@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Mapa de prueba de M9 (SPEC.md #12): rejilla de colores placeholder, no arte real
+     (skill vne-milestone-workflow, "no inventes contenido de juego"). Subconjunto de TMX
+     que vne_bake entiende: una capa "tiles" y una "collision" en CSV, y un objectgroup
+     "triggers" con un trigger que apila una escena de VN (ver docs/DECISIONS.md, ADR de
+     M9 sobre el formato .vnm). -->
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down"
+     width="8" height="6" tilewidth="64" tileheight="64" infinite="0" nextlayerid="4" nextobjectid="2">
+ <layer id="1" name="tiles" width="8" height="6">
+  <data encoding="csv">
+1,1,1,1,1,1,1,1,
+1,2,2,2,2,2,2,1,
+1,2,3,3,3,3,2,1,
+1,2,3,3,3,3,2,1,
+1,2,2,2,2,2,2,1,
+1,1,1,1,1,1,1,1
+</data>
+ </layer>
+ <layer id="2" name="collision" width="8" height="6">
+  <data encoding="csv">
+1,1,1,1,1,1,1,1,
+1,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,1,
+1,1,1,1,1,1,1,1
+</data>
+ </layer>
+ <objectgroup id="3" name="triggers">
+  <object id="1" x="192" y="128" width="64" height="64">
+   <properties>
+    <property name="script" value="assets_baked/demo_branching.vnc"/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>
