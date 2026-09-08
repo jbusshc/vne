@@ -41,6 +41,16 @@ u32 push_string(CompiledScriptData* data, const std::string& s) {
     return offset;
 }
 
+// SPEC.md #9.2: "clave estable archivo:linea:hash". El hash es la parte que de verdad
+// protege contra mostrar una traduccion obsoleta (si el texto original cambia, el hash
+// cambia, la clave ya no coincide con ninguna traduccion existente); archivo:linea solo
+// esta para que un traductor pueda ubicar la linea a simple vista en el catalogo.
+std::string catalog_key(const std::string& file_name, u32 line, u32 key_hash) {
+    char hex[9];
+    std::snprintf(hex, sizeof(hex), "%08x", key_hash);
+    return file_name + ":" + std::to_string(line) + ":" + hex;
+}
+
 CmpOp negate_cmp_op(CmpOp op) {
     switch (op) {
         case CmpOp::Eq: return CmpOp::Ne;
@@ -58,7 +68,6 @@ CmpOp negate_cmp_op(CmpOp op) {
 CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                                     const std::string&              file_name) {
     CompileResult result;
-    (void)file_name;
 
     // Pase 1: pc de cada instruccion es su indice en el array final (1:1, Label incluido
     // como un Cmd mas). Recolecta la tabla de etiquetas para resolver Jump/Call/JumpIf y
@@ -92,12 +101,16 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                 cmd.label.name_hash = fnv1a_u32(instr.name);
                 data.labels.push_back(CompiledLabel{cmd.label.name_hash, static_cast<u32>(data.cmds.size())});
                 break;
-            case InstrKind::Say:
+            case InstrKind::Say: {
                 cmd.kind = CmdKind::Say;
                 cmd.say.speaker_id = instr.speaker.empty() ? static_cast<u16>(0xFFFFu)
                                                              : speakers.intern(instr.speaker);
                 cmd.say.text_id = push_string(&data, instr.text);
+                cmd.say.key_hash = fnv1a_u32(instr.text);
+                data.catalog_entries.push_back(
+                    CatalogEntry{catalog_key(file_name, instr.line, cmd.say.key_hash), instr.text});
                 break;
+            }
             case InstrKind::Show:
                 cmd.kind           = CmdKind::Show;
                 cmd.show.actor_id = actors.intern(instr.actor);
@@ -160,6 +173,14 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                         co.cond_op     = opt.condition.op;
                         co.cond_rhs    = opt.condition.rhs;
                     }
+                    co.key_hash = fnv1a_u32(opt.text);
+                    // instr.line es la linea del propio @choice, no la de cada opcion
+                    // individual (ParsedChoiceOption no guarda la suya, ver
+                    // parser.h): aproximacion aceptada, solo afecta a donde apunta la
+                    // clave en el catalogo para un traductor, no a su estabilidad (el
+                    // hash es la parte que importa).
+                    data.catalog_entries.push_back(
+                        CatalogEntry{catalog_key(file_name, instr.line, co.key_hash), opt.text});
                     data.choice_options.push_back(co);
                 }
                 break;
@@ -215,7 +236,7 @@ bool write_vnc(const std::string& path, const CompiledScriptData& data) {
     }
 
     const u32 magic              = 0x53434E56u;  // 'VNCS' (V,N,C,S en memoria little-endian)
-    const u32 version            = 2;  // M5: se anadio la tabla de ChoiceOption
+    const u32 version            = 3;  // M10: Cmd::say y ChoiceOption ganaron key_hash
     const u32 cmd_count          = static_cast<u32>(data.cmds.size());
     const u32 string_pool_size   = static_cast<u32>(data.string_pool.size());
     const u32 label_count        = static_cast<u32>(data.labels.size());

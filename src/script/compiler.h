@@ -14,6 +14,14 @@ struct CompiledLabel {
     u32 pc;
 };
 
+// Una entrada del catalogo de localizacion (SPEC.md #9.2: "clave estable
+// archivo:linea:hash"). No es parte del .vnc: vne_bake la escribe aparte, al catalogo de
+// extraccion (M10, ver ADR-0046 en docs/DECISIONS.md).
+struct CatalogEntry {
+    std::string key;   // "archivo:linea:hash_hex"
+    std::string text;  // texto original (espanol, el idioma en que se autoran los guiones)
+};
+
 struct CompiledScriptData {
     std::vector<Cmd>           cmds;
     std::string                string_pool;  // bytes UTF-8 terminados en '\0'
@@ -23,6 +31,9 @@ struct CompiledScriptData {
     // formato .vnc de SPEC.md #9.3 (que solo documenta Cmd[]/string_pool/Label[]): ver
     // ADR de M5 en docs/DECISIONS.md.
     std::vector<ChoiceOption>  choice_options;
+    // Todo texto de dialogo (Say y opciones de Choice), para la extraccion de catalogo
+    // de M10. No se escribe en el .vnc: tools/bake/main.cpp lo vuelca aparte.
+    std::vector<CatalogEntry>  catalog_entries;
 };
 
 struct CompileError {

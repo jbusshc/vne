@@ -62,6 +62,31 @@ TEST_CASE("compiler: Sfx guarda la ruta completa en el string_pool; Bgm usa hash
     CHECK(compiled.data.cmds[2].stop_bgm.fade == doctest::Approx(1.0f));
 }
 
+TEST_CASE("compiler: Say y Choice generan key_hash y entradas de catalogo (M10)") {
+    ParseResult parsed = parse_script(
+        "personaje: Hola mundo.\n"
+        "@choice\n"
+        "    \"Opcion A\" -> fin\n"
+        "@end\n"
+        ":: fin\n"
+        "@end\n",
+        "t.vns");
+    REQUIRE(parsed.ok());
+    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns");
+    REQUIRE(compiled.ok());
+
+    REQUIRE(compiled.data.cmds[0].kind == CmdKind::Say);
+    CHECK(compiled.data.cmds[0].say.key_hash == fnv1a_u32("Hola mundo."));
+
+    REQUIRE(compiled.data.choice_options.size() == 1);
+    CHECK(compiled.data.choice_options[0].key_hash == fnv1a_u32("Opcion A"));
+
+    REQUIRE(compiled.data.catalog_entries.size() == 2);
+    CHECK(compiled.data.catalog_entries[0].text == "Hola mundo.");
+    CHECK(compiled.data.catalog_entries[0].key.find("t.vns:1:") == 0);
+    CHECK(compiled.data.catalog_entries[1].text == "Opcion A");
+}
+
 TEST_CASE("compiler + write_vnc: el formato binario coincide con SPEC.md #9.3") {
     ParseResult   parsed   = parse_script("personaje: Hola mundo.\n@end\n", "t.vns");
     CompileResult compiled = compile_instructions(parsed.instructions, "t.vns");
@@ -75,7 +100,7 @@ TEST_CASE("compiler + write_vnc: el formato binario coincide con SPEC.md #9.3") 
     u32 header[6];
     REQUIRE(std::fread(header, sizeof(header), 1, f) == 1);
     CHECK(header[0] == 0x53434E56u);  // 'VNCS'
-    CHECK(header[1] == 2u);  // M5: se anadio la tabla de ChoiceOption
+    CHECK(header[1] == 3u);  // M10: Cmd::say/ChoiceOption ganaron key_hash
     CHECK(header[2] == static_cast<u32>(compiled.data.cmds.size()));
     CHECK(header[3] == static_cast<u32>(compiled.data.string_pool.size()));
     CHECK(header[4] == 0u);  // sin etiquetas en este guion

@@ -163,6 +163,148 @@ int bake_script(const char* in_path, const char* out_path) {
     return 0;
 }
 
+// --- Localizacion (M10, SPEC.md #9.2/#10): extraccion del catalogo y horneado a .vnl
+// (ADR-0046: decision del usuario, catalogo horneado, no suelto en texto plano).
+// Formato de autoria intermedio (catalog-extract escribe, catalog-compile lee): dos
+// lineas por entrada (clave, luego texto) en vez de CSV con comas/comillas escapadas —
+// el dialogo puede contener cualquier puntuacion, asi que evitar el escapado de CSV de
+// verdad es la opcion mas simple. Debe coincidir con text/catalog.h (duplicado a
+// proposito, mismo patron que el magic de .vnc entre compiler.cpp y script_load.cpp).
+namespace {
+constexpr u32 k_vnl_magic_local   = 0x434C4E56u;  // 'VNLC'
+constexpr u32 k_vnl_version_local = 1;
+}  // namespace
+
+// vne_bake catalog-extract <salida.csv> <guion1.vns> [guion2.vns ...] (SPEC.md #10:
+// "extraccion del catalogo"). No escribe ningun .vnc: solo parsea y compila en memoria
+// para recolectar los textos.
+int bake_catalog_extract(const char* out_path, int script_count, char** script_paths) {
+    std::FILE* out = std::fopen(out_path, "wb");
+    if (out == nullptr) {
+        log_error("vne_bake: no se pudo escribir '%s'", out_path);
+        return 1;
+    }
+
+    usize total_entries = 0;
+    for (int i = 0; i < script_count; ++i) {
+        std::string source;
+        if (!read_whole_file(script_paths[i], &source)) {
+            log_error("vne_bake: no se pudo leer '%s'", script_paths[i]);
+            std::fclose(out);
+            return 1;
+        }
+        ParseResult parsed = parse_script(source, script_paths[i]);
+        if (!parsed.ok()) {
+            for (const ParseError& err : parsed.errors) {
+                log_error("%s:%u: %s", err.file.c_str(), err.line, err.message.c_str());
+            }
+            std::fclose(out);
+            return 1;
+        }
+        CompileResult compiled = compile_instructions(parsed.instructions, script_paths[i]);
+        if (!compiled.ok()) {
+            for (const CompileError& err : compiled.errors) {
+                log_error("%s:%u: %s", err.file.c_str(), err.line, err.message.c_str());
+            }
+            std::fclose(out);
+            return 1;
+        }
+        for (const CatalogEntry& entry : compiled.data.catalog_entries) {
+            std::fwrite(entry.key.data(), 1, entry.key.size(), out);
+            std::fputc('\n', out);
+            std::fwrite(entry.text.data(), 1, entry.text.size(), out);
+            std::fputc('\n', out);
+        }
+        total_entries += compiled.data.catalog_entries.size();
+    }
+
+    std::fclose(out);
+    log_info("vne_bake: catalogo extraido a '%s' (%zu entradas de %d guiones)", out_path,
+              total_entries, script_count);
+    return 0;
+}
+
+// vne_bake catalog-compile <entrada.csv> <salida.vnl>: hornea un catalogo (extraido o
+// traducido a mano conservando las mismas claves, ver docs/DECISIONS.md ADR-0046) a
+// binario. La clave real en runtime es solo el hash hexadecimal al final de la clave
+// "archivo:linea:hash" (SPEC.md #9.2): el traductor nunca lo recalcula, solo conserva la
+// linea de clave tal cual y traduce la linea de texto que sigue.
+int bake_catalog_compile(const char* in_path, const char* out_path) {
+    std::string source;
+    if (!read_whole_file(in_path, &source)) {
+        log_error("vne_bake: no se pudo leer '%s'", in_path);
+        return 1;
+    }
+
+    struct Entry { u32 key_hash; std::string text; };
+    std::vector<Entry> entries;
+
+    usize pos = 0;
+    while (pos < source.size()) {
+        usize key_end = source.find('\n', pos);
+        if (key_end == std::string::npos) break;
+        std::string key = source.substr(pos, key_end - pos);
+        pos             = key_end + 1;
+
+        usize text_end = source.find('\n', pos);
+        if (text_end == std::string::npos) text_end = source.size();
+        std::string text = source.substr(pos, text_end - pos);
+        pos               = text_end + 1;
+
+        usize last_colon = key.find_last_of(':');
+        if (last_colon == std::string::npos) {
+            log_error("vne_bake: '%s' clave mal formada: '%s'", in_path, key.c_str());
+            continue;
+        }
+        std::string hex = key.substr(last_colon + 1);
+        u32          key_hash = 0;
+        auto res = std::from_chars(hex.data(), hex.data() + hex.size(), key_hash, 16);
+        if (res.ec != std::errc()) {
+            log_error("vne_bake: '%s' hash invalido en clave '%s'", in_path, key.c_str());
+            continue;
+        }
+        entries.push_back(Entry{key_hash, text});
+    }
+
+    std::sort(entries.begin(), entries.end(),
+              [](const Entry& a, const Entry& b) { return a.key_hash < b.key_hash; });
+
+    std::vector<u32> keys, text_offsets;
+    std::string       string_pool;
+    for (const Entry& e : entries) {
+        keys.push_back(e.key_hash);
+        text_offsets.push_back(static_cast<u32>(string_pool.size()));
+        string_pool.insert(string_pool.end(), e.text.begin(), e.text.end());
+        string_pool.push_back('\0');
+    }
+
+    std::FILE* out = std::fopen(out_path, "wb");
+    if (out == nullptr) {
+        log_error("vne_bake: no se pudo escribir '%s'", out_path);
+        return 1;
+    }
+    u32 header[4] = {k_vnl_magic_local, k_vnl_version_local, static_cast<u32>(entries.size()),
+                      static_cast<u32>(string_pool.size())};
+    bool ok = std::fwrite(header, sizeof(header), 1, out) == 1;
+    if (!keys.empty()) {
+        ok = ok && std::fwrite(keys.data(), sizeof(u32), keys.size(), out) == keys.size();
+        ok = ok && std::fwrite(text_offsets.data(), sizeof(u32), text_offsets.size(), out) ==
+                       text_offsets.size();
+    }
+    if (!string_pool.empty()) {
+        ok = ok && std::fwrite(string_pool.data(), 1, string_pool.size(), out) ==
+                       string_pool.size();
+    }
+    std::fclose(out);
+    if (!ok) {
+        log_error("vne_bake: escritura incompleta de '%s'", out_path);
+        return 1;
+    }
+
+    log_info("vne_bake: %s -> %s (%zu entradas)", in_path, out_path, entries.size());
+    return 0;
+}
+
 // --- Mapas: TMX (Tiled) -> .vnm (ADR de M9 en docs/DECISIONS.md: SPEC.md #11 no da el
 // layout binario, asi que se diseña la version mas simple). Subconjunto deliberado de
 // TMX: una sola capa de tiles ("tiles"), una sola capa de colision ("collision", 0/1),
@@ -554,7 +696,8 @@ int bake_atlas() {
 
 }  // namespace
 
-// Uso: vne_bake [atlas | script <entrada.vns> <salida.vnc> | map <entrada.tmx> <salida.vnm>]
+// Uso: vne_bake [atlas | script <in.vns> <out.vnc> | map <in.tmx> <out.vnm> |
+//                catalog-extract <out.csv> <guion.vns...> | catalog-compile <in.csv> <out.vnl>]
 // Sin argumentos (o "atlas"): empaqueta assets_src/png/*.png si hay alguno (ADR-0025), o
 // genera el placeholder procedural de respaldo si no.
 int main(int argc, char** argv) {
@@ -571,6 +714,20 @@ int main(int argc, char** argv) {
             return 1;
         }
         return bake_map(argv[2], argv[3]);
+    }
+    if (argc >= 2 && std::strcmp(argv[1], "catalog-extract") == 0) {
+        if (argc < 4) {
+            log_error("uso: vne_bake catalog-extract <salida.csv> <guion1.vns> [guion2.vns ...]");
+            return 1;
+        }
+        return bake_catalog_extract(argv[2], argc - 3, argv + 3);
+    }
+    if (argc >= 2 && std::strcmp(argv[1], "catalog-compile") == 0) {
+        if (argc < 4) {
+            log_error("uso: vne_bake catalog-compile <entrada.csv> <salida.vnl>");
+            return 1;
+        }
+        return bake_catalog_compile(argv[2], argv[3]);
     }
     return bake_atlas();
 }

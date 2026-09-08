@@ -49,7 +49,13 @@ struct Cmd {
     CmdKind kind;
     u8      _pad[3] = {};
     union {
-        struct { u16 speaker_id; u32 text_id; }                   say;
+        // key_hash: fnv1a_u32 del texto original en español (SPEC.md #9.2, "clave
+        // estable... hash"), para resolver una traduccion en runtime (M10, ver
+        // text/catalog.h) sin depender de un text_id que solo tiene sentido dentro del
+        // string_pool de ESTE guion compilado. text_id sigue siendo el texto base
+        // (fallback si no hay traduccion o el catalogo activo es el mismo idioma en que
+        // se autoro el guion).
+        struct { u16 speaker_id; u32 text_id; u32 key_hash; }     say;
         struct { u16 actor_id; u16 pose_id; u8 slot; f32 fade; }  show;
         struct { u8 slot; f32 fade; }                             hide;
         struct { u16 bg_id; f32 fade; }                           bg;
@@ -82,10 +88,10 @@ struct Cmd {
 };
 
 static_assert(std::is_trivially_copyable_v<Cmd>);
-// Tamano verificado compilando, no asumido (ver docs/DECISIONS.md): jump_if sigue siendo
-// el miembro mas grande de la union tras M6, asi que el tamano de Cmd no cambio desde
-// M5. No es el 20 final de SPEC.md #8.1 todavia (Move, con tres f32, si lo hara crecer
-// cuando le toque).
+// Tamano verificado compilando, no asumido (ver docs/DECISIONS.md): say con key_hash
+// (M10) sigue cabiendo en los mismos 12 bytes que ya ocupaba jump_if, asi que el tamano
+// de Cmd no cambio desde M5. No es el 20 final de SPEC.md #8.1 todavia (Move, con tres
+// f32, si lo hara crecer cuando le toque).
 static_assert(sizeof(Cmd) == 16);
 
 // Una opcion de un comando Choice (SPEC.md #9.1: texto, condicion opcional, etiqueta
@@ -106,6 +112,7 @@ struct ChoiceOption {
     CmpOp cond_op        = CmpOp::Eq;
     u8    _pad1[3]        = {};
     i32   cond_rhs        = 0;
+    u32   key_hash        = 0;  // M10, ver comentario en Cmd::say
 };
 
 static_assert(std::is_trivially_copyable_v<ChoiceOption>);

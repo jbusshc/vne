@@ -5,8 +5,33 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno (M9 implementado, pendiente de confirmación para cerrar)
-**Último hito completado:** M9 — MapMode. `src/game/map_format.h` define un formato
+**Hito activo:** ninguno (M10 implementado, pendiente de confirmación para cerrar —
+último hito numerado de SPEC.md §12)
+**Último hito completado:** M10 — Localización. `Cmd::say`/`ChoiceOption` ganan
+`key_hash` (`fnv1a_u32` del texto original en español, SPEC.md #9.2 "clave estable...
+hash"; `sizeof(Cmd)` sigue en 16 bytes). `vne_bake catalog-extract` recorre los guiones
+y escribe el catálogo base (`assets_src/locale/es.csv`); `vne_bake catalog-compile` lo
+hornea a `.vnl` binario — decisión explícita del usuario (ADR-0046, SPEC.md §14 lo
+marcaba como una decisión que el agente no debe tomar solo: horneado, no suelto en texto
+plano, por consistencia con el resto del pipeline). `text/catalog.{h,cpp}` resuelve una
+clave contra el catálogo activo con caída al texto base si falta la traducción (nunca
+texto vacío); solo el hash importa en runtime, no archivo:línea (ADR-0047). `MenuMode`
+gana una fila de idioma que alterna español/japonés en caliente: `catalog_generation()`
+fuerza a `VnMode` a reconstruir su `TextLayout` (sin relayoutear en ningún otro frame,
+regla intacta) y a cargar la fuente correcta — la fuente CJK ahora se carga aparte de la
+latina (antes `main.cpp` cargaba solo `NotoSansJP.ttf` para todo; M10 separó
+`NotoSans.ttf` para el idioma base). La traducción de prueba (`ja.csv`) es un placeholder
+mecánico marcado "[JA-placeholder]", no japonés real (ADR-0048, regla de "no inventar
+contenido" aplicada también a idiomas). 105/105 tests en Ship; en Debug+ASan 105/106 (el
+de rendimiento de M2 no representativo sin optimizar, ADR-0018), sin ningún reporte de
+memoria. El cambio de idioma se verificó con tests sobre `catalog.cpp`, no pulsando
+flechas en la ventana interactiva en este entorno (misma limitación de siempre). El
+backlog no se relocaliza (se queda en el idioma en que se dijo cada línea); el idioma
+activo no persiste entre sesiones (no hay `config.ini` todavía en el proyecto). Windows
+sigue siendo la única plataforma verificada (ADR-0013). Detalle completo en
+docs/DECISIONS.md.
+
+M9 — MapMode (hito anterior). `src/game/map_format.h` define un formato
 `.vnm` propio (ADR-0043: SPEC.md #11 no da el layout, a diferencia de `.vnc`/`.vnsave`) —
 rejilla de tiles, bits de colisión, triggers con ruta a un `.vnc`. `tools/bake/main.cpp`
 (`vne_bake map`) escanea el subconjunto de TMX que este proyecto autora (una capa

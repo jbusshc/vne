@@ -210,6 +210,13 @@ int main(int argc, char** argv) {
     if (!demo_font.valid()) {
         log_error("No se pudo cargar la fuente de prueba NotoSansJP.ttf");
     }
+    // Fuente latina aparte para el dialogo en español (M10, "fuentes CJK bajo demanda":
+    // la fuente CJK completa solo se necesita de verdad cuando el idioma activo la usa;
+    // la rasterizacion de glifos bajo demanda en si ya existe desde M2 en glyph_cache).
+    FontHandle latin_dialogue_font = text_load_font("assets_src/ttf/NotoSans.ttf", 28);
+    if (!latin_dialogue_font.valid()) {
+        log_error("No se pudo cargar la fuente de prueba NotoSans.ttf");
+    }
     const char* demo_text =
         "Hola {b}mundo{/b}. {color=#ff5040}Texto en rojo{/color}. "
         "{ruby=\xE3\x81\x8B\xE3\x82\x93\xE3\x81\x98}\xE6\xBC\xA2\xE5\xAD\x97{/ruby} "
@@ -241,7 +248,7 @@ int main(int argc, char** argv) {
     VnMode vn_mode{};
     vn_mode.state        = &demo_state;
     vn_mode.script        = demo_script;
-    vn_mode.font          = demo_font;
+    vn_mode.font          = latin_dialogue_font;  // idioma base: espanol (M10)
     vn_mode.layout_arena = &g_arena_scene;
 
     BacklogMode backlog_mode{};
@@ -250,9 +257,12 @@ int main(int argc, char** argv) {
     backlog_mode.scratch_arena = &g_arena_scene;
 
     MenuMode menu_mode{};
-    menu_mode.state         = &demo_state;
-    menu_mode.font          = demo_font;
-    menu_mode.scratch_arena = &g_arena_scene;
+    menu_mode.state              = &demo_state;
+    menu_mode.font                = demo_font;
+    menu_mode.scratch_arena      = &g_arena_scene;
+    menu_mode.dialogue_font_slot = &vn_mode.font;  // M10: cambia el idioma de VnMode
+    menu_mode.latin_font          = latin_dialogue_font;
+    menu_mode.cjk_font            = demo_font;
 
     SaveLoadMode save_load_mode{};
     save_load_mode.state         = &demo_state;

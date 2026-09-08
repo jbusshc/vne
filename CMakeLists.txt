@@ -285,6 +285,7 @@ add_library(vne_base STATIC
   src/text/font.cpp
   src/text/glyph_cache.cpp
   src/text/layout.cpp
+  src/text/catalog.cpp
   src/vm/vm.cpp
   src/vm/script_load.cpp
   src/vm/backlog.cpp
@@ -430,20 +431,24 @@ add_custom_target(vne_copy_ogg_assets
 )
 add_dependencies(vne_game vne_copy_ogg_assets)
 
-# Fuente de prueba para la demo de M2 (ADR pendiente de registrar: Noto Sans JP, OFL,
-# descargada para tener CJK real que probar; ver docs/DECISIONS.md). Se copia al
-# directorio de build para que vne_game la encuentre con una ruta relativa a su propio
-# CWD, igual que el atlas horneado.
-add_custom_command(
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSansJP.ttf
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          ${CMAKE_SOURCE_DIR}/assets_src/ttf/NotoSansJP.ttf
-          ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSansJP.ttf
-  DEPENDS ${CMAKE_SOURCE_DIR}/assets_src/ttf/NotoSansJP.ttf
-  COMMENT "Copiando NotoSansJP.ttf al directorio de build"
-)
-add_custom_target(vne_copy_fonts DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSansJP.ttf)
+# Fuentes de prueba (Noto Sans + Noto Sans JP, OFL, ADR-0017): se copian al directorio de
+# build para que vne_game las encuentre con una ruta relativa a su propio CWD, igual que
+# el atlas horneado. NotoSans.ttf (latina) se anadio en M10 para el idioma base del
+# dialogo, separada de la CJK que solo hace falta "bajo demanda" (ver docs/DECISIONS.md).
+foreach(font_file NotoSansJP.ttf NotoSans.ttf)
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/${font_file}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/assets_src/ttf/${font_file}
+            ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/${font_file}
+    DEPENDS ${CMAKE_SOURCE_DIR}/assets_src/ttf/${font_file}
+    COMMENT "Copiando ${font_file} al directorio de build"
+  )
+endforeach()
+add_custom_target(vne_copy_fonts DEPENDS
+  ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSansJP.ttf
+  ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSans.ttf)
 add_dependencies(vne_game vne_copy_fonts)
 
 # Guion de prueba de M3 (ADR pendiente, ver docs/DECISIONS.md): nombres placeholder
@@ -503,6 +508,25 @@ add_custom_command(
 add_custom_target(vne_bake_map
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_map.vnm)
 add_dependencies(vne_game vne_bake_map)
+
+# Catalogos de localizacion (M10, ADR-0046: horneados a binario). assets_src/locale/*.csv
+# son el formato de autoria, ya en el repo (es.csv se regenera a mano con
+# "vne_bake catalog-extract" cuando cambian los guiones, no automaticamente en cada build
+# — evita que un build normal reescriba un archivo que un traductor puede estar editando).
+foreach(locale es ja)
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/${locale}.vnl
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
+    COMMAND vne_bake catalog-compile
+            ${CMAKE_SOURCE_DIR}/assets_src/locale/${locale}.csv
+            ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/${locale}.vnl
+    DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/locale/${locale}.csv
+    COMMENT "vne_bake: compilando ${locale}.csv a ${locale}.vnl"
+  )
+  add_custom_target(vne_bake_catalog_${locale}
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/${locale}.vnl)
+  add_dependencies(vne_game vne_bake_catalog_${locale})
+endforeach()
 
 enable_testing()
 add_subdirectory(tests)

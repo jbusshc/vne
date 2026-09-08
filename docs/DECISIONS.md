@@ -1408,6 +1408,102 @@ byte a byte (no hay ningún binario v1 real disponible ya para generar uno).
 
 ---
 
+## ADR-0046 — Catálogo de localización horneado a binario, no suelto en texto plano
+
+**Fecha:** 2026-09-07
+**Hito:** M10
+**Estado:** aceptada — decisión del usuario (SPEC.md #14 la marca explícitamente como
+"el agente no debe tomarla solo")
+
+**Contexto.** SPEC.md #14 lista sin resolver: "si el catálogo de localización se
+empaqueta o queda suelto para permitir parches de traducción de la comunidad. Decidir en
+M10." Dejarlo suelto (un `.csv`/`.json` leído directo en runtime) permitiría que alguien
+parcheara una traducción sin recompilar nada; hornearlo a binario es más consistente con
+el resto del pipeline de assets (`.vnc`, `.vnm`, atlas) y con "cero parsing en release"
+(SPEC.md #9.3), pero exige tener `vne_bake` instalado para tocar una traducción.
+
+**Decision.** El catálogo se hornea a binario. `assets_src/locale/<idioma>.csv` es el
+formato de autoría (clave `archivo:linea:hash` + texto, editable a mano o por una
+herramienta de traducción); `vne_bake catalog <entrada.csv> <salida.vnl>` lo compila a
+`.vnl`, que es lo único que el juego lee en runtime (ver ADR-0047 para el layout).
+
+**Alternativas descartadas.** Catálogo suelto en texto plano leído directo por el juego:
+habría permitido parches de comunidad sin `vne_bake`, pero el usuario prefirió
+consistencia con el resto del pipeline sobre esa flexibilidad.
+
+**Consecuencias.** Una traducción nueva o corregida requiere ejecutar `vne_bake catalog`
+antes de que el juego la vea — no hay forma de parchear una traducción sin las
+herramientas de build. Si en el futuro se decide dar soporte a parches de comunidad sin
+recompilar, haría falta revisar esta decisión (registrarlo como una nueva ADR que
+sustituya a esta, no cambiar el comportamiento en silencio).
+
+---
+
+## ADR-0047 — Clave de catálogo: solo el hash del texto original importa en runtime, no `archivo:linea`
+
+**Fecha:** 2026-09-07
+**Hito:** M10
+**Estado:** aceptada
+
+**Contexto.** SPEC.md #9.2 especifica la clave como "archivo:linea:hash" pero también
+dice: "si el texto original cambia, la clave cambia y la traducción queda marcada como
+obsoleta en vez de mostrarse desactualizada" — la parte que garantiza esa propiedad es
+solo el hash del texto, no el archivo ni la línea (que pueden cambiar por razones ajenas
+a la traducción, p. ej. reordenar líneas de un guion).
+
+**Decision.** El componente que de verdad se usa como clave en runtime
+(`Cmd::say.key_hash`, `ChoiceOption.key_hash`, y la búsqueda en `text/catalog.cpp`) es
+solo `fnv1a_u32(texto_original)`, un `u32`. La cadena completa "archivo:linea:hash" solo
+existe en el catálogo de autoría (`assets_src/locale/*.csv`) para que un traductor pueda
+ubicar la línea a simple vista; `vne_bake catalog-compile` extrae el hash del final de
+esa cadena y descarta archivo/línea al hornear el `.vnl`.
+
+**Alternativas descartadas.** Usar la clave completa "archivo:linea:hash" como string en
+runtime (comparación de strings o un hash de la cadena completa): habría invalidado
+todas las traducciones existentes cada vez que alguien moviera una línea de sitio dentro
+de un guion, exactamente el problema que SPEC.md #9.2 dice que el hash debe evitar.
+
+**Consecuencias.** Un traductor debe conservar la línea de clave tal cual al traducir
+(solo cambia el texto en la línea siguiente); si la reescribe o la recalcula a mano, la
+traducción deja de encontrarse. Dos textos originales distintos que por mala suerte
+compartan el mismo hash de 32 bits colisionarían (mismo riesgo aceptado ya en ADR-0029/
+ADR-0034 para nombres de variable/pista de música) — improbable para el tamaño de
+catálogo de este proyecto.
+
+---
+
+## ADR-0048 — Traducción de prueba: placeholder marcado explícitamente, no japonés real
+
+**Fecha:** 2026-09-07
+**Hito:** M10
+**Estado:** aceptada
+
+**Contexto.** El criterio de M10 ("el juego cambia de español a japonés sin reiniciar")
+necesita un catálogo de traducción de verdad para probar el cambio de idioma en
+caliente. La regla no negociable #6 de `CLAUDE.md` prohíbe inventar contenido de juego;
+fabricar una traducción japonesa de calidad desconocida (sin revisión humana ni acceso a
+un traductor real) sería exactamente ese tipo de invención, solo que en otro idioma.
+
+**Decision.** `assets_src/locale/ja.csv` se generó mecánicamente a partir de
+`es.csv` anteponiendo el marcador literal `"[JA-placeholder] "` a cada texto (mismas
+claves, texto no traducido de verdad). Prueba el mecanismo completo (extracción,
+horneado, resolución por hash, cambio en caliente, carga de fuente CJK bajo demanda) sin
+pretender ser una traducción real.
+
+**Alternativas descartadas.** Traducir de verdad con el propio conocimiento del modelo:
+descartado por la misma razón que cualquier otro contenido de juego inventado — sin
+revisión humana, una "traducción" así no es fiable y podría acabar pareciendo contenido
+real en vez del placeholder obvio que la regla exige. Dejar `ja.csv` vacío: no
+demostraría que el pipeline resuelve claves de verdad (solo el camino "sin traducción,
+cae al texto base").
+
+**Consecuencias.** Antes de un lanzamiento real, `assets_src/locale/ja.csv` necesita una
+traducción japonesa de verdad hecha por una persona — anotado en "Pendientes
+observados". El pipeline en sí (extracción → horneado → resolución → cambio en caliente)
+no cambia cuando eso ocurra, solo el contenido del `.csv`.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -1581,3 +1677,26 @@ desviarte.
   todavia un catalogo de mapas por id como el de musica de M6 (ADR-0034). Si un hito
   futuro necesita mas de un mapa, hara falta resolver `map_id` a una ruta `.vnm` de la
   misma forma que `Bgm.track_id` se resuelve a un archivo de audio.
+- `assets_src/locale/ja.csv` es un placeholder mecanico, no una traduccion real
+  (ADR-0048): antes de cualquier lanzamiento hace falta que una persona lo traduzca de
+  verdad, conservando las claves tal cual.
+- El idioma activo no persiste entre sesiones (vive solo en memoria, MenuMode lo resetea
+  a español cada vez que arranca el proceso): el skill vne-serializable-state dice que
+  una preferencia de idioma va en `config.ini`, aparte de `GameState`, pero ese archivo
+  de configuracion todavia no existe en el proyecto (ningun hito hasta ahora lo ha
+  necesitado). Anotado para cuando exista.
+- El backlog (M4) no se relocaliza al cambiar de idioma: las lineas ya dichas se quedan
+  en el idioma en el que se dijeron (`BacklogEntry` no tiene `key_hash`, solo `text_id`
+  del guion). Cambiar esto exigiria anadir un campo a `BacklogEntry`, que ademas se
+  serializa en `.vnsave` (M4) — el mismo tipo de migracion de version que
+  `GameState` v1->v2 (ADR-0045), no se hizo por alcance: M10 solo pedia que el dialogo en
+  curso cambiara de idioma, no el historial.
+- Solo hay una fuente CJK (`NotoSansJP.ttf`) y se asume que cualquier idioma no-español
+  la necesita (`MenuMode::update`, comentario "un unico caso especial"): si se anade un
+  tercer idioma con un alfabeto distinto (p. ej. coreano), hay que ampliar esa logica a
+  una tabla idioma->fuente en vez de un booleano.
+- El cambio de idioma en caliente (M10) se verifico con tests automatizados sobre
+  `text/catalog.cpp` (carga, resolucion por hash, generacion que fuerza relayout) pero no
+  pulsando las flechas en el `MenuMode` real dentro de la ventana interactiva en este
+  entorno (misma limitacion de siempre): no se vio el texto cambiar de espanol a
+  "[JA-placeholder]" en pantalla de verdad, solo que la maquinaria que lo haria funciona.

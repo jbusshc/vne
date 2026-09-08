@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include "gfx/gfx.h"
+#include "text/catalog.h"
 #include "vm/script_load.h"
 
 namespace {
@@ -18,16 +19,23 @@ bool current_is_say(const VnMode& vn) {
 }
 
 void rebuild_layout_if_needed(VnMode* vn) {
-    if (!current_is_say(*vn) || vn->layout_pc == vn->state->vm.pc) {
+    u32 gen = catalog_generation();
+    if (!current_is_say(*vn) ||
+        (vn->layout_pc == vn->state->vm.pc && vn->layout_locale_gen == gen)) {
         return;
     }
     const Cmd& cmd  = vn->script.cmds[vn->state->vm.pc];
-    const char* text = script_string(vn->script, cmd.say.text_id);
+    // Catalogo primero, texto base del guion como respaldo (M10, SPEC.md #10: "todos
+    // los textos vienen del catalogo"; nunca cadena vacia si falta la traduccion).
+    const char* base_text = script_string(vn->script, cmd.say.text_id);
+    const char* text       = catalog_resolve(cmd.say.key_hash, base_text);
     // text_layout es la funcion cara de este modulo (skill vne-rendering): solo se llama
-    // aqui, cuando la linea de dialogo cambia, nunca por frame.
-    vn->current_layout   = text_layout(vn->font, text, 1700.0f, vn->layout_arena);
-    vn->layout_pc         = vn->state->vm.pc;
-    vn->visible_glyphs_f = 0.0f;
+    // aqui, cuando la linea de dialogo cambia (o cambia el idioma activo), nunca por
+    // frame sin mas.
+    vn->current_layout     = text_layout(vn->font, text, 1700.0f, vn->layout_arena);
+    vn->layout_pc           = vn->state->vm.pc;
+    vn->layout_locale_gen = gen;
+    vn->visible_glyphs_f   = 0.0f;
 }
 
 }  // namespace

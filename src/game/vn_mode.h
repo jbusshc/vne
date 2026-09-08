@@ -17,7 +17,8 @@ struct VnMode : Mode {
     Arena*          layout_arena = nullptr;  // g_arena_scene: el layout sobrevive entre frames
 
     TextLayout current_layout;
-    u32        layout_pc = 0xFFFFFFFFu;  // pc para el que se construyo current_layout
+    u32        layout_pc         = 0xFFFFFFFFu;  // pc para el que se construyo current_layout
+    u32        layout_locale_gen = 0xFFFFFFFFu;  // catalog_generation() de ese momento (M10)
     f32        visible_glyphs_f = 0.0f;
 
     bool skip_mode = false;
