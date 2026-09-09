@@ -5,26 +5,46 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** M11 — Sistema de assets y empaquetado (implementado, pendiente de
-confirmación para cerrar). `platform/files.{h,cpp}` sobre SDL3 unifica el filesystem y
-deja `audio.cpp` sin `#if` de plataforma (deuda que SPEC.md §2 nombraba).
-`assets/pak.{h,cpp}` implementa el `.pak` de §11 con dos backends tras la misma interfaz
-(directorio suelto en Debug/Dev, `.pak` residente en Ship) y `vne_bake pack` lo construye;
-**ningún cargador del motor abre ya un archivo por ruta literal** — texturas, fuentes,
-guiones, mapas, catálogos y audio resuelven nombres lógicos. `assets/assets.{h,cpp}` añade
-el hilo de IO (SDL_Thread + cola circular fija con mutex/condición) y la API de §7.4:
-`assets_texture` es asíncrona con placeholder y el mismo handle pasa a la textura real al
-integrarla; `assets_font`/`assets_sound` son síncronas a propósito (ADR-0053, ninguna
-tiene placeholder que enseñar). `assets/hot_reload.{h,cpp}` vigila mtimes cada 500 ms y
-recarga `.ttf` y `.png` en caliente; los `.vns` siguen en el editor porque tocan la VM.
-Cinco decisiones nuevas: ADR-0051 (heap_guard `thread_local`), ADR-0052 (el hilo de IO
-solo lee bytes), ADR-0053, ADR-0054 (`.pak` leído a memoria, no `mmap`), ADR-0055 (audio
-empaquetado y catálogo de música horneado). `atlas.bin` sigue sin nombres lógicos a
-propósito, no por olvido: no hay consumidor todavía (lo necesita M15), anotado en
-Pendientes.
+**Hito activo:** ninguno. El siguiente por defecto es M12 (presentación y jugabilidad
+completas), que ya puede apoyarse en el sistema de assets de M11 para las máscaras de
+transición.
+
+**Último hito completado:** M11 — Sistema de assets y empaquetado.
+`platform/files.{h,cpp}` sobre SDL3 unifica el filesystem y deja `audio.cpp` sin ningún
+`#if` de plataforma (la deuda que SPEC.md §2 nombraba). `assets/pak.{h,cpp}` implementa el
+`.pak` de §11 con dos backends tras la misma interfaz (directorio suelto en Debug/Dev,
+`.pak` residente en Ship) y `vne_bake pack` lo construye; **ningún cargador del motor abre
+ya un archivo por ruta literal** — texturas, fuentes, guiones, mapas, catálogos y audio
+resuelven nombres lógicos. `assets/assets.{h,cpp}` añade el hilo de IO (SDL_Thread + cola
+circular de tamaño fijo con mutex/condición, sin heap) y la API de §7.4: `assets_texture`
+es asíncrona con placeholder y el mismo handle pasa a la textura real al integrarla;
+`assets_font`/`assets_sound` son síncronas a propósito (ADR-0053, ninguna tiene placeholder
+que enseñar). `assets/hot_reload.{h,cpp}` vigila mtimes cada 500 ms y recarga `.ttf` y
+`.png` en caliente, con recarga *en el sitio* que conserva el handle (`text_reload_font`,
+`assets_reload_texture`); los `.vns` siguen en el editor porque recargarlos toca la VM.
+
+Criterios verificados con números, no por encima: handle válido en **9-12 µs** (criterio
+<100 µs), integrar el atlas cuesta **~8 ms** de los 16.6 ms de un frame — por eso se
+integra **una** carga por llamada y no todas —, y Ship arranca y se juega **solo desde
+`game.pak`** con `assets_baked/` y `assets_src/` renombrados (los tres guiones de demo
+completan con exit 0, incluido `demo_audio.vns`, que ejercita el decode desde memoria; la
+ventana real corre sin crash con `heap_allocs_frame_max=0`). La recarga en caliente de
+`.png`, `.ttf` y `.vns` se comprobó tocando los tres archivos con el juego corriendo.
+126/126 tests en Dev, 125/125 en Ship, 125/126 en Debug+ASan (solo el de rendimiento de
+M2, no representativo sin optimizar, ADR-0018).
+
+Cinco decisiones nuevas: ADR-0051 (`heap_guard` pasa a `thread_local` — el segundo hilo
+habría corrido datos con el contador del principal; la solución no fue una cuarta excepción
+a la regla de cero heap sino contabilidad por hilo), ADR-0052 (el hilo de IO solo lee
+bytes; decode y GPU en el principal), ADR-0053, ADR-0054 (`.pak` leído a memoria, no
+`mmap`) y ADR-0055 (audio empaquetado y catálogo de música horneado). `atlas.bin` sigue
+sin nombres lógicos **a propósito**, no por olvido: no hay ningún consumidor que pida un
+sprite por nombre todavía, y añadir una API sin llamante es lo que SPEC.md §1 dice que no
+se hace. Lo necesita M15. Windows sigue siendo la única plataforma verificada (ADR-0013).
+Detalle completo en docs/DECISIONS.md.
 
 M0–M10 están cerrados. La hoja de ruta se amplió con **M11–M15** (ADR-0050) tras comprobar
-que cerrar en M10 dejaba fuera partes enteras de la especificación: M11 (este hito), M12
+que cerrar en M10 dejaba fuera partes enteras de la especificación: M11 (cerrado), M12
 presentación y jugabilidad completas (`Move`/`Transition`, `{w=}`/`{speed=}`/`{b}` con
 efecto real, polifonía, AABB), M13 integridad de datos y herramientas offline (validar
 actores, detectar colisiones de hash, `vne_bake font`, TMX robusto), M14 configuración y
