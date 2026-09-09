@@ -282,6 +282,7 @@ add_library(vne_base STATIC
   src/platform/input.cpp
   src/platform/files.cpp
   src/assets/pak.cpp
+  src/assets/assets.cpp
   src/gfx/gfx.cpp
   src/gfx/texture.cpp
   src/text/font.cpp

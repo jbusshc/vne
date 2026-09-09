@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <doctest/doctest.h>
 
+#include "assets/assets.h"
 #include "assets/pak.h"
 #include "base/arena.h"
 #include "gfx/gfx.h"
@@ -49,6 +50,9 @@ int main(int argc, char** argv) {
         // g_arena_frame este inicializada.
         glyph_cache_init();
         gfx_begin_frame();
+        // Despues del sistema de texturas (reserva el handle placeholder) y con el backend
+        // ya montado arriba: assets_init() arranca el hilo de IO.
+        assets_init();
         g_test_font_latin = text_load_font("ttf/NotoSans.ttf", 32);
         g_test_font_cjk   = text_load_font("ttf/NotoSansJP.ttf", 32);
     }
@@ -61,6 +65,7 @@ int main(int argc, char** argv) {
 
     audio_shutdown();
     if (have_gfx) {
+        assets_shutdown();  // para el hilo de IO antes de tirar el contexto grafico
         glyph_cache_shutdown();
         gfx_shutdown();
     }

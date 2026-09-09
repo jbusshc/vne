@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "assets/assets.h"
 #include "assets/pak.h"
 #include "audio/audio.h"
 #include "base/arena.h"
@@ -222,16 +223,20 @@ int main(int argc, char** argv) {
     // (text/ ya depende de gfx/). Es la misma capa que ya llama a
     // glyph_cache_begin_frame() cada frame.
     glyph_cache_init();
+    // Despues del sistema de texturas (assets_texture reserva el handle placeholder) y con
+    // el backend ya montado: arranca el hilo de IO (SPEC.md #7.4).
+    assets_init();
 
 #if defined(VN_EDITOR)
     editor_init();
     g_editor_render_hook = editor_render;
 #endif
 
-    TextureHandle atlas{};
-    if (texture_load("atlas_00.qoi", &atlas) != TextureLoadResult::Ok) {
-        log_error("No se pudo cargar el atlas de prueba; se usara el placeholder magenta.");
-    }
+    // assets_texture y no texture_load: devuelve ya un handle dibujable (placeholder
+    // magenta) y el hilo de IO trae el atlas de verdad por detras, que aparece solo en
+    // cuanto assets_process_completed_loads() lo integre, sobre este mismo handle
+    // (SPEC.md #7.4, criterio de M11). Los primeros frames dibujan magenta a proposito.
+    TextureHandle atlas = assets_texture("atlas_00.qoi");
 
     u32              atlas_sprite_count = 0;
     AtlasSpriteRect* atlas_sprites      = read_atlas_manifest(&atlas_sprite_count);
@@ -334,6 +339,9 @@ int main(int argc, char** argv) {
         heap_guard_reset_frame();
         gfx_begin_frame();
         glyph_cache_begin_frame();
+        // Unico punto donde un asset que trajo el hilo de IO entra en el juego (SPEC.md
+        // #7.4). Acotado por dentro para no reventar el presupuesto del frame.
+        assets_process_completed_loads();
 
         platform_poll_events(&input);
 
@@ -501,6 +509,7 @@ int main(int argc, char** argv) {
     editor_shutdown();
 #endif
     audio_shutdown();
+    assets_shutdown();       // para el hilo de IO antes de tirar nada que pueda estar usando
     glyph_cache_shutdown();  // antes de gfx_shutdown, simetrico con el init de arriba
     gfx_shutdown();
     platform_window_destroy(&window);
