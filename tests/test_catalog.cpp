@@ -14,7 +14,7 @@
 
 TEST_CASE("catalog_load: carga el .vnl horneado y resuelve una clave conocida") {
     Arena a = arena_create(256 * 1024, "test_catalog");
-    REQUIRE(catalog_load("assets_baked/ja.vnl", &a) == CatalogLoadResult::Ok);
+    REQUIRE(catalog_load("ja.vnl", &a) == CatalogLoadResult::Ok);
 
     u32 key = fnv1a_u32("Linea de dialogo de prueba numero 1 del capitulo uno.");
     const char* translated = catalog_find(key);
@@ -27,7 +27,7 @@ TEST_CASE("catalog_load: carga el .vnl horneado y resuelve una clave conocida") 
 
 TEST_CASE("catalog_find: una clave que no esta en el catalogo activo devuelve nullptr") {
     Arena a = arena_create(256 * 1024, "test_catalog");
-    REQUIRE(catalog_load("assets_baked/ja.vnl", &a) == CatalogLoadResult::Ok);
+    REQUIRE(catalog_load("ja.vnl", &a) == CatalogLoadResult::Ok);
 
     CHECK(catalog_find(0xDEADBEEFu) == nullptr);
 
@@ -48,7 +48,7 @@ TEST_CASE("catalog_resolve: cae al texto base cuando no hay traduccion (M10, nun
 
 TEST_CASE("catalog_load: un archivo inexistente falla sin crashear y limpia el catalogo") {
     Arena a = arena_create(256 * 1024, "test_catalog");
-    CHECK(catalog_load("assets_baked/no_existe.vnl", &a) == CatalogLoadResult::NotFound);
+    CHECK(catalog_load("no_existe.vnl", &a) == CatalogLoadResult::NotFound);
     CHECK(catalog_find(1) == nullptr);
     arena_destroy(&a);
 }
@@ -59,7 +59,7 @@ TEST_CASE("catalog_generation: cambia con cada catalog_load/catalog_clear (M10, 
     u32 gen0 = catalog_generation();
 
     Arena a = arena_create(256 * 1024, "test_catalog");
-    REQUIRE(catalog_load("assets_baked/es.vnl", &a) == CatalogLoadResult::Ok);
+    REQUIRE(catalog_load("es.vnl", &a) == CatalogLoadResult::Ok);
     u32 gen1 = catalog_generation();
     CHECK(gen1 != gen0);
 

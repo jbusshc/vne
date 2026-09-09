@@ -30,7 +30,10 @@ struct MapMode : Mode {
     // volver a entrar de inmediato: se limpia cuando el jugador sale del tile.
     i32 active_trigger_index = -1;
 
-    bool load(const char* vnm_path, Arena* arena);
+    // logical_name se resuelve contra el backend de assets activo (directorio suelto o
+    // .pak, ver assets/pak.h -- p.ej. "demo_map.vnm"), no una ruta de archivo literal
+    // (M11).
+    bool load(const char* logical_name, Arena* arena);
 
     bool tile_blocked(i32 tile_x, i32 tile_y) const;
     i32  trigger_at(i32 tile_x, i32 tile_y) const;

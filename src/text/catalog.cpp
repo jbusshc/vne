@@ -1,9 +1,9 @@
 #include "text/catalog.h"
 
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
 
+#include "assets/pak.h"
 #include "base/log.h"
 
 namespace {
@@ -18,36 +18,27 @@ u32 catalog_generation() {
     return g_generation;
 }
 
-CatalogLoadResult catalog_load(const char* vnl_path, Arena* arena) {
+CatalogLoadResult catalog_load(const char* logical_name, Arena* arena) {
     catalog_clear();
 
-    std::FILE* file = std::fopen(vnl_path, "rb");
-    if (file == nullptr) {
-        log_error("catalog_load: no se encontro '%s'", vnl_path);
+    // M11: ya no abre directamente por ruta de archivo -- se resuelve a traves del
+    // backend activo (directorio suelto o .pak, ver assets/pak.h), mismo patron que
+    // vm/script_load.cpp y MapMode::load.
+    const u8* bytes = nullptr;
+    usize     size  = 0;
+    if (!pak_resolve_into_arena(logical_name, arena, &bytes, &size)) {
+        log_error("catalog_load: no se encontro '%s'", logical_name);
         return CatalogLoadResult::NotFound;
     }
-    std::fseek(file, 0, SEEK_END);
-    long size = std::ftell(file);
-    std::fseek(file, 0, SEEK_SET);
-    if (size < static_cast<long>(4 * sizeof(u32))) {
-        std::fclose(file);
-        log_error("catalog_load: '%s' demasiado pequeno para ser un .vnl", vnl_path);
+    if (size < 4 * sizeof(u32)) {
+        log_error("catalog_load: '%s' demasiado pequeno para ser un .vnl", logical_name);
         return CatalogLoadResult::BadFormat;
     }
-
-    u8* bytes = arena_alloc_n<u8>(arena, static_cast<usize>(size));
-    if (bytes == nullptr ||
-        std::fread(bytes, 1, static_cast<usize>(size), file) != static_cast<usize>(size)) {
-        std::fclose(file);
-        log_error("catalog_load: fallo leyendo '%s'", vnl_path);
-        return CatalogLoadResult::BadFormat;
-    }
-    std::fclose(file);
 
     u32 header[4];
     std::memcpy(header, bytes, sizeof(header));
     if (header[0] != k_vnl_magic || header[1] != k_vnl_version) {
-        log_error("catalog_load: '%s' no es un .vnl valido (magic/version)", vnl_path);
+        log_error("catalog_load: '%s' no es un .vnl valido (magic/version)", logical_name);
         return CatalogLoadResult::BadFormat;
     }
     u32 count            = header[2];
@@ -63,14 +54,14 @@ CatalogLoadResult catalog_load(const char* vnl_path, Arena* arena) {
     g_string_pool = reinterpret_cast<const char*>(bytes + offset);
     offset += string_pool_size;
 
-    if (offset > static_cast<usize>(size)) {
-        log_error("catalog_load: '%s' esta truncado", vnl_path);
+    if (offset > size) {
+        log_error("catalog_load: '%s' esta truncado", logical_name);
         catalog_clear();
         return CatalogLoadResult::BadFormat;
     }
     g_count = count;
 
-    log_info("catalog_load: '%s' cargado (%u entradas)", vnl_path, g_count);
+    log_info("catalog_load: '%s' cargado (%u entradas)", logical_name, g_count);
     return CatalogLoadResult::Ok;
 }
 

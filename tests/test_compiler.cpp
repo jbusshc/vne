@@ -51,7 +51,7 @@ TEST_CASE("compiler: Sfx guarda la ruta completa en el string_pool; Bgm usa hash
     REQUIRE(compiled.data.cmds.size() == 4);
     CHECK(compiled.data.cmds[0].kind == CmdKind::Sfx);
     std::string path(compiled.data.string_pool.data() + compiled.data.cmds[0].sfx.text_id);
-    CHECK(path == "assets_src/ogg/puerta_cierra.wav");
+    CHECK(path == "ogg/puerta_cierra.wav");
 
     CHECK(compiled.data.cmds[1].kind == CmdKind::Bgm);
     CHECK(compiled.data.cmds[1].bgm.track_id ==

@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "base/hash.h"
 #include "game/map_format.h"
 #include "script/compiler.h"
 #include "script/map_bake.h"
@@ -50,17 +51,30 @@ static void ensure_directory_exists(const char* path) {
 #endif
 }
 
-static std::vector<std::string> list_png_files(const char* dir) {
+// extension incluye el punto (".png"); nullptr o "" lista todo el directorio (M11,
+// vne_bake pack, que necesita recorrer assets_baked/ entero sin filtrar por tipo).
+static std::vector<std::string> list_files_in_dir(const char* dir, const char* extension) {
     std::vector<std::string> result;
+    auto matches = [&](const std::string& name) {
+        if (extension == nullptr || extension[0] == '\0') {
+            return true;
+        }
+        usize ext_len = std::strlen(extension);
+        return name.size() > ext_len &&
+               name.compare(name.size() - ext_len, ext_len, extension) == 0;
+    };
 #if defined(_WIN32)
-    std::string        pattern = std::string(dir) + "\\*.png";
+    std::string        pattern = std::string(dir) + "\\*";
     WIN32_FIND_DATAA    find_data;
     HANDLE handle = FindFirstFileA(pattern.c_str(), &find_data);
     if (handle == INVALID_HANDLE_VALUE) {
         return result;
     }
     do {
-        result.push_back(std::string(dir) + "/" + find_data.cFileName);
+        std::string name = find_data.cFileName;
+        if (name[0] != '.' && matches(name)) {
+            result.push_back(std::string(dir) + "/" + name);
+        }
     } while (FindNextFileA(handle, &find_data));
     FindClose(handle);
 #else
@@ -71,13 +85,17 @@ static std::vector<std::string> list_png_files(const char* dir) {
     struct dirent* entry;
     while ((entry = readdir(d)) != nullptr) {
         std::string name = entry->d_name;
-        if (name.size() > 4 && name.compare(name.size() - 4, 4, ".png") == 0) {
+        if (name[0] != '.' && matches(name)) {
             result.push_back(std::string(dir) + "/" + name);
         }
     }
     closedir(d);
 #endif
     return result;
+}
+
+static std::vector<std::string> list_png_files(const char* dir) {
+    return list_files_in_dir(dir, ".png");
 }
 
 namespace {
@@ -506,13 +524,160 @@ int bake_atlas() {
     return bake_atlas_procedural_fallback();
 }
 
+// --- Empaquetado (M11, SPEC.md #11): junta todo lo que el juego lee en runtime en un
+// unico game.pak. Debe coincidir con assets/pak.cpp (duplicado a proposito, ver el
+// comentario alli: mismo patron que el magic de .vnc entre compiler.cpp y
+// script_load.cpp).
+
+constexpr u32 k_pak_magic   = 0x4B504E56u;  // 'VNPK'
+constexpr u32 k_pak_version = 1;
+
+enum class PakEntryType : u8 { Texture, Font, Sound, Script, Map, Locale, Other };
+
+struct PakEntry {
+    u64          name_hash;
+    u64          offset;
+    u32          size;
+    PakEntryType type;
+    u8           _pad[3];
+};
+static_assert(sizeof(PakEntry) == 24);
+
+PakEntryType pak_type_for_extension(const std::string& logical_name) {
+    auto ends_with = [&](const char* suffix) {
+        usize len = std::strlen(suffix);
+        return logical_name.size() >= len &&
+               logical_name.compare(logical_name.size() - len, len, suffix) == 0;
+    };
+    if (ends_with(".qoi") || ends_with(".bin")) return PakEntryType::Texture;
+    if (ends_with(".ttf")) return PakEntryType::Font;
+    if (ends_with(".ogg") || ends_with(".wav")) return PakEntryType::Sound;
+    if (ends_with(".vnc")) return PakEntryType::Script;
+    if (ends_with(".vnm")) return PakEntryType::Map;
+    if (ends_with(".vnl")) return PakEntryType::Locale;
+    return PakEntryType::Other;
+}
+
+// vne_bake pack <salida.pak> <assets_baked_dir> <assets_src_dir>. assets_baked_dir se
+// recorre entero y plano (atlas, .vnc, .vnm, .vnl: todo ya horneado con nombres finales).
+// De assets_src_dir solo entran ttf/ y ogg/, con ese prefijo en su nombre logico dentro
+// del pak -- son los dos unicos tipos que SPEC.md #11 todavia no hornea a un formato
+// propio (vne_bake font no existe hasta M13; audio es copia directa desde M6), asi que
+// esta es la unica forma de que Ship no dependa de leerlos sueltos de assets_src/.
+int bake_pack(const char* out_path, const char* baked_dir, const char* src_dir) {
+    struct PendingEntry { std::string logical_name; std::string bytes; PakEntryType type; };
+    std::vector<PendingEntry> pending;
+
+    auto collect = [&](const std::vector<std::string>& paths, const char* prefix) {
+        for (const std::string& path : paths) {
+            std::string content;
+            if (!read_whole_file(path.c_str(), &content)) {
+                log_error("vne_bake pack: no se pudo leer '%s'", path.c_str());
+                continue;
+            }
+            usize       slash    = path.find_last_of("/\\");
+            std::string filename = slash == std::string::npos ? path : path.substr(slash + 1);
+            std::string logical  = prefix != nullptr ? std::string(prefix) + filename : filename;
+            pending.push_back(PendingEntry{logical, std::move(content),
+                                            pak_type_for_extension(logical)});
+        }
+    };
+
+    collect(list_files_in_dir(baked_dir, nullptr), nullptr);
+    collect(list_files_in_dir((std::string(src_dir) + "/ttf").c_str(), nullptr), "ttf/");
+    std::vector<std::string> ogg_paths = list_files_in_dir((std::string(src_dir) + "/ogg").c_str(),
+                                                             nullptr);
+    collect(ogg_paths, "ogg/");
+
+    // Catalogo de musica horneado dentro del propio pak (M11): en backend suelto,
+    // audio.cpp sigue escaneando assets_src/ogg/ en runtime (dir_list_by_extension), pero
+    // en Ship solo existe game.pak -- no hay directorio que escanear. "ogg_catalog.bin" es
+    // el mismo {track_id -> nombre logico} que antes se armaba en runtime, generado aqui
+    // en su lugar. Formato: registros de tamano fijo, sin cabecera (el conteo sale de
+    // dividir el tamano de la entrada del pak entre sizeof(record), mismo patron que
+    // atlas_00.bin con sus SpriteRect). Debe coincidir con audio.cpp (duplicado a
+    // proposito, mismo patron que el resto de formatos de este proyecto).
+    struct OggCatalogRecord {
+        u16  track_id;
+        u8   _pad[2];
+        char logical_name[64];
+    };
+    static_assert(sizeof(OggCatalogRecord) == 68);
+    if (!ogg_paths.empty()) {
+        std::string catalog_bytes;
+        for (const std::string& path : ogg_paths) {
+            usize       slash    = path.find_last_of("/\\");
+            std::string filename = slash == std::string::npos ? path : path.substr(slash + 1);
+            std::string logical  = "ogg/" + filename;
+            std::string name_no_ext = filename;
+            usize       dot         = name_no_ext.find_last_of('.');
+            if (dot != std::string::npos) {
+                name_no_ext.resize(dot);
+            }
+            OggCatalogRecord record{};
+            record.track_id = static_cast<u16>(fnv1a_u32(name_no_ext) % 65536u);
+            std::snprintf(record.logical_name, sizeof(record.logical_name), "%s",
+                          logical.c_str());
+            catalog_bytes.append(reinterpret_cast<const char*>(&record), sizeof(record));
+        }
+        pending.push_back(
+            PendingEntry{"ogg_catalog.bin", std::move(catalog_bytes), PakEntryType::Other});
+    }
+
+    if (pending.empty()) {
+        log_error("vne_bake pack: no se encontro ningun asset en '%s' ni en '%s'", baked_dir,
+                   src_dir);
+        return 1;
+    }
+
+    // Orden por hash ascendente: assets/pak.cpp resuelve con busqueda binaria, igual que
+    // text/catalog.cpp con las claves de un .vnl.
+    std::sort(pending.begin(), pending.end(), [](const PendingEntry& a, const PendingEntry& b) {
+        return fnv1a_u64(a.logical_name) < fnv1a_u64(b.logical_name);
+    });
+
+    std::FILE* out = std::fopen(out_path, "wb");
+    if (out == nullptr) {
+        log_error("vne_bake pack: no se pudo escribir '%s'", out_path);
+        return 1;
+    }
+
+    u32 header[3] = {k_pak_magic, k_pak_version, static_cast<u32>(pending.size())};
+    std::fwrite(header, sizeof(u32), 3, out);
+
+    usize data_offset = 3 * sizeof(u32) + pending.size() * sizeof(PakEntry);
+    std::vector<PakEntry> entries;
+    entries.reserve(pending.size());
+    for (const PendingEntry& e : pending) {
+        entries.push_back(PakEntry{fnv1a_u64(e.logical_name), data_offset,
+                                    static_cast<u32>(e.bytes.size()), e.type, {}});
+        data_offset += e.bytes.size();
+    }
+    std::fwrite(entries.data(), sizeof(PakEntry), entries.size(), out);
+    for (const PendingEntry& e : pending) {
+        std::fwrite(e.bytes.data(), 1, e.bytes.size(), out);
+    }
+    std::fclose(out);
+
+    log_info("vne_bake: %zu assets empaquetados en '%s'", pending.size(), out_path);
+    return 0;
+}
+
 }  // namespace
 
 // Uso: vne_bake [atlas | script <in.vns> <out.vnc> | map <in.tmx> <out.vnm> |
-//                catalog-extract <out.csv> <guion.vns...> | catalog-compile <in.csv> <out.vnl>]
+//                catalog-extract <out.csv> <guion.vns...> | catalog-compile <in.csv> <out.vnl> |
+//                pack <out.pak> <assets_baked_dir> <assets_src_dir>]
 // Sin argumentos (o "atlas"): empaqueta assets_src/png/*.png si hay alguno (ADR-0025), o
 // genera el placeholder procedural de respaldo si no.
 int main(int argc, char** argv) {
+    if (argc >= 2 && std::strcmp(argv[1], "pack") == 0) {
+        if (argc < 5) {
+            log_error("uso: vne_bake pack <salida.pak> <assets_baked_dir> <assets_src_dir>");
+            return 1;
+        }
+        return bake_pack(argv[2], argv[3], argv[4]);
+    }
     if (argc >= 2 && std::strcmp(argv[1], "script") == 0) {
         if (argc < 4) {
             log_error("uso: vne_bake script <entrada.vns> <salida.vnc>");

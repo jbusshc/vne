@@ -25,8 +25,7 @@ struct MenuMode : Mode {
     FontHandle  cjk_font;
     static constexpr u32 k_locale_count               = 2;
     const char*           locale_names[k_locale_count] = {"Espanol", "Nihongo (placeholder)"};
-    const char*           locale_vnl_paths[k_locale_count] = {nullptr,
-                                                                "assets_baked/ja.vnl"};
+    const char*           locale_vnl_paths[k_locale_count] = {nullptr, "ja.vnl"};
     i32                   locale_index                     = 0;
 
     // Cache de layouts (skill vne-rendering): solo se reconstruye cuando cambia algo

@@ -1,41 +1,32 @@
 #include "game/map_mode.h"
 
-#include <cstdio>
 #include <cstring>
 
 #include <SDL3/SDL.h>
 
+#include "assets/pak.h"
 #include "base/log.h"
 #include "gfx/gfx.h"
 
-bool MapMode::load(const char* vnm_path, Arena* arena) {
-    std::FILE* file = std::fopen(vnm_path, "rb");
-    if (file == nullptr) {
-        log_error("MapMode::load: no se encontro '%s'", vnm_path);
+bool MapMode::load(const char* logical_name, Arena* arena) {
+    // M11: ya no abre directamente por ruta de archivo -- se resuelve a traves del
+    // backend activo (directorio suelto o .pak, ver assets/pak.h), mismo patron que
+    // vm/script_load.cpp.
+    const u8* bytes = nullptr;
+    usize     size  = 0;
+    if (!pak_resolve_into_arena(logical_name, arena, &bytes, &size)) {
+        log_error("MapMode::load: no se encontro '%s'", logical_name);
         return false;
     }
-    std::fseek(file, 0, SEEK_END);
-    long size = std::ftell(file);
-    std::fseek(file, 0, SEEK_SET);
-    if (size < static_cast<long>(7 * sizeof(u32))) {
-        std::fclose(file);
-        log_error("MapMode::load: '%s' demasiado pequeno para ser un .vnm", vnm_path);
+    if (size < 7 * sizeof(u32)) {
+        log_error("MapMode::load: '%s' demasiado pequeno para ser un .vnm", logical_name);
         return false;
     }
-
-    u8* bytes = arena_alloc_n<u8>(arena, static_cast<usize>(size));
-    if (bytes == nullptr ||
-        std::fread(bytes, 1, static_cast<usize>(size), file) != static_cast<usize>(size)) {
-        std::fclose(file);
-        log_error("MapMode::load: fallo leyendo '%s'", vnm_path);
-        return false;
-    }
-    std::fclose(file);
 
     u32 header[7];
     std::memcpy(header, bytes, sizeof(header));
     if (header[0] != k_vnm_magic || header[1] != k_vnm_version) {
-        log_error("MapMode::load: '%s' no es un .vnm valido (magic/version)", vnm_path);
+        log_error("MapMode::load: '%s' no es un .vnm valido (magic/version)", logical_name);
         return false;
     }
     grid_w        = header[2];
@@ -57,8 +48,8 @@ bool MapMode::load(const char* vnm_path, Arena* arena) {
     string_pool = reinterpret_cast<const char*>(bytes + offset);
     offset += string_pool_size;
 
-    if (offset > static_cast<usize>(size)) {
-        log_error("MapMode::load: '%s' esta truncado", vnm_path);
+    if (offset > size) {
+        log_error("MapMode::load: '%s' esta truncado", logical_name);
         return false;
     }
     return true;

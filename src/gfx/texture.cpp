@@ -14,10 +14,9 @@
 #pragma warning(pop)
 #endif
 
-#include <cstdio>
 #include <cstdlib>
 
-#include "base/arena.h"
+#include "assets/pak.h"
 #include "base/log.h"
 #include "base/pool.h"
 #include "gfx/texture_internal.h"
@@ -60,6 +59,32 @@ sg_sampler make_default_sampler() {
     return sg_make_sampler(&desc);
 }
 
+// Decodifica QOI y sube la imagen resultante a *slot (sobrescribe image/sampler/width/
+// height). Compartido entre texture_load (sincrono, M1) y texture_finish_load_from_memory
+// (M11, bytes que ya trajo el hilo de IO): la unica diferencia entre ambos es de donde
+// salen los bytes QOI, no que se hace con ellos.
+bool decode_qoi_into_slot(TextureSlot* slot, const void* qoi_bytes, usize qoi_size) {
+    qoi_desc desc{};
+    void*    pixels = qoi_decode(qoi_bytes, static_cast<int>(qoi_size), &desc, 4);
+    if (pixels == nullptr) {
+        return false;
+    }
+
+    sg_image_desc img_desc{};
+    img_desc.width                    = static_cast<int>(desc.width);
+    img_desc.height                   = static_cast<int>(desc.height);
+    img_desc.pixel_format             = SG_PIXELFORMAT_RGBA8;
+    img_desc.data.subimage[0][0].ptr  = pixels;
+    img_desc.data.subimage[0][0].size = static_cast<usize>(desc.width) * desc.height * 4;
+
+    slot->image   = sg_make_image(&img_desc);
+    slot->sampler = make_default_sampler();
+    slot->width   = static_cast<i32>(desc.width);
+    slot->height  = static_cast<i32>(desc.height);
+    std::free(pixels);
+    return true;
+}
+
 }  // namespace
 
 void texture_system_init() {
@@ -79,61 +104,68 @@ void texture_system_shutdown() {
     g_pool = Pool<TextureSlot, k_max_textures>{};
 }
 
-TextureLoadResult texture_load(const char* path, TextureHandle* out) {
+TextureLoadResult texture_load(const char* logical_name, TextureHandle* out) {
     *out = g_placeholder;
 
-    std::FILE* file = std::fopen(path, "rb");
-    if (file == nullptr) {
-        log_error("texture_load: no se encontro '%s'", path);
+    // M11: ya no abre directamente por ruta de archivo -- se resuelve a traves del
+    // backend activo (directorio suelto o .pak, ver assets/pak.h), igual que
+    // text_load_font. Sincrono (a diferencia de assets_texture, ver texture_reserve_
+    // placeholder/texture_finish_load_from_memory mas abajo): este es el camino que ya
+    // usaba el stress test de M1 antes de que existiera el hilo de IO, y sigue siendo
+    // valido para cualquier carga que el llamante prefiera bloqueante.
+    const u8* bytes = nullptr;
+    usize     size  = 0;
+    bool      owned = false;
+    if (!pak_resolve(logical_name, &bytes, &size, &owned)) {
+        log_error("texture_load: no se encontro '%s'", logical_name);
         return TextureLoadResult::NotFound;
     }
-    std::fseek(file, 0, SEEK_END);
-    long size = std::ftell(file);
-    std::fseek(file, 0, SEEK_SET);
-    if (size <= 0) {
-        std::fclose(file);
-        log_error("texture_load: '%s' esta vacio", path);
-        return TextureLoadResult::BadFormat;
-    }
 
-    u8* bytes = arena_alloc_n<u8>(&g_arena_frame, static_cast<usize>(size));
-    usize read = std::fread(bytes, 1, static_cast<usize>(size), file);
-    std::fclose(file);
-    if (read != static_cast<usize>(size)) {
-        log_error("texture_load: lectura incompleta de '%s'", path);
-        return TextureLoadResult::BadFormat;
-    }
-
-    qoi_desc desc{};
-    void*    pixels = qoi_decode(bytes, static_cast<int>(size), &desc, 4);
-    if (pixels == nullptr) {
-        log_error("texture_load: '%s' no es un QOI valido", path);
-        return TextureLoadResult::BadFormat;
-    }
-
-    TextureSlot* slot   = nullptr;
+    TextureSlot*  slot   = nullptr;
     TextureHandle handle = pool_acquire<struct TextureTag>(&g_pool, &slot);
     if (!handle.valid()) {
-        std::free(pixels);
+        pak_release(bytes, owned);
         log_error("texture_load: pool de texturas lleno (%u)", k_max_textures);
         return TextureLoadResult::OutOfSlots;
     }
 
-    sg_image_desc img_desc{};
-    img_desc.width                    = static_cast<int>(desc.width);
-    img_desc.height                   = static_cast<int>(desc.height);
-    img_desc.pixel_format             = SG_PIXELFORMAT_RGBA8;
-    img_desc.data.subimage[0][0].ptr  = pixels;
-    img_desc.data.subimage[0][0].size = static_cast<usize>(desc.width) * desc.height * 4;
-
-    slot->image   = sg_make_image(&img_desc);
-    slot->sampler = make_default_sampler();
-    slot->width   = static_cast<i32>(desc.width);
-    slot->height  = static_cast<i32>(desc.height);
-    std::free(pixels);
+    bool ok = decode_qoi_into_slot(slot, bytes, size);
+    pak_release(bytes, owned);
+    if (!ok) {
+        log_error("texture_load: '%s' no es un QOI valido", logical_name);
+        return TextureLoadResult::BadFormat;
+    }
 
     *out = handle;
     return TextureLoadResult::Ok;
+}
+
+TextureHandle texture_reserve_placeholder() {
+    TextureSlot*  placeholder_slot = pool_resolve<struct TextureTag>(&g_pool, g_placeholder);
+    TextureSlot*  slot             = nullptr;
+    TextureHandle handle           = pool_acquire<struct TextureTag>(&g_pool, &slot);
+    if (!handle.valid()) {
+        log_error("texture_reserve_placeholder: pool de texturas lleno (%u)", k_max_textures);
+        return g_placeholder;
+    }
+    *slot = *placeholder_slot;  // misma sg_image/sg_sampler que el placeholder: no crea
+                                // nada nuevo en la GPU, solo reserva el slot.
+    return handle;
+}
+
+bool texture_finish_load_from_memory(TextureHandle handle, const u8* qoi_bytes,
+                                      usize qoi_size) {
+    TextureSlot* slot = pool_resolve<struct TextureTag>(&g_pool, handle);
+    if (slot == nullptr) {
+        log_error("texture_finish_load_from_memory: handle invalido o caducado");
+        return false;
+    }
+    if (!decode_qoi_into_slot(slot, qoi_bytes, qoi_size)) {
+        log_error("texture_finish_load_from_memory: bytes QOI invalidos, se queda con el "
+                  "placeholder");
+        return false;
+    }
+    return true;
 }
 
 TextureHandle texture_create_dynamic(i32 width, i32 height) {

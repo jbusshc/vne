@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <doctest/doctest.h>
 
+#include "assets/pak.h"
 #include "base/arena.h"
 #include "gfx/gfx.h"
 #include "platform/window.h"
@@ -28,6 +29,12 @@ int main(int argc, char** argv) {
     g_arena_perm  = arena_create(64ull * 1024 * 1024, "test_perm");
     g_arena_scene = arena_create(64ull * 1024 * 1024, "test_scene");
     g_arena_frame = arena_create(8ull * 1024 * 1024, "test_frame");
+    // "." y no VNE_SOURCE_DIR (que en la practica solo hacia falta para los .ttf, ver
+    // git blame): el directorio de build ya se autocontiene con assets_baked/ y una
+    // copia propia de assets_src/ttf|ogg (CMakeLists.txt las copia ahi), exactamente
+    // igual que main.cpp (M11). Antes de audio_init(): scan_music_catalog() pasara a
+    // resolver por aqui tambien.
+    pak_mount(".");
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
     lua_init();
@@ -42,8 +49,8 @@ int main(int argc, char** argv) {
         // g_arena_frame este inicializada.
         glyph_cache_init();
         gfx_begin_frame();
-        g_test_font_latin = text_load_font(VNE_SOURCE_DIR "/assets_src/ttf/NotoSans.ttf", 32);
-        g_test_font_cjk   = text_load_font(VNE_SOURCE_DIR "/assets_src/ttf/NotoSansJP.ttf", 32);
+        g_test_font_latin = text_load_font("ttf/NotoSans.ttf", 32);
+        g_test_font_cjk   = text_load_font("ttf/NotoSansJP.ttf", 32);
     }
 
     int result = context.run();

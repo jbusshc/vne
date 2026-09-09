@@ -20,7 +20,9 @@ constexpr u32 k_vnl_version = 1;
 
 enum class CatalogLoadResult : u8 { Ok, NotFound, BadFormat };
 
-CatalogLoadResult catalog_load(const char* vnl_path, Arena* arena);
+// logical_name se resuelve contra el backend de assets activo (directorio suelto o .pak,
+// ver assets/pak.h -- p.ej. "ja.vnl"), no una ruta de archivo literal (M11).
+CatalogLoadResult catalog_load(const char* logical_name, Arena* arena);
 
 // Sin catalogo activo (idioma base, el mismo en que se autoraron los guiones): cualquier
 // lookup cae siempre al texto base. Es el estado inicial.

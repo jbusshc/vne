@@ -16,6 +16,15 @@ struct FontData {
     f32        ascender = 0.0f;   // pixeles, desde la linea base hacia arriba
     f32        descender = 0.0f;  // pixeles, positivo, desde la linea base hacia abajo
     f32        line_height = 0.0f;
+    // M11: FT_New_Memory_Face() no copia el buffer que se le pasa, lo referencia mientras
+    // la cara este viva (rasteriza glifos bajo demanda, ver glyph_cache.cpp). raw_bytes
+    // tiene que sobrevivir tanto como ft_face. No hay un text_system_shutdown() que libere
+    // fuentes individualmente hoy (ninguno lo hacia antes de M11 tampoco: viven todo el
+    // proceso, igual que ft_face/hb_font, nunca se llama FT_Done_Face salvo en el camino
+    // de fallo de la propia carga) -- raw_bytes_owned solo importa si alguna vez se anade
+    // esa descarga.
+    const u8*  raw_bytes       = nullptr;
+    bool       raw_bytes_owned = false;
 };
 
 FontData* font_resolve(FontHandle h);

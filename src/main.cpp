@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "assets/pak.h"
 #include "audio/audio.h"
 #include "base/arena.h"
 #include "base/heap_guard.h"
@@ -94,37 +95,58 @@ struct AtlasSpriteRect {
 // ambos casos, mismo formato de sprites). No hay todavia un modulo assets/ formal: esto
 // es una lectura minima, solo para el stress test de M1. Devuelve nullptr si no se pudo
 // cargar; el llamante debe seguir funcionando igual (placeholder magenta).
+//
+// M11: resuelto contra el backend de assets activo (directorio suelto o .pak, ver
+// assets/pak.h), no una ruta de archivo literal. Requiere que mount_assets_backend() ya
+// se haya llamado.
 static AtlasSpriteRect* read_atlas_manifest(u32* out_count) {
     *out_count = 0;
 
-    std::FILE* bin = std::fopen("assets_baked/atlas_00.bin", "rb");
-    if (bin == nullptr) {
-        log_error("No se encontro assets_baked/atlas_00.bin; ejecuta vne_bake primero.");
+    const u8* bytes = nullptr;
+    usize     size  = 0;
+    if (!pak_resolve_into_arena("atlas_00.bin", &g_arena_perm, &bytes, &size)) {
+        log_error("No se encontro atlas_00.bin; ejecuta vne_bake primero.");
+        return nullptr;
+    }
+    if (size < sizeof(u32) * 5) {
+        log_error("atlas_00.bin truncado");
         return nullptr;
     }
     u32 header[5];
-    if (std::fread(header, sizeof(header), 1, bin) != 1 || header[0] != k_atlas_bin_magic ||
-        header[1] != 2u) {
-        log_error("assets_baked/atlas_00.bin invalido o de una version anterior");
-        std::fclose(bin);
+    std::memcpy(header, bytes, sizeof(header));
+    if (header[0] != k_atlas_bin_magic || header[1] != 2u) {
+        log_error("atlas_00.bin invalido o de una version anterior");
         return nullptr;
     }
     u32 count = header[4];
     if (count == 0) {
-        std::fclose(bin);
+        return nullptr;
+    }
+    if (size < sizeof(header) + static_cast<usize>(count) * sizeof(AtlasSpriteRect)) {
+        log_error("atlas_00.bin truncado");
         return nullptr;
     }
 
-    AtlasSpriteRect* sprites = arena_alloc_n<AtlasSpriteRect>(&g_arena_perm, count);
-    if (sprites == nullptr ||
-        std::fread(sprites, sizeof(AtlasSpriteRect), count, bin) != count) {
-        log_error("assets_baked/atlas_00.bin truncado");
-        std::fclose(bin);
-        return nullptr;
-    }
-    std::fclose(bin);
     *out_count = count;
-    return sprites;
+    // const_cast, no cambio de firma: nada escribe atlas_sprites en el llamante (solo
+    // lee por indice para el stress test de M1), y read_atlas_manifest ya devolvia
+    // AtlasSpriteRect* antes de M11 -- pak_resolve_into_arena entrega const u8* porque en
+    // backend empaquetado el puntero cae dentro del .pak residente, que nadie debe
+    // escribir nunca.
+    return const_cast<AtlasSpriteRect*>(
+        reinterpret_cast<const AtlasSpriteRect*>(bytes + sizeof(header)));
+}
+
+// Ship monta game.pak (SPEC.md #11: "paquete .pak ... para builds de release"); Debug/Dev
+// montan el directorio suelto, que ademas es lo que hace posible el hot reload de M8/M11
+// (leer un archivo recien modificado sin volver a hornear el .pak entero). Un unico sitio
+// para esta decision: main() y run_autoplay() la comparten.
+static void mount_assets_backend() {
+#if defined(VN_SHIPPING)
+    pak_mount("game.pak");
+#else
+    pak_mount(".");  // assets_baked/ y assets_src/ttf|ogg del propio build dir
+#endif
 }
 
 // Corre un guion entero sin ventana ni GPU, a maxima velocidad, via vm_skip_current()
@@ -135,6 +157,7 @@ static int run_autoplay(const char* script_path) {
     g_arena_perm  = arena_create(k_perm_arena_size, "perm");
     g_arena_scene = arena_create(k_scene_arena_size, "scene");
     g_arena_frame = arena_create(k_frame_arena_size, "frame");
+    mount_assets_backend();
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
     lua_init();
@@ -178,6 +201,7 @@ int main(int argc, char** argv) {
     g_arena_perm  = arena_create(k_perm_arena_size, "perm");
     g_arena_scene = arena_create(k_scene_arena_size, "scene");
     g_arena_frame = arena_create(k_frame_arena_size, "frame");
+    mount_assets_backend();
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
     lua_init();
@@ -205,21 +229,21 @@ int main(int argc, char** argv) {
 #endif
 
     TextureHandle atlas{};
-    if (texture_load("assets_baked/atlas_00.qoi", &atlas) != TextureLoadResult::Ok) {
+    if (texture_load("atlas_00.qoi", &atlas) != TextureLoadResult::Ok) {
         log_error("No se pudo cargar el atlas de prueba; se usara el placeholder magenta.");
     }
 
     u32              atlas_sprite_count = 0;
     AtlasSpriteRect* atlas_sprites      = read_atlas_manifest(&atlas_sprite_count);
 
-    FontHandle demo_font = text_load_font("assets_src/ttf/NotoSansJP.ttf", 28);
+    FontHandle demo_font = text_load_font("ttf/NotoSansJP.ttf", 28);
     if (!demo_font.valid()) {
         log_error("No se pudo cargar la fuente de prueba NotoSansJP.ttf");
     }
     // Fuente latina aparte para el dialogo en español (M10, "fuentes CJK bajo demanda":
     // la fuente CJK completa solo se necesita de verdad cuando el idioma activo la usa;
     // la rasterizacion de glifos bajo demanda en si ya existe desde M2 en glyph_cache).
-    FontHandle latin_dialogue_font = text_load_font("assets_src/ttf/NotoSans.ttf", 28);
+    FontHandle latin_dialogue_font = text_load_font("ttf/NotoSans.ttf", 28);
     if (!latin_dialogue_font.valid()) {
         log_error("No se pudo cargar la fuente de prueba NotoSans.ttf");
     }
@@ -244,9 +268,8 @@ int main(int argc, char** argv) {
     demo_state.player_y = 3.0f * 64.0f + 32.0f;
 
     CompiledScript demo_script{};
-    if (script_load("assets_baked/demo.vnc", &g_arena_scene, &demo_script) !=
-        ScriptLoadResult::Ok) {
-        log_error("No se pudo cargar assets_baked/demo.vnc; ejecuta vne_bake primero.");
+    if (script_load("demo.vnc", &g_arena_scene, &demo_script) != ScriptLoadResult::Ok) {
+        log_error("No se pudo cargar demo.vnc; ejecuta vne_bake primero.");
     }
 
     // Pila de modos (SPEC.md #10, M7): VnMode dirige la VM y el cuadro de dialogo real
@@ -282,9 +305,9 @@ int main(int argc, char** argv) {
     // ya las usa el rollback de M4 en la base de la pila).
     MapMode map_mode{};
     map_mode.state = &demo_state;
-    bool have_map  = map_mode.load("assets_baked/demo_map.vnm", &g_arena_scene);
+    bool have_map  = map_mode.load("demo_map.vnm", &g_arena_scene);
     if (!have_map) {
-        log_error("No se pudo cargar assets_baked/demo_map.vnm; ejecuta vne_bake map primero.");
+        log_error("No se pudo cargar demo_map.vnm; ejecuta vne_bake map primero.");
     }
 
     ModeStack mode_stack{};

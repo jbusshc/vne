@@ -43,7 +43,12 @@ bool g_setup  = false;
 // dentro del editor, no se le da al juego la capacidad de parsear.
 struct ScriptWatcher {
     char  vns_path[256] = {};
-    char  vnc_path[256] = {};
+    char  vnc_path[256] = {};  // ruta de archivo real: la usa vne_bake como argumento
+    // Nombre logico (M11, ver assets/pak.h): lo que script_load() espera, no una ruta de
+    // archivo. Distinto de vnc_path porque vne_bake si necesita una ruta real -- son el
+    // mismo destino visto por dos consumidores distintos (herramienta offline vs backend
+    // de assets en runtime).
+    char  vnc_logical_name[256] = {};
     i64   last_mtime     = 0;
     f32   check_timer     = 0.0f;
 };
@@ -100,7 +105,8 @@ void check_hot_reload(GameState* state, CompiledScript* script, f32 dt) {
     }
 
     CompiledScript reloaded{};
-    if (script_load(g_watcher.vnc_path, &g_arena_scene, &reloaded) == ScriptLoadResult::Ok) {
+    if (script_load(g_watcher.vnc_logical_name, &g_arena_scene, &reloaded) ==
+        ScriptLoadResult::Ok) {
         *script     = reloaded;
         state->vm.pc         = 0;
         state->vm.cmd_phase = 0;
@@ -192,6 +198,8 @@ void editor_init() {
                   VNE_SOURCE_DIR "/assets_src/scripts/demo.vns");
     std::snprintf(g_watcher.vnc_path, sizeof(g_watcher.vnc_path),
                   "%s", "assets_baked/demo.vnc");
+    std::snprintf(g_watcher.vnc_logical_name, sizeof(g_watcher.vnc_logical_name), "%s",
+                  "demo.vnc");
     g_watcher.last_mtime = file_mtime(g_watcher.vns_path);
 
     // Mismo formato que el swapchain al que gfx_present() ya dibuja (gfx_backend.h): el

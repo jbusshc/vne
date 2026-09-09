@@ -16,16 +16,12 @@
 #include <cstdio>
 #include <cstring>
 
-#if defined(_WIN32)
-#include <windows.h>
-#else
-#include <dirent.h>
-#endif
-
+#include "assets/pak.h"
 #include "base/hash.h"
 #include "base/heap_guard.h"
 #include "base/log.h"
 #include "base/pool.h"
+#include "platform/files.h"
 
 namespace {
 
@@ -36,6 +32,12 @@ constexpr u32 k_max_path         = 128;
 struct SoundSlot {
     ma_sound sound;
     bool     initialized = false;
+    // Solo se usa en backend empaquetado (M11, ver audio_load): ma_sound_init_from_file
+    // sigue siendo el camino en backend suelto (ADR-0036 depende de una ruta de archivo
+    // real, no se toca). El decoder tiene que sobrevivir tanto como sound -- lo referencia
+    // como su ma_data_source, igual que raw_bytes en text/font_internal.h con FreeType.
+    ma_decoder decoder;
+    bool       has_decoder = false;
 };
 
 struct CatalogEntry {
@@ -104,56 +106,65 @@ f32 effective_volume(Bus bus, f32 volume) {
 // GameState.bgm_track_id (u16, SPEC.md #8.2, no puede ser un puntero ni un text_id de un
 // guion concreto) no podria resolverse de vuelta a un archivo tras cargar una partida
 // creada por un guion distinto al que esta cargado ahora mismo (ver ADR de M6).
+//
+// M11: el listado de directorio ya no tiene su propio #if _WIN32/#else -- vive en
+// platform/files.h (SPEC.md #2, deuda senalada explicitamente ahi: "audio.cpp enumera un
+// directorio con la API del sistema en lugar de hacerlo a traves de platform/").
+void dir_list_callback_music(void* /*userdata*/, const char* name_no_ext,
+                              const char* full_name) {
+    if (g_catalog_count >= k_max_catalog) {
+        return;
+    }
+    CatalogEntry& entry = g_catalog[g_catalog_count];
+    entry.track_id      = static_cast<u16>(fnv1a_u32(name_no_ext) % 65536u);
+    // full_name conserva la extension real del archivo (hoy .wav para los tonos de
+    // prueba, .ogg en principio para musica de verdad): no se puede asumir una sola,
+    // por eso dir_list_by_extension recibe filtro nullptr (todo el directorio) y aqui se
+    // usa el nombre tal cual llega, igual que hacia el codigo Win32/dirent original.
+    // M11: nombre logico ("ogg/..."), no ruta de archivo literal -- audio_load lo resuelve
+    // a traves del backend activo (ver assets/pak.h), igual que el catalogo empaquetado
+    // de mas arriba.
+    std::snprintf(entry.path, sizeof(entry.path), "ogg/%s", full_name);
+    g_catalog_count += 1;
+}
+
+// Debe coincidir con tools/bake/main.cpp (duplicado a proposito, mismo patron que el
+// resto de formatos de este proyecto -- ver el comentario junto a bake_pack()).
+struct OggCatalogRecord {
+    u16  track_id;
+    u8   _pad[2];
+    char logical_name[64];
+};
+static_assert(sizeof(OggCatalogRecord) == 68);
+
 void scan_music_catalog() {
     g_catalog_count = 0;
-#if defined(_WIN32)
-    WIN32_FIND_DATAA find_data;
-    HANDLE           find = FindFirstFileA("assets_src/ogg/*", &find_data);
-    if (find == INVALID_HANDLE_VALUE) {
+
+    // M11: en backend empaquetado no hay directorio que escanear (solo existe game.pak),
+    // asi que el catalogo se lee ya horneado desde "ogg_catalog.bin" (lo escribe
+    // vne_bake pack). En backend suelto se sigue escaneando assets_src/ogg/ en runtime,
+    // sin cambios de comportamiento respecto a antes de M11.
+    if (pak_is_packed()) {
+        const u8* bytes = nullptr;
+        usize     size  = 0;
+        bool      owned = false;
+        if (!pak_resolve("ogg_catalog.bin", &bytes, &size, &owned)) {
+            log_error("scan_music_catalog: 'ogg_catalog.bin' no esta en el pak montado");
+            return;
+        }
+        u32 count = static_cast<u32>(size / sizeof(OggCatalogRecord));
+        const OggCatalogRecord* records = reinterpret_cast<const OggCatalogRecord*>(bytes);
+        for (u32 i = 0; i < count && g_catalog_count < k_max_catalog; ++i) {
+            CatalogEntry& entry = g_catalog[g_catalog_count];
+            entry.track_id      = records[i].track_id;
+            std::snprintf(entry.path, sizeof(entry.path), "%s", records[i].logical_name);
+            g_catalog_count += 1;
+        }
+        pak_release(bytes, owned);
         return;
     }
-    do {
-        if (find_data.cFileName[0] == '.') {
-            continue;
-        }
-        if (g_catalog_count >= k_max_catalog) {
-            break;
-        }
-        char name_no_ext[k_max_path] = {};
-        std::snprintf(name_no_ext, sizeof(name_no_ext), "%s", find_data.cFileName);
-        char* dot = std::strrchr(name_no_ext, '.');
-        if (dot != nullptr) {
-            *dot = '\0';
-        }
-        CatalogEntry& entry = g_catalog[g_catalog_count];
-        entry.track_id      = static_cast<u16>(fnv1a_u32(name_no_ext) % 65536u);
-        std::snprintf(entry.path, sizeof(entry.path), "assets_src/ogg/%s", find_data.cFileName);
-        g_catalog_count += 1;
-    } while (FindNextFileA(find, &find_data));
-    FindClose(find);
-#else
-    DIR* dir = opendir("assets_src/ogg");
-    if (dir == nullptr) {
-        return;
-    }
-    struct dirent* entry_dir;
-    while ((entry_dir = readdir(dir)) != nullptr && g_catalog_count < k_max_catalog) {
-        if (entry_dir->d_name[0] == '.') {
-            continue;
-        }
-        char name_no_ext[k_max_path] = {};
-        std::snprintf(name_no_ext, sizeof(name_no_ext), "%s", entry_dir->d_name);
-        char* dot = std::strrchr(name_no_ext, '.');
-        if (dot != nullptr) {
-            *dot = '\0';
-        }
-        CatalogEntry& entry = g_catalog[g_catalog_count];
-        entry.track_id      = static_cast<u16>(fnv1a_u32(name_no_ext) % 65536u);
-        std::snprintf(entry.path, sizeof(entry.path), "assets_src/ogg/%s", entry_dir->d_name);
-        g_catalog_count += 1;
-    }
-    closedir(dir);
-#endif
+
+    dir_list_by_extension("assets_src/ogg", nullptr, dir_list_callback_music, nullptr);
 }
 
 SoundHandle cache_find(u32 path_hash) {
@@ -193,6 +204,11 @@ void audio_shutdown() {
     for (u32 i = 0; i < k_max_sounds; ++i) {
         if (g_pool.items[i].initialized) {
             ma_sound_uninit(&g_pool.items[i].sound);
+            // El sound tiene que dejar de referenciar al decoder ANTES de liberarlo
+            // (orden de destruccion, mismo principio que face/raw_bytes en font.cpp).
+            if (g_pool.items[i].has_decoder) {
+                ma_decoder_uninit(&g_pool.items[i].decoder);
+            }
         }
     }
     ma_engine_uninit(&g_engine);
@@ -207,31 +223,18 @@ void audio_update(f32 dt, f32* out_bgm_position) {
     }
 }
 
-AudioLoadResult audio_load(const char* path, bool streaming, SoundHandle* out) {
+AudioLoadResult audio_load(const char* logical_name, bool streaming, SoundHandle* out) {
     *out = SoundHandle{};
     if (!g_engine_ready) {
         return AudioLoadResult::NotFound;
     }
 
-    u32         path_hash = fnv1a_u32(path);
+    u32         path_hash = fnv1a_u32(logical_name);
     SoundHandle cached     = cache_find(path_hash);
     if (cached.valid()) {
         *out = cached;
         return AudioLoadResult::Ok;
     }
-
-    // Comprobar que el archivo existe antes de llamar a miniaudio, no despues: pedirle a
-    // ma_sound_init_from_file que falle sobre un archivo inexistente dispara un
-    // use-after-free real dentro de su gestor de recursos (miniaudio 0.11.21,
-    // ma_resource_manager_data_buffer_node_acquire — confirmado con ASan, no es un bug de
-    // este proyecto). Evitar la ruta de fallo por completo es mas simple y fiable que
-    // reportarlo rio arriba (ver ADR de M6).
-    std::FILE* probe = std::fopen(path, "rb");
-    if (probe == nullptr) {
-        log_error("audio_load: no se encontro '%s'", path);
-        return AudioLoadResult::NotFound;
-    }
-    std::fclose(probe);
 
     SoundSlot*  slot   = nullptr;
     SoundHandle handle = pool_acquire<SoundTag>(&g_pool, &slot);
@@ -239,20 +242,72 @@ AudioLoadResult audio_load(const char* path, bool streaming, SoundHandle* out) {
         return AudioLoadResult::OutOfSlots;
     }
 
-    // Cargar/decodificar un archivo asigna heap por como funciona miniaudio (igual que
-    // ejecutar Lua, ADR-0032): la primera vez que un @sfx/@bgm nuevo se dispara dentro
-    // del bucle de frame, este es el unico otro punto exceptuado de la regla de cero heap
-    // (SPEC.md #4). Cargas repetidas del mismo path usan la cache de arriba y no llegan
-    // aqui.
-    heap_guard_suspend();
-    u32 flags = streaming ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE;
-    ma_result result =
-        ma_sound_init_from_file(&g_engine, path, flags, nullptr, nullptr, &slot->sound);
-    heap_guard_resume();
+    // M11: dos caminos segun el backend activo (ver assets/pak.h), porque miniaudio no
+    // tiene una unica API que sirva para los dos.
+    char loose_path[512];
+    ma_result result;
+    if (pak_resolve_loose_path(logical_name, loose_path, sizeof(loose_path))) {
+        // Backend suelto: EXACTAMENTE el mismo camino que antes de M11, sin tocar nada
+        // (ADR-0036 depende de esta comprobacion con fopen antes de llamar a miniaudio:
+        // pedirle a ma_sound_init_from_file que falle sobre un archivo inexistente
+        // dispara un use-after-free real dentro de su gestor de recursos, miniaudio
+        // 0.11.21, ma_resource_manager_data_buffer_node_acquire — confirmado con ASan).
+        std::FILE* probe = std::fopen(loose_path, "rb");
+        if (probe == nullptr) {
+            pool_release<SoundTag>(&g_pool, handle);
+            log_error("audio_load: no se encontro '%s'", loose_path);
+            return AudioLoadResult::NotFound;
+        }
+        std::fclose(probe);
+
+        // Cargar/decodificar un archivo asigna heap por como funciona miniaudio (igual
+        // que ejecutar Lua, ADR-0032): la primera vez que un @sfx/@bgm nuevo se dispara
+        // dentro del bucle de frame, este es el unico otro punto exceptuado de la regla
+        // de cero heap (SPEC.md #4). Cargas repetidas del mismo nombre usan la cache de
+        // arriba y no llegan aqui.
+        heap_guard_suspend();
+        u32 flags = streaming ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE;
+        result = ma_sound_init_from_file(&g_engine, loose_path, flags, nullptr, nullptr,
+                                          &slot->sound);
+        heap_guard_resume();
+    } else {
+        // Backend empaquetado: no hay ruta de archivo real que darle a miniaudio, asi que
+        // se decodifica desde el puntero que ya vive dentro del .pak montado en memoria
+        // (pak_resolve nunca devuelve owned=true en este backend -- el puntero vive tanto
+        // como el proceso, igual que el .pak entero, asi que el decoder puede referenciarlo
+        // sin que nadie tenga que gestionar su vida util por separado).
+        const u8* bytes = nullptr;
+        usize     size  = 0;
+        bool      owned = false;
+        if (!pak_resolve(logical_name, &bytes, &size, &owned)) {
+            pool_release<SoundTag>(&g_pool, handle);
+            log_error("audio_load: no se encontro '%s'", logical_name);
+            return AudioLoadResult::NotFound;
+        }
+
+        heap_guard_suspend();
+        ma_decoder_config cfg = ma_decoder_config_init_default();
+        result = ma_decoder_init_memory(bytes, size, &cfg, &slot->decoder);
+        if (result == MA_SUCCESS) {
+            slot->has_decoder = true;
+            // Sin flags de streaming/decode aqui (esos son de MA_RESOURCE_MANAGER_DATA_
+            // SOURCE_FLAG_*, solo se aplican via ma_sound_init_from_file): un ma_decoder
+            // ya decodifica de forma incremental por si mismo, streaming o no es
+            // irrelevante para esta API.
+            result = ma_sound_init_from_data_source(&g_engine, &slot->decoder, 0, nullptr,
+                                                     &slot->sound);
+            if (result != MA_SUCCESS) {
+                ma_decoder_uninit(&slot->decoder);
+                slot->has_decoder = false;
+            }
+        }
+        heap_guard_resume();
+    }
 
     if (result != MA_SUCCESS) {
         pool_release<SoundTag>(&g_pool, handle);
-        log_error("audio_load: no se pudo cargar '%s' (%d)", path, static_cast<int>(result));
+        log_error("audio_load: no se pudo cargar '%s' (%d)", logical_name,
+                  static_cast<int>(result));
         return AudioLoadResult::NotFound;
     }
     slot->initialized = true;

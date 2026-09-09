@@ -93,11 +93,11 @@ void lua_init() {
     });
     vn.set_function("play_sfx", [](const std::string& name) {
         // Misma convencion que el comando @sfx del DSL (script/compiler.cpp): el nombre
-        // incluye la extension y se resuelve contra assets_src/ogg/, porque un efecto de
-        // sonido no pasa por el catalogo por id (eso es solo para la musica, que si
-        // sobrevive a un guardado, ADR-0034).
+        // incluye la extension y se resuelve contra el backend de assets activo (M11,
+        // ver assets/pak.h), porque un efecto de sonido no pasa por el catalogo por id
+        // (eso es solo para la musica, que si sobrevive a un guardado, ADR-0034).
         char path[256];
-        std::snprintf(path, sizeof(path), "assets_src/ogg/%s", name.c_str());
+        std::snprintf(path, sizeof(path), "ogg/%s", name.c_str());
         SoundHandle handle{};
         if (audio_load(path, false, &handle) == AudioLoadResult::Ok) {
             audio_play(handle, Bus::Sfx, 1.0f, false);

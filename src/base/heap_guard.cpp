@@ -2,8 +2,14 @@
 
 #include "base/assert.h"
 
-u64 g_frame_alloc_count = 0;
-static bool g_heap_guard_suspended = false;
+thread_local u64 g_frame_alloc_count = 0;
+// thread_local por la misma razon que g_frame_alloc_count (ver heap_guard.h): aunque hoy
+// solo el hilo principal llama a suspend/resume, dejarlo global compartido seria una
+// lectura/escritura sin sincronizar desde el punto de vista del hilo de IO en cuanto ese
+// hilo exista (M11) — inofensivo en la practica porque su contador nunca se consulta,
+// pero es una carrera de datos real bajo el modelo de memoria de C++. Con thread_local
+// deja de serlo, sin coste ni cambio de comportamiento observable.
+static thread_local bool g_heap_guard_suspended = false;
 
 void heap_guard_reset_frame() {
     g_frame_alloc_count = 0;

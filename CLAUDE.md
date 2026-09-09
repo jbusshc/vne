@@ -5,16 +5,28 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno. M0–M10 están cerrados. La hoja de ruta se amplió con **M11–M15**
-(ADR-0050) tras comprobar que cerrar en M10 dejaba fuera partes enteras de la
-especificación: M11 sistema de assets y empaquetado (§7.4 nunca se implementó, `src/assets/`
-está vacío, y el `game.pak` de §11 tampoco existe), M12 presentación y jugabilidad
-completas (`Move`/`Transition`, `{w=}`/`{speed=}`/`{b}` con efecto real, polifonía, AABB),
-M13 integridad de datos y herramientas offline (validar actores, detectar colisiones de
-hash, `vne_bake font`, TMX robusto), M14 configuración y localización completas
-(`config.ini`, backlog relocalizable, `.vnsave` v3) y M15 interacción y testabilidad de la
-UI (ratón, grabar/reproducir input, arte de UI real, visor de atlas). El siguiente por
-defecto es M11: M15 lo necesita, M12 se apoya en él y el 3D de §13.2 también lo da por
+**Hito activo:** M11 — Sistema de assets y empaquetado (en progreso). Plan por etapas:
+(0) `fnv1a_u64` + `g_frame_alloc_count` pasa a `thread_local` en `heap_guard` — sin esto
+el hilo de IO de esta etapa correría datos con el contador del hilo principal; (1)
+`platform/files.h/.cpp` sobre `SDL_GetPathInfo`/`SDL_EnumerateDirectory`/`SDL_LoadFile`,
+migra el escaneo de `audio.cpp` (deuda de SPEC.md §2), NO toca `tools/bake/` (enlaza sin
+SDL3 a propósito); (2) `src/assets/pak.{h,cpp}`, formato `.pak` de SPEC.md §11 con dos
+backends (directorio suelto / `.pak` mapeado a memoria), `vne_bake pack`; (3) hilo de IO
+único + `assets_texture/font/sound/process_completed_loads` — el hilo solo lee bytes, el
+decode y la subida a GPU se quedan en el hilo principal (`sg_make_image` no es
+thread-safe); (4) migrar los call sites existentes (atlas, fuentes, `script_load`,
+`map_mode::load`, `catalog_load`, `audio_load`) a leer por esta vía; (5) watcher genérico
+de mtimes (sustituye al de un solo archivo de M8) y `atlas.bin` con nombres lógicos
+(cierra ADR-0025). Detalle completo en docs/DECISIONS.md cuando se cierre.
+
+M0–M10 están cerrados. La hoja de ruta se amplió con **M11–M15** (ADR-0050) tras comprobar
+que cerrar en M10 dejaba fuera partes enteras de la especificación: M11 (este hito), M12
+presentación y jugabilidad completas (`Move`/`Transition`, `{w=}`/`{speed=}`/`{b}` con
+efecto real, polifonía, AABB), M13 integridad de datos y herramientas offline (validar
+actores, detectar colisiones de hash, `vne_bake font`, TMX robusto), M14 configuración y
+localización completas (`config.ini`, backlog relocalizable, `.vnsave` v3) y M15
+interacción y testabilidad de la UI (ratón, grabar/reproducir input, arte de UI real,
+visor de atlas). M15 necesita M11, M12 se apoya en él y el 3D de §13.2 también lo da por
 supuesto.
 
 **Portabilidad: se programa siempre, se verifica cuando haya máquinas.** Son dos cosas

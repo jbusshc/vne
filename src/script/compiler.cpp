@@ -202,10 +202,12 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
             case InstrKind::Sfx:
                 // instr.sound debe incluir la extension (p. ej. "@sfx puerta_cierra.wav"):
                 // a diferencia de @bgm (que resuelve por catalogo, ADR de M6), Sfx guarda
-                // la ruta completa directo en el string_pool, asi que no hay forma de
-                // adivinar el formato del archivo.
+                // el nombre logico completo directo en el string_pool, asi que no hay
+                // forma de adivinar el formato del archivo. "ogg/" y no "assets_src/ogg/"
+                // desde M11: audio_load lo resuelve contra el backend de assets activo
+                // (directorio suelto o .pak, ver assets/pak.h), no una ruta de archivo.
                 cmd.kind        = CmdKind::Sfx;
-                cmd.sfx.text_id = push_string(&data, "assets_src/ogg/" + instr.sound);
+                cmd.sfx.text_id = push_string(&data, "ogg/" + instr.sound);
                 break;
             case InstrKind::Bgm:
                 cmd.kind           = CmdKind::Bgm;

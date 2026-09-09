@@ -7,9 +7,30 @@
 
 enum class TextureLoadResult : u8 { Ok, NotFound, BadFormat, OutOfSlots };
 
+// logical_name se resuelve contra el backend de assets activo (directorio suelto o .pak,
+// ver assets/pak.h -- p.ej. "atlas_00.qoi"), no una ruta de archivo literal (M11).
+//
 // Un fallo nunca es fatal: *out siempre queda con un handle valido, apuntando al
 // placeholder magenta si la carga fallo, y el juego continua (SPEC.md #4).
-TextureLoadResult texture_load(const char* path, TextureHandle* out);
+TextureLoadResult texture_load(const char* logical_name, TextureHandle* out);
+
+// --- Carga en dos fases (M11, assets/assets.cpp): el hilo de IO no puede llamar a
+// sg_make_image (sokol_gfx no es thread-safe), asi que la carga real de un asset_texture
+// se parte en reservar-ahora + terminar-despues sobre el MISMO handle.
+
+// Reserva un slot que empieza apuntando al placeholder magenta (misma imagen/sampler que
+// usa un texture_load fallido). Instantaneo: no decodifica ni toca la GPU mas alla de
+// reutilizar los objetos del placeholder ya creados. Este es el handle que
+// assets_texture() devuelve de inmediato.
+TextureHandle texture_reserve_placeholder();
+
+// Decodifica QOI ya en memoria (bytes que el hilo de IO leyo del disco o del .pak) y sube
+// la imagen real al slot que ya devolvio texture_reserve_placeholder(), en el sitio: el
+// handle no cambia, solo lo que apunta. Debe llamarse desde el hilo principal (misma
+// razon que arriba). Si el decode falla, el slot se queda apuntando al placeholder y
+// devuelve false (nunca fatal, SPEC.md #4).
+bool texture_finish_load_from_memory(TextureHandle handle, const u8* qoi_bytes,
+                                      usize qoi_size);
 
 // Ancho/alto en pixeles. Escribe 0,0 si el handle no resuelve a nada.
 void texture_size(TextureHandle h, i32* out_w, i32* out_h);

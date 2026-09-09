@@ -28,6 +28,7 @@ add_executable(vne_tests
   test_map_mode.cpp
   test_catalog.cpp
   test_map_bake.cpp
+  test_pak.cpp
 )
 target_link_libraries(vne_tests PRIVATE vne_base vne_script_tools doctest::doctest)
 target_include_directories(vne_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR})

@@ -17,7 +17,7 @@
 TEST_CASE("MapMode::load: lee el .vnm horneado y expone la rejilla correcta") {
     Arena     a = arena_create(1 * 1024 * 1024, "test_map");
     MapMode   m;
-    REQUIRE(m.load("assets_baked/demo_map.vnm", &a));
+    REQUIRE(m.load("demo_map.vnm", &a));
     CHECK(m.grid_w == 8);
     CHECK(m.grid_h == 6);
     CHECK(m.tile_size == 64);
@@ -27,7 +27,7 @@ TEST_CASE("MapMode::load: lee el .vnm horneado y expone la rejilla correcta") {
 TEST_CASE("MapMode: la colision de borde bloquea, el interior esta libre (demo_map.tmx)") {
     Arena   a = arena_create(1 * 1024 * 1024, "test_map");
     MapMode m;
-    REQUIRE(m.load("assets_baked/demo_map.vnm", &a));
+    REQUIRE(m.load("demo_map.vnm", &a));
 
     CHECK(m.tile_blocked(0, 0));   // esquina, pared de borde
     CHECK(m.tile_blocked(7, 5));   // esquina opuesta
@@ -42,7 +42,7 @@ TEST_CASE("MapMode: la colision de borde bloquea, el interior esta libre (demo_m
 TEST_CASE("MapMode: el trigger de demo_map.tmx se detecta en su tile y no fuera de el") {
     Arena   a = arena_create(1 * 1024 * 1024, "test_map");
     MapMode m;
-    REQUIRE(m.load("assets_baked/demo_map.vnm", &a));
+    REQUIRE(m.load("demo_map.vnm", &a));
 
     REQUIRE(m.trigger_count == 1);
     CHECK(m.trigger_at(3, 2) == 0);   // tile del trigger (192/64, 128/64)
@@ -56,7 +56,7 @@ TEST_CASE("MapMode::update: caminar hasta el trigger dispara pending_trigger_scr
           "sola vez") {
     Arena     a = arena_create(1 * 1024 * 1024, "test_map");
     MapMode   m;
-    REQUIRE(m.load("assets_baked/demo_map.vnm", &a));
+    REQUIRE(m.load("demo_map.vnm", &a));
 
     GameState state{};
     state.player_x = 3.0f * 64.0f + 32.0f;  // tile (3,3): abierto, junto al trigger
@@ -81,7 +81,7 @@ TEST_CASE("MapMode::update: caminar hasta el trigger dispara pending_trigger_scr
         arena_destroy(&a);
         return;
     }
-    CHECK(std::string_view(m.pending_trigger_script) == "assets_baked/demo_branching.vnc");
+    CHECK(std::string_view(m.pending_trigger_script) == "demo_branching.vnc");
 
     // Consumir el trigger (lo que haria main.cpp) y seguir de pie en el mismo tile: no
     // debe volver a dispararse hasta salir y volver a entrar.

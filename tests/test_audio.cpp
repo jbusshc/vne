@@ -8,7 +8,7 @@
 
 TEST_CASE("audio: cargar y reproducir un sfx da un voice_id valido") {
     SoundHandle h{};
-    REQUIRE(audio_load("assets_src/ogg/puerta_cierra.wav", false, &h) == AudioLoadResult::Ok);
+    REQUIRE(audio_load("ogg/puerta_cierra.wav", false, &h) == AudioLoadResult::Ok);
     REQUIRE(h.valid());
     u32 voice_id = audio_play(h, Bus::Sfx, 1.0f, false);
     CHECK(voice_id != 0);
@@ -17,14 +17,14 @@ TEST_CASE("audio: cargar y reproducir un sfx da un voice_id valido") {
 
 TEST_CASE("audio: cargar un archivo inexistente falla sin crashear") {
     SoundHandle h{};
-    CHECK(audio_load("assets_src/ogg/no_existe.wav", false, &h) != AudioLoadResult::Ok);
+    CHECK(audio_load("ogg/no_existe.wav", false, &h) != AudioLoadResult::Ok);
     CHECK_FALSE(h.valid());
 }
 
 TEST_CASE("audio: cargar el mismo path dos veces devuelve el mismo handle (cache)") {
     SoundHandle a{}, b{};
-    REQUIRE(audio_load("assets_src/ogg/puerta_cierra.wav", false, &a) == AudioLoadResult::Ok);
-    REQUIRE(audio_load("assets_src/ogg/puerta_cierra.wav", false, &b) == AudioLoadResult::Ok);
+    REQUIRE(audio_load("ogg/puerta_cierra.wav", false, &a) == AudioLoadResult::Ok);
+    REQUIRE(audio_load("ogg/puerta_cierra.wav", false, &b) == AudioLoadResult::Ok);
     CHECK(a == b);
 }
 
@@ -36,8 +36,8 @@ TEST_CASE("audio: audio_set_bus_volume no revienta con valores fuera de rango") 
 
 TEST_CASE("audio: crossfade de musica cambia la pista activa y su posicion se puede leer") {
     SoundHandle a{}, b{};
-    REQUIRE(audio_load("assets_src/ogg/tema_a.wav", true, &a) == AudioLoadResult::Ok);
-    REQUIRE(audio_load("assets_src/ogg/tema_b.wav", true, &b) == AudioLoadResult::Ok);
+    REQUIRE(audio_load("ogg/tema_a.wav", true, &a) == AudioLoadResult::Ok);
+    REQUIRE(audio_load("ogg/tema_b.wav", true, &b) == AudioLoadResult::Ok);
 
     audio_crossfade_music(a, 0.0f);
     CHECK(audio_music_position() >= 0.0f);
@@ -63,7 +63,7 @@ TEST_CASE("audio: un track_id que no esta en el catalogo se rechaza sin crashear
 
 TEST_CASE("audio: el voice_id lleva la generacion del slot, no solo el indice") {
     SoundHandle h{};
-    REQUIRE(audio_load("assets_src/ogg/puerta_cierra.wav", false, &h) == AudioLoadResult::Ok);
+    REQUIRE(audio_load("ogg/puerta_cierra.wav", false, &h) == AudioLoadResult::Ok);
     u32 voice_id = audio_play(h, Bus::Sfx, 1.0f, false);
     REQUIRE(voice_id != 0);
 
