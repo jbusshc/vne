@@ -241,3 +241,18 @@ void glyph_cache_flush_dirty_pages() {
         }
     }
 }
+
+void glyph_cache_invalidate_font(FontHandle font) {
+    u32 cleared = 0;
+    for (auto& entry : g_table) {
+        // La clave es (font.index << 32) | glyph_index, ver glyph_key(): basta comparar
+        // la mitad alta para quedarse con los glifos de esta fuente.
+        if (entry.used && static_cast<u32>(entry.key >> 32) == font.index) {
+            entry.used = false;
+            cleared += 1;
+        }
+    }
+    if (cleared > 0) {
+        log_info("glyph_cache: %u glifos invalidados tras recargar la fuente", cleared);
+    }
+}

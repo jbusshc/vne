@@ -5,19 +5,23 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** M11 — Sistema de assets y empaquetado (en progreso). Plan por etapas:
-(0) `fnv1a_u64` + `g_frame_alloc_count` pasa a `thread_local` en `heap_guard` — sin esto
-el hilo de IO de esta etapa correría datos con el contador del hilo principal; (1)
-`platform/files.h/.cpp` sobre `SDL_GetPathInfo`/`SDL_EnumerateDirectory`/`SDL_LoadFile`,
-migra el escaneo de `audio.cpp` (deuda de SPEC.md §2), NO toca `tools/bake/` (enlaza sin
-SDL3 a propósito); (2) `src/assets/pak.{h,cpp}`, formato `.pak` de SPEC.md §11 con dos
-backends (directorio suelto / `.pak` mapeado a memoria), `vne_bake pack`; (3) hilo de IO
-único + `assets_texture/font/sound/process_completed_loads` — el hilo solo lee bytes, el
-decode y la subida a GPU se quedan en el hilo principal (`sg_make_image` no es
-thread-safe); (4) migrar los call sites existentes (atlas, fuentes, `script_load`,
-`map_mode::load`, `catalog_load`, `audio_load`) a leer por esta vía; (5) watcher genérico
-de mtimes (sustituye al de un solo archivo de M8) y `atlas.bin` con nombres lógicos
-(cierra ADR-0025). Detalle completo en docs/DECISIONS.md cuando se cierre.
+**Hito activo:** M11 — Sistema de assets y empaquetado (implementado, pendiente de
+confirmación para cerrar). `platform/files.{h,cpp}` sobre SDL3 unifica el filesystem y
+deja `audio.cpp` sin `#if` de plataforma (deuda que SPEC.md §2 nombraba).
+`assets/pak.{h,cpp}` implementa el `.pak` de §11 con dos backends tras la misma interfaz
+(directorio suelto en Debug/Dev, `.pak` residente en Ship) y `vne_bake pack` lo construye;
+**ningún cargador del motor abre ya un archivo por ruta literal** — texturas, fuentes,
+guiones, mapas, catálogos y audio resuelven nombres lógicos. `assets/assets.{h,cpp}` añade
+el hilo de IO (SDL_Thread + cola circular fija con mutex/condición) y la API de §7.4:
+`assets_texture` es asíncrona con placeholder y el mismo handle pasa a la textura real al
+integrarla; `assets_font`/`assets_sound` son síncronas a propósito (ADR-0053, ninguna
+tiene placeholder que enseñar). `assets/hot_reload.{h,cpp}` vigila mtimes cada 500 ms y
+recarga `.ttf` y `.png` en caliente; los `.vns` siguen en el editor porque tocan la VM.
+Cinco decisiones nuevas: ADR-0051 (heap_guard `thread_local`), ADR-0052 (el hilo de IO
+solo lee bytes), ADR-0053, ADR-0054 (`.pak` leído a memoria, no `mmap`), ADR-0055 (audio
+empaquetado y catálogo de música horneado). `atlas.bin` sigue sin nombres lógicos a
+propósito, no por olvido: no hay consumidor todavía (lo necesita M15), anotado en
+Pendientes.
 
 M0–M10 están cerrados. La hoja de ruta se amplió con **M11–M15** (ADR-0050) tras comprobar
 que cerrar en M10 dejaba fuera partes enteras de la especificación: M11 (este hito), M12

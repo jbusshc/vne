@@ -43,3 +43,12 @@ void assets_process_completed_loads();
 // Diagnostico para el editor/HUD (M8): cuantas cargas hay encoladas o en vuelo ahora
 // mismo. 0 significa que todo lo pedido ya esta resuelto.
 u32 assets_pending_count();
+
+// Vuelve a leer una textura ya cargada y la sustituye EN EL SITIO: el handle no cambia,
+// asi que todo el que lo tenga guardado pasa a ver la version nueva (M11, recarga en
+// caliente). Sincrona a proposito: la dispara un archivo que acaba de cambiar en disco,
+// no el bucle de juego, y quien la llama quiere saber ya si funciono.
+//
+// Devuelve false si el nombre no estaba cargado o si la relectura fallo; en ese caso la
+// textura anterior se queda intacta.
+bool assets_reload_texture(const char* logical_name);

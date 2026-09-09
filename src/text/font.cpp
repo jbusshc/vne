@@ -85,3 +85,50 @@ FontHandle text_load_font(const char* logical_name, u32 px_size) {
 FontData* font_resolve(FontHandle h) {
     return pool_resolve<struct FontTag>(&g_pool, h);
 }
+
+bool text_reload_font(FontHandle handle, const char* logical_name, u32 px_size) {
+    FontData* data = pool_resolve<struct FontTag>(&g_pool, handle);
+    if (data == nullptr) {
+        log_error("text_reload_font: handle invalido");
+        return false;
+    }
+
+    // Construir la fuente nueva ANTES de tocar la vieja: si algo falla (archivo a medio
+    // guardar, que es justo lo que puede pasar recargando en caliente), el juego se queda
+    // con la que ya tenia en vez de sin ninguna.
+    const u8* bytes = nullptr;
+    usize     size  = 0;
+    bool      owned = false;
+    if (!pak_resolve(logical_name, &bytes, &size, &owned)) {
+        log_error("text_reload_font: no se pudo abrir '%s'", logical_name);
+        return false;
+    }
+    FT_Face new_face = nullptr;
+    if (FT_New_Memory_Face(g_ft_library, bytes, static_cast<FT_Long>(size), 0, &new_face) != 0 ||
+        FT_Set_Pixel_Sizes(new_face, 0, px_size) != 0) {
+        log_error("text_reload_font: '%s' no se pudo releer, se conserva la anterior",
+                  logical_name);
+        if (new_face != nullptr) {
+            FT_Done_Face(new_face);
+        }
+        pak_release(bytes, owned);
+        return false;
+    }
+    hb_font_t* new_hb = hb_ft_font_create_referenced(new_face);
+
+    // Ya hay reemplazo valido: ahora si se puede soltar lo viejo. El orden importa --
+    // primero la cara (deja de referenciar el buffer), luego el buffer.
+    hb_font_destroy(data->hb_font);
+    FT_Done_Face(data->ft_face);
+    pak_release(data->raw_bytes, data->raw_bytes_owned);
+
+    data->ft_face         = new_face;
+    data->hb_font         = new_hb;
+    data->px_size         = px_size;
+    data->ascender        = static_cast<f32>(new_face->size->metrics.ascender) / 64.0f;
+    data->descender       = static_cast<f32>(-new_face->size->metrics.descender) / 64.0f;
+    data->line_height     = static_cast<f32>(new_face->size->metrics.height) / 64.0f;
+    data->raw_bytes       = bytes;
+    data->raw_bytes_owned = owned;
+    return true;
+}

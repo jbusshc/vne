@@ -13,3 +13,12 @@
 // Devuelve un handle invalido (h.valid() == false) si la carga falla; el error concreto
 // queda en el log. No hay placeholder de fuente: sin fuente no hay texto que dibujar.
 FontHandle text_load_font(const char* logical_name, u32 px_size);
+
+// Vuelve a cargar una fuente EN EL SITIO (M11, recarga en caliente): el handle no cambia,
+// asi que todo el que ya lo tenga guardado (VnMode, MenuMode...) pasa a usar la version
+// nueva sin enterarse. Devuelve false y deja la fuente anterior intacta si la recarga
+// falla, para no dejar el juego sin fuente por un archivo a medio guardar.
+//
+// El llamante debe invalidar los glifos ya rasterizados de esta fuente
+// (glyph_cache_invalidate_font), o se seguirian dibujando los viejos.
+bool text_reload_font(FontHandle handle, const char* logical_name, u32 px_size);

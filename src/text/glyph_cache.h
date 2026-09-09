@@ -32,3 +32,15 @@ void glyph_cache_begin_frame();
 // registra un aviso) en vez de crashear: las paginas siguen "dirty" y se suben en el
 // siguiente frame (ADR-0016 / ADR-0019, docs/DECISIONS.md).
 void glyph_cache_flush_dirty_pages();
+
+// Descarta los glifos ya rasterizados de una fuente concreta (M11, recarga en caliente):
+// tras recargar el TTF, los glifos cacheados son los de la version anterior y hay que
+// dejar que se vuelvan a rasterizar bajo demanda. La clave del cache no incluye
+// font.gen a proposito (ver el comentario en glyph_cache.cpp), asi que recargar una
+// fuente "en el sitio" -- mismo handle, contenido nuevo -- exige limpiar aqui de forma
+// explicita o se seguirian sirviendo los glifos viejos.
+//
+// El espacio que esos glifos ocupaban en el atlas no se recupera: el empaquetador es un
+// shelf de una sola pasada, sin free individual. Aceptable porque esto solo ocurre al
+// tocar un archivo a mano en Debug/Dev, no en un juego real.
+void glyph_cache_invalidate_font(FontHandle font);

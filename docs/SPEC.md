@@ -96,11 +96,12 @@ cómo se escribe el código **ahora**, no una tarea futura. En la práctica sign
   directorios. Los formatos en disco (`.vnc`, `.vnsave`, `.vnm`, `.vnl`, `.pak`) se leen y
   escriben con tipos de tamaño fijo.
 
-Estado real: se ha cumplido. Solo tres archivos tienen un `#if` de plataforma
-(`gfx_backend_d3d11.cpp`, que es el backend; `audio/audio.cpp` y `editor/editor.cpp`, ambos con
-su rama POSIX escrita). La deuda conocida es que `audio/audio.cpp` enumera un directorio con la
-API del sistema en lugar de hacerlo a través de `platform/`, lo que M11 corrige al necesitar esa
-misma operación para el sistema de assets.
+Estado real: se ha cumplido. Tras M11, el filesystem vive detrás de `platform/files.h` (sobre
+SDL3) y `audio/audio.cpp` ya no tiene ningún `#if` de plataforma. Quedan dos en el código de
+runtime — `gfx_backend_d3d11.cpp`, que es el backend por definición, y `editor/editor.cpp`, con
+su rama POSIX escrita — más el de `tools/bake/main.cpp`, deliberado: esa herramienta enlaza sin
+SDL3 a propósito (lo explica su propio bloque en `CMakeLists.txt`), así que conserva su listado
+de directorio mínimo en vez de depender de `platform/`.
 
 Lo que **no** se puede hacer aquí es compilar y verificar fuera de Windows: ver §13.1.
 
@@ -747,7 +748,7 @@ Modos previstos: `VnMode`, `MapMode`, `MenuMode`, `BacklogMode`, `SaveLoadMode`.
 
 | Origen (`assets_src/`) | Herramienta | Destino (`assets_baked/`) | Estado |
 |---|---|---|---|
-| `png/*.png` | `vne_bake atlas` | `atlas_NN.qoi` + `atlas.bin` | parcial: `atlas.bin` sin nombres ni sub-páginas (ADR-0025), lo completa M11 |
+| `png/*.png` | `vne_bake atlas` | `atlas_NN.qoi` + `atlas.bin` | parcial: `atlas.bin` sigue sin nombres ni sub-páginas (ADR-0025). M11 lo dejó así a propósito: no hay ningún consumidor que pida un sprite por nombre todavía. Lo necesita M15 |
 | `ttf/*.ttf` | `vne_bake font` | `font_*.atlas` + métricas | **no existe**: las fuentes se rasterizan en runtime. M13 |
 | `scripts/*.vns` | `vne_bake script` | `*.vnc` | hecho (M3) |
 | `maps/*.tmx` | `vne_bake map` | `*.vnm` | hecho (M9) |
@@ -755,8 +756,10 @@ Modos previstos: `VnMode`, `MapMode`, `MenuMode`, `BacklogMode`, `SaveLoadMode`.
 | `shaders/*.glsl` | ~~`sokol-shdc`~~ | ~~`*.glsl.h`~~ | **no se usa**: escritos a mano en `src/gfx/shaders.h` (ADR-0010); `shaders/` está vacío |
 | `ogg/*.ogg` | copia directa | `*.ogg` | hecho (M6) |
 
-Todo se empaqueta en `game.pak`. **Nada de esto existe todavía** — no hay `.pak`, y el juego
-lee los assets sueltos del directorio de build. Lo construye M11 junto con §7.4:
+Todo se empaqueta en `game.pak` con `vne_bake pack <out.pak> <assets_baked_dir> <assets_src_dir>`
+(M11). Las builds `Ship` lo montan y no leen ni un archivo suelto; `Debug`/`Dev` montan el
+directorio, que es lo que permite la recarga en caliente. El `.pak` se lee entero a memoria al
+montar en vez de mapearse con `mmap` (ADR-0054):
 
 ```
 Formato .pak

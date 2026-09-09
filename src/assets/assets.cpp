@@ -286,3 +286,24 @@ u32 assets_pending_count() {
     SDL_UnlockMutex(g_mutex);
     return count;
 }
+
+bool assets_reload_texture(const char* logical_name) {
+    TextureHandle handle = cache_find(fnv1a_u64(logical_name));
+    if (!handle.valid()) {
+        return false;  // nunca se pidio: no hay nada que recargar
+    }
+
+    const u8* data  = nullptr;
+    usize     size  = 0;
+    bool      owned = false;
+    if (!pak_resolve(logical_name, &data, &size, &owned)) {
+        log_error("assets_reload_texture: no se encontro '%s'", logical_name);
+        return false;
+    }
+    bool ok = texture_finish_load_from_memory(handle, data, size);
+    pak_release(data, owned);
+    if (ok) {
+        log_info("assets_reload_texture: '%s' recargado en caliente", logical_name);
+    }
+    return ok;
+}

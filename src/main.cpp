@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "assets/assets.h"
+#include "assets/hot_reload.h"
 #include "assets/pak.h"
 #include "audio/audio.h"
 #include "base/arena.h"
@@ -252,6 +253,13 @@ int main(int argc, char** argv) {
     if (!latin_dialogue_font.valid()) {
         log_error("No se pudo cargar la fuente de prueba NotoSans.ttf");
     }
+
+    // Recarga en caliente (SPEC.md #7.4, M11): vigila los .ttf de estas dos fuentes y los
+    // .png del atlas. Los .vns los vigila el editor aparte, porque recargarlos toca la VM
+    // (ver el comentario de reparto en assets/hot_reload.h). Vacio en Ship.
+    hot_reload_init();
+    hot_reload_watch_font(demo_font, "ttf/NotoSansJP.ttf", 28);
+    hot_reload_watch_font(latin_dialogue_font, "ttf/NotoSans.ttf", 28);
     const char* demo_text =
         "Hola {b}mundo{/b}. {color=#ff5040}Texto en rojo{/color}. "
         "{ruby=\xE3\x81\x8B\xE3\x82\x93\xE3\x81\x98}\xE6\xBC\xA2\xE5\xAD\x97{/ruby} "
@@ -384,6 +392,8 @@ int main(int argc, char** argv) {
 
         f32 dt = clock_tick(&clock);
         audio_update(dt, &demo_state.bgm_position);
+        // Vacio en Ship; en Debug/Dev comprueba mtimes como mucho cada 500 ms.
+        hot_reload_update(dt);
 
         mode_stack_update(&mode_stack, input, dt);
         if (backlog_mode.wants_close) {

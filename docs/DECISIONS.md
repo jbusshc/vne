@@ -1613,6 +1613,181 @@ omitirlo y dar la impresión de que sí.
 
 ---
 
+## ADR-0051 — `heap_guard` pasa a `thread_local` en vez de exceptuar al hilo de IO
+
+**Fecha:** 2026-09-08
+**Hito:** M11
+**Estado:** aceptada
+
+**Contexto.** M11 introduce el primer segundo hilo del motor. `g_frame_alloc_count` (y el
+flag de `heap_guard_suspend`) eran variables globales simples: en cuanto el hilo de IO
+asignara memoria por su cuenta — leer un archivo a un buffer, por ejemplo — incrementaría
+el mismo contador que `heap_guard_check_frame()` revisa al final del frame del hilo
+principal. Eso es a la vez una carrera de datos real bajo el modelo de memoria de C++ y
+una fuente de falsos positivos: el assert de cero heap por frame saltaría por asignaciones
+que no ocurren en ningún frame.
+
+**Decisión.** Ambas variables pasan a `thread_local`. Cada hilo lleva su propio contador;
+el del hilo de IO simplemente no se consulta nunca, porque ese hilo no tiene "frame". La
+regla de SPEC.md §4 se lee tal cual está escrita: prohíbe asignar *entre `arena_reset` y
+`gfx_present`*, y el hilo de IO no está en ese tramo. `heap_guard_suspend/resume` siguen
+siendo exclusivas del hilo principal.
+
+**Alternativas descartadas.** Añadir el hilo de IO como cuarta excepción documentada junto
+a Lua/audio/subproceso del editor: sería mentir sobre lo que ocurre. Esas tres excepciones
+existen porque código de terceros asigna *dentro del frame* y no se puede evitar; el hilo
+de IO no está en el frame en absoluto, así que no necesita ninguna dispensa — necesita que
+la contabilidad sea por hilo, que es distinto. Proteger el contador con un mutex o hacerlo
+atómico: costaría en el camino caliente (cada `operator new` del hilo principal) para
+mezclar dos cuentas que no tienen nada que ver entre sí.
+
+**Consecuencias.** El contador que ve el HUD sigue siendo exactamente el mismo número que
+antes para el hilo principal, así que ninguna verificación previa cambia de significado.
+Si algún día hay más hilos, cada uno queda contabilizado por separado sin tocar nada. El
+riesgo que queda es el inverso: una asignación indebida dentro del hilo de IO no la detecta
+nadie, porque su contador no se revisa — aceptado, ese hilo no tiene presupuesto de frame
+que proteger.
+
+---
+
+## ADR-0052 — El hilo de IO solo lee bytes; decodificar y subir a GPU se queda en el principal
+
+**Fecha:** 2026-09-08
+**Hito:** M11
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §7.4 pide que "la carga real ocurra en un hilo de IO dedicado". La
+pregunta es dónde cortar exactamente: leer del disco, decodificar (QOI, TTF, audio) y subir
+la textura a la GPU son tres pasos distintos con restricciones distintas. `sg_make_image` de
+sokol_gfx no es thread-safe, y las librerías de terceros (FreeType, miniaudio) tienen sus
+propias reglas de reentrada que habría que auditar una por una.
+
+**Decisión.** El hilo de IO hace exclusivamente lo primero: resolver un nombre lógico a
+bytes vía `pak_resolve()`. Todo lo demás — decodificar y crear el recurso de GPU — ocurre en
+el hilo principal dentro de `assets_process_completed_loads()`. Como corolario, `pak_resolve()`
+no toca ninguna arena del proyecto (usa el asignador de SDL), porque las arenas no son
+thread-safe.
+
+**Alternativas descartadas.** Decodificar también en el hilo de IO y subir solo la textura
+en el principal: ganaría unos milisegundos de CPU por asset, a cambio de auditar la
+reentrada de FreeType y miniaudio y de gestionar buffers de píxeles cruzando hilos. No
+compensa para el tamaño de assets de una novela visual. Un pool de hilos en vez de uno
+solo: SPEC.md §1 excluye explícitamente "job system o paralelismo más allá de un hilo de
+carga de assets".
+
+**Consecuencias.** Lo que se elimina es el bloqueo por E/S de disco, que es exactamente el
+tirón que la tabla de riesgos de SPEC.md §14 quería evitar. El coste de decodificar sigue
+cayendo en el frame: medido en `tests/test_assets.cpp`, integrar el atlas de prueba cuesta
+~8 ms en Dev, un 48% del presupuesto de 16.6 ms. Por eso
+`assets_process_completed_loads()` integra **una** carga por llamada y no todas las que
+haya: dos texturas grandes en el mismo frame se pasarían del presupuesto. Si algún día los
+assets crecen hasta que una sola integración no quepa en un frame, habrá que subir el
+decode al hilo de IO — y entonces sí tocará la auditoría de reentrada que aquí se evitó.
+
+---
+
+## ADR-0053 — Solo `assets_texture` es asíncrona; `assets_font` y `assets_sound` son síncronas
+
+**Fecha:** 2026-09-08
+**Hito:** M11
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §7.4 declara cuatro funciones (`assets_texture`, `assets_font`,
+`assets_sound`, `assets_process_completed_loads`) y describe el modelo asíncrono ilustrándolo
+**solo** con `assets_texture`: "devuelve inmediatamente un handle válido que apunta al
+placeholder hasta que la carga termina". No dice qué debe hacer una fuente o un sonido
+mientras cargan.
+
+**Decisión.** Únicamente `assets_texture` es asíncrona. `assets_font` y `assets_sound`
+resuelven por el mismo backend (así que funcionan igual con `.pak` que con directorio
+suelto) pero de forma síncrona, en el hilo que las llama.
+
+**Alternativas descartadas.** Hacerlas asíncronas por simetría: ninguna de las dos tiene
+"versión placeholder" que enseñar mientras carga. `text/font.h` ya documentaba desde M2 que
+"sin fuente no hay texto que dibujar" — devuelve un handle inválido si falla, no una fuente
+de repuesto — y `audio_load` hace lo mismo. Diferirlas obligaría a inventar ese concepto de
+placeholder solo para tener algo que devolver, o a que el llamante gestionara un "todavía
+no está listo" que hoy no existe en ninguna de sus firmas. Además el coste que se ahorraría
+es pequeño: parsear las métricas de un TTF no se parece a decodificar un atlas y subirlo a
+la GPU.
+
+**Consecuencias.** El hilo de IO tiene un único tipo de trabajo, lo que mantiene su cola y
+su protocolo simples. Si en el futuro se cargan fuentes o bancos de sonido grandes a mitad
+de partida y se nota el tirón, habrá que revisitar esto — y entonces la decisión de fondo
+que hay que tomar primero es qué mostrar/oír mientras tanto, no cómo hacer el hilo.
+
+---
+
+## ADR-0054 — El `.pak` se lee entero a `g_arena_perm`, no se mapea con `mmap`
+
+**Fecha:** 2026-09-08
+**Hito:** M11
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §7.4 describe el backend de release como "paquete .pak (builds de
+release, **mapeado a memoria**)". SDL3 no expone un `mmap` portable de propósito general, y
+escribirlo a mano significaría un `#if` por sistema operativo justo en la capa que M11
+existe para unificar.
+
+**Decisión.** `pak_mount()` lee el archivo entero una sola vez a `g_arena_perm` y lo deja
+residente para todo el proceso. `pak_resolve()` devuelve punteros directos dentro de ese
+bloque, sin copiar.
+
+**Alternativas descartadas.** Un `mmap`/`CreateFileMapping` propio tras `platform/`: es la
+implementación literal de lo que pide la especificación, pero añade código específico de
+plataforma que nadie puede compilar fuera de Windows hoy (§13.1) a cambio de un beneficio
+que este proyecto no puede medir — sus assets ocupan unos 12 MB.
+
+**Consecuencias.** Se cumple la propiedad que de verdad importa (una sola lectura de disco
+al arrancar, cero E/S por asset después) pero **no** la letra: no hay paginación perezosa
+ni memoria compartida entre procesos, y el `.pak` entero ocupa RAM desde el arranque. Con
+12 MB dentro de una arena de 64 MB no es un problema; si los assets crecen a cientos de MB
+habrá que implementar el mapeo de verdad. Queda anotado en "Pendientes observados" para que
+la divergencia con la especificación no se pierda.
+
+---
+
+## ADR-0055 — Audio empaquetado: decodificar desde memoria y hornear el catálogo de música
+
+**Fecha:** 2026-09-08
+**Hito:** M11
+**Estado:** aceptada
+
+**Contexto.** Dos problemas aparecieron al llevar el audio al backend empaquetado.
+Primero: `ma_sound_init_from_file()` de miniaudio solo acepta una ruta de archivo, y en Ship
+no hay archivos sueltos. Segundo: `scan_music_catalog()` construía el catálogo
+`{track_id → archivo}` **enumerando** `assets_src/ogg/` en runtime, y un `.pak` no se puede
+enumerar por nombre: sus entradas guardan el hash del nombre, no el nombre (que es
+justamente lo que permite resolver sin comparar cadenas).
+
+**Decisión.** Dos caminos según el backend activo, no uno solo:
+- Backend suelto: `audio_load` conserva **intacto** el camino de M6, con su comprobación
+  previa con `fopen` incluida (ADR-0036 depende de ella para esquivar un use-after-free real
+  de miniaudio 0.11.21).
+- Backend empaquetado: `ma_decoder_init_memory()` + `ma_sound_init_from_data_source()` sobre
+  el puntero que ya vive dentro del `.pak` residente. El `ma_decoder` se guarda en el
+  `SoundSlot` porque tiene que sobrevivir tanto como el `ma_sound` que lo referencia.
+- El catálogo de música lo genera `vne_bake pack` como una entrada más dentro del `.pak`
+  (`ogg_catalog.bin`, registros de tamaño fijo). En runtime se lee en vez de escanear.
+
+**Alternativas descartadas.** Un `ma_vfs` propio que le presentara el `.pak` a miniaudio
+como si fuera un sistema de archivos: es la solución "correcta" de manual, y también la que
+más superficie nueva mete en la librería que ya nos dio el único use-after-free real del
+proyecto. Guardar los nombres completos en las entradas del `.pak` para poder enumerarlas:
+engordaría el formato fijo de 24 bytes que SPEC.md §11 define, y solo lo necesita el audio.
+Extraer los `.ogg` a archivos temporales al arrancar: reintroduce E/S de disco y ensucia el
+directorio del jugador.
+
+**Consecuencias.** El camino de audio ya probado no se toca, así que el riesgo se concentra
+en código nuevo que solo corre en Ship — y por eso se verificó explícitamente ejecutando
+`demo_audio.vns` (que dispara `@bgm`/`@sfx`/`@stopbgm`) desde un `.pak` con los directorios
+sueltos renombrados. El precio es tener dos caminos que mantener en `audio_load`: si uno se
+arregla, hay que mirar el otro. El catálogo horneado además fija los `track_id` en tiempo de
+horneado, lo que es más robusto que depender del orden de enumeración del sistema de
+archivos.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -1829,12 +2004,35 @@ nota de contexto.
   la necesita (`MenuMode::update`, comentario "un unico caso especial"): si se anade un
   tercer idioma con un alfabeto distinto (p. ej. coreano), hay que ampliar esa logica a
   una tabla idioma->fuente en vez de un booleano.
-- `audio/audio.cpp` enumera `assets_src/ogg/` incluyendo `<windows.h>`/`<dirent.h>`
-  directamente, cuando SPEC.md #3 asigna el filesystem a SDL3 y #2 exige que lo especifico
-  del SO viva tras `platform/`. Las dos ramas estan escritas, asi que no rompe la
-  portabilidad, pero pone codigo de plataforma en un modulo que no deberia tenerlo.
-  Asignado a M11: el backend de directorio suelto y el watcher necesitan exactamente esa
-  misma operacion, asi que es el momento de consolidarla en `platform/` y que audio la use.
+- `atlas.bin` sigue sin nombres logicos ni sub-paginas (ADR-0025, y M11 lo mencionaba en
+  su descripcion): los sprites se indexan por posicion en el array. NO se implemento a
+  proposito, no por olvido: hoy no hay ningun consumidor que pida un sprite por nombre --
+  VnMode y MapMode dibujan con `gfx_white_texture()` y el unico lector del manifiesto es
+  el stress test de M1, que recorre por indice. Anadir la tabla de nombres ahora seria una
+  API sin llamante, justo lo que SPEC.md #1 dice que no se hace ("cada funcionalidad
+  existe porque el juego la necesita"). El hito que lo necesitara de verdad es M15 (arte
+  de UI real).
+- El `.pak` se lee entero a memoria en vez de mapearse con `mmap` (ADR-0054): con ~12 MB
+  de assets es irrelevante, pero es una divergencia real con la letra de SPEC.md #7.4
+  ("mapeado a memoria"). Si los assets llegan a cientos de MB, hay que implementar el
+  mapeo de verdad tras `platform/`.
+- `assets_process_completed_loads()` integra una sola carga por llamada porque decodificar
+  el atlas cuesta ~8 ms de los 16.6 ms de un frame (ADR-0052). Si en algun momento un solo
+  asset no cabe en un frame, no bastara con bajar mas el limite: habra que subir el decode
+  al hilo de IO, con la auditoria de reentrada de FreeType/miniaudio que ADR-0052 evito.
+- El hot reload de fuentes deja huecos en el atlas de glifos: `glyph_cache_invalidate_font`
+  marca las entradas como libres pero el empaquetador shelf no reaprovecha ese espacio.
+  Recargar la misma fuente muchas veces en una sesion larga de desarrollo acabaria llenando
+  las paginas. Solo afecta a Debug/Dev; si molesta, lo que hace falta es reempaquetar el
+  atlas de glifos, no un free por glifo.
+- El hot reload de texturas solo cubre el atlas (`assets_src/png/` -> `atlas_00.qoi`), que
+  es el unico origen de textura que existe hoy. Cuando haya texturas sueltas (fondos
+  grandes, SPEC.md #11), el watcher necesitara una tabla origen->nombre logico en vez de
+  la regla fija de `hot_reload.cpp`.
+- ~~`audio/audio.cpp` enumera `assets_src/ogg/` incluyendo `<windows.h>`/`<dirent.h>`
+  directamente~~ — resuelto en M11: el listado vive ahora en `platform/files.h` sobre
+  `SDL_EnumerateDirectory`, y `audio.cpp` ya no tiene ningun `#if` de plataforma.
+  `tools/bake/main.cpp` conserva el suyo a proposito (enlaza sin SDL3, ver su CMakeLists).
 - `@move` aparece en el ejemplo de sintaxis de SPEC.md #9.1 y en el skill
   `vne-script-dsl`, pero no existe: ni en `CmdKind` ni en el parser (escribirlo da
   "comando desconocido"). `Transition` tampoco tiene sintaxis asignada. Documentado como
