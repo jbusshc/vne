@@ -9,8 +9,8 @@
 //
 // M3 declaro el subconjunto de dialogo/flujo lineal (Nop, Say, Show, Hide, Bg, Wait,
 // Jump, Label, End). M5 anadio ramificacion (SetVar, AddVar, JumpIf, Choice, ChoiceEnd,
-// Call, Return, LuaCall). M6 anade audio (Sfx, Bgm, StopBgm); Move/Transition quedan
-// para cuando les toque (no son de M6, SPEC.md #12). Los switch sin `default` del
+// Call, Return, LuaCall). M6 anade audio (Sfx, Bgm, StopBgm). M12 cierra los dos ultimos
+// valores que faltaban de SPEC.md #8.1: Move y Transition. Los switch sin `default` del
 // interprete siguen obligando a cubrir exactamente lo que existe ahora.
 //
 // Anadir un comando toca exactamente cuatro sitios: un valor aqui, un struct en la
@@ -38,12 +38,19 @@ enum class CmdKind : u8 {
     Sfx,
     Bgm,
     StopBgm,
+    Move,
+    Transition,
 };
 
 // Operadores de comparacion de JumpIf y de las condiciones opcionales de @choice
 // (SPEC.md #9.1: "if valor > 2"). Solo comparaciones simples var-OP-valor: es lo unico
 // que aparece en los ejemplos de la especificacion, no hay expresiones compuestas.
 enum class CmpOp : u8 { Eq, Ne, Lt, Le, Gt, Ge };
+
+// Las tres transiciones de pantalla completa que soporta @transition (SPEC.md #12: "la
+// misma ruta de codigo para fade, wipe y disolucion"). Ver gfx/shaders.h para la formula
+// unica que las tres comparten via una mascara distinta cada una.
+enum class TransitionKind : u8 { Fade, Wipe, Dissolve };
 
 struct Cmd {
     CmdKind kind;
@@ -84,15 +91,27 @@ struct Cmd {
         // de M6).
         struct { u16 track_id; f32 fade; }                        bgm;
         struct { f32 fade; }                                      stop_bgm;
+        // Interpola actors[slot].x/y linealmente desde su posicion actual hasta (x, y) en
+        // "seconds" (mismo patron cmd_timer que el fade de Show/Hide, ver vm.cpp). Sin
+        // consumidor visual todavia -- ni Show ni Hide lo tienen tampoco (VnMode/MapMode
+        // no dibujan actors[], ver Pendientes observados) -- verificado sobre GameState,
+        // no en pantalla.
+        // _pad explicito (ADR-0028): sin el, el relleno de alineacion que el compilador
+        // mete entre slot y x no se preserva de forma fiable a traves de copias bajo MSVC.
+        struct { u8 slot; u8 _pad[3]; f32 x, y, seconds; }        move;
+        // Unico valor de CmdKind que hace crecer sizeof(Cmd) de 16 a 20: es justo lo que
+        // fija SPEC.md #8.1 como tamano final. transition_kind decide que mascara usa el
+        // shader de gfx/shaders.h; el umbral (0..1) lo conduce cmd_timer/seconds, igual
+        // que cualquier otro fade.
+        struct { TransitionKind transition_kind; u8 _pad[3]; f32 seconds; } transition;
     };
 };
 
 static_assert(std::is_trivially_copyable_v<Cmd>);
-// Tamano verificado compilando, no asumido (ver docs/DECISIONS.md): say con key_hash
-// (M10) sigue cabiendo en los mismos 12 bytes que ya ocupaba jump_if, asi que el tamano
-// de Cmd no cambio desde M5. No es el 20 final de SPEC.md #8.1 todavia (Move, con tres
-// f32, si lo hara crecer cuando le toque).
-static_assert(sizeof(Cmd) == 16);
+// Tamano verificado compilando, no asumido (ver docs/DECISIONS.md): Move es el primer
+// campo que de verdad hace falta que sea mas grande que los 12 bytes que ya cabian desde
+// M5, y lleva Cmd a los 20 bytes finales de SPEC.md #8.1 (M12).
+static_assert(sizeof(Cmd) == 20);
 
 // Una opcion de un comando Choice (SPEC.md #9.1: texto, condicion opcional, etiqueta
 // destino). No es parte de la tagged union de Cmd (su cardinalidad es variable por

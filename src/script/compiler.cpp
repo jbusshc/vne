@@ -218,6 +218,18 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                 cmd.kind          = CmdKind::StopBgm;
                 cmd.stop_bgm.fade = instr.fade;
                 break;
+            case InstrKind::Move:
+                cmd.kind         = CmdKind::Move;
+                cmd.move.slot    = instr.slot;
+                cmd.move.x       = instr.move_x;
+                cmd.move.y       = instr.move_y;
+                cmd.move.seconds = instr.seconds;
+                break;
+            case InstrKind::Transition:
+                cmd.kind                    = CmdKind::Transition;
+                cmd.transition.transition_kind = instr.transition_kind;
+                cmd.transition.seconds         = instr.seconds;
+                break;
         }
         data.cmds.push_back(cmd);
     }
@@ -238,7 +250,7 @@ bool write_vnc(const std::string& path, const CompiledScriptData& data) {
     }
 
     const u32 magic              = 0x53434E56u;  // 'VNCS' (V,N,C,S en memoria little-endian)
-    const u32 version            = 3;  // M10: Cmd::say y ChoiceOption ganaron key_hash
+    const u32 version            = 4;  // M12: Cmd crece a 20 bytes (Move/Transition)
     const u32 cmd_count          = static_cast<u32>(data.cmds.size());
     const u32 string_pool_size   = static_cast<u32>(data.string_pool.size());
     const u32 label_count        = static_cast<u32>(data.labels.size());

@@ -178,6 +178,40 @@ TEST_CASE("parser: @sfx, @bgm y @stopbgm") {
     CHECK(r.instructions[3].fade == doctest::Approx(0.0f));
 }
 
+TEST_CASE("parser: @move y @transition (M12)") {
+    const char* src =
+        "@move slot 2 to 640.5 -120 in 0.75\n"
+        "@transition fade 0.5\n"
+        "@transition wipe 1.0\n"
+        "@transition dissolve 0.25\n"
+        "@end\n";
+    ParseResult r = parse_script(src, "t.vns");
+    REQUIRE(r.ok());
+    REQUIRE(r.instructions.size() == 5);
+
+    CHECK(r.instructions[0].kind == InstrKind::Move);
+    CHECK(r.instructions[0].slot == 2);
+    CHECK(r.instructions[0].move_x == doctest::Approx(640.5f));
+    CHECK(r.instructions[0].move_y == doctest::Approx(-120.0f));
+    CHECK(r.instructions[0].seconds == doctest::Approx(0.75f));
+
+    CHECK(r.instructions[1].kind == InstrKind::Transition);
+    CHECK(r.instructions[1].transition_kind == TransitionKind::Fade);
+    CHECK(r.instructions[1].seconds == doctest::Approx(0.5f));
+    CHECK(r.instructions[2].transition_kind == TransitionKind::Wipe);
+    CHECK(r.instructions[3].transition_kind == TransitionKind::Dissolve);
+}
+
+TEST_CASE("parser: @move y @transition mal formados son error de compilacion") {
+    // Las palabras conectoras de @move son obligatorias y posicionales.
+    CHECK_FALSE(parse_script("@move slot 0 640 480 in 1.0\n@end\n", "t.vns").ok());
+    CHECK_FALSE(parse_script("@move slot 0 to 640 480\n@end\n", "t.vns").ok());
+    CHECK_FALSE(parse_script("@move slot x to 640 480 in 1.0\n@end\n", "t.vns").ok());
+    // Un tipo de transicion desconocido no se acepta en silencio (SPEC.md #9.2).
+    CHECK_FALSE(parse_script("@transition espiral 1.0\n@end\n", "t.vns").ok());
+    CHECK_FALSE(parse_script("@transition fade\n@end\n", "t.vns").ok());
+}
+
 TEST_CASE("parser: etiqueta desconocida en un @choice tambien es error de compilacion") {
     ParseResult r = parse_script(
         "@choice\n    \"opcion\" -> nunca_declarada\n@end\n@end\n", "roto.vns");

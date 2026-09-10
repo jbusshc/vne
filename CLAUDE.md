@@ -5,9 +5,23 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno. El siguiente por defecto es M12 (presentación y jugabilidad
-completas), que ya puede apoyarse en el sistema de assets de M11 para las máscaras de
-transición.
+**Hito activo:** M12 — Presentación y jugabilidad completas (en progreso). Plan por
+etapas: (0) `Move`/`Transition` en `CmdKind`, `sizeof(Cmd)` 16→20, `.vnc` v3→v4 — un v3
+obsoleto se **rechaza** con error claro, no se "migra" (el criterio original de SPEC.md
+§12 hablaba de migrar una partida guardada con un `.vnc` v3, pero `.vnsave` nunca embebe
+datos de `Cmd`, solo `vm.pc`/`script_id`, así que no hay nada que migrar ahí; corregido en
+SPEC.md); sintaxis nueva `@move slot N to X Y in S` / `@transition <fade|wipe|dissolve> S`,
+sin especificar en ningún sitio hasta ahora; (1) shader de transición (HLSL+GLSL a mano,
+ADR-0010), fórmula única `alpha = saturate((threshold - mask) * sharpness)` para fade/
+wipe/dissolve, máscaras generadas proceduralmente en código (no assets, evita "inventar
+contenido"); (2) `{w=n}`/`{speed=n}` reales vía un array paralelo de eventos en
+`TextLayout`; (3) `{b}` con negrita sintética de FreeType (`FT_GlyphSlot_Embolden`, no hay
+asset de fuente en negrita) — exige que `GlyphQuad` sepa de qué fuente viene cada glifo;
+(4) modo auto proporcional a la longitud de línea; (5) polifonía real de `@sfx` — verificado
+empíricamente con `heap_guard` que `ma_sound_init_copy` no asigna heap en esta versión de
+miniaudio, así que no hace falta una cuarta excepción a la regla de cero heap; (6) colisión
+AABB en `MapMode` en vez de por punto. Detalle completo en docs/DECISIONS.md cuando se
+cierre.
 
 **Último hito completado:** M11 — Sistema de assets y empaquetado.
 `platform/files.{h,cpp}` sobre SDL3 unifica el filesystem y deja `audio.cpp` sin ningún

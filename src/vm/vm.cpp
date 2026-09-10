@@ -126,6 +126,25 @@ void cmd_start(const Cmd& cmd, GameState* state, const CompiledScript& script) {
             state->bgm_track_id = 0;
             state->bgm_position = 0.0f;
             break;
+        case CmdKind::Move: {
+            // Igual que Bg (ver mas abajo): el estado logico se aplica AL INSTANTE aqui,
+            // no interpolado. cmd_timer/seconds es solo temporizacion, para cuando exista
+            // un renderer que interpole visualmente desde donde el sprite estuviera
+            // dibujado hasta este destino ya fijado -- eso es un problema del renderer
+            // (que arranca desde su propia posicion en pantalla), no de GameState.
+            // Evita ademas anadir "posicion de origen" a VmState solo para esto, que
+            // subiria la version de .vnsave sin necesidad real (ver ADR de M12).
+            u8 slot          = cmd.move.slot < k_max_actor_slots ? cmd.move.slot : 0;
+            state->actors[slot].x = cmd.move.x;
+            state->actors[slot].y = cmd.move.y;
+            break;
+        }
+        case CmdKind::Transition:
+            // Puramente temporizado (cmd_timer, ver cmd_update). El renderer no necesita
+            // ningun campo nuevo de GameState: lee transition_kind y calcula el umbral
+            // directamente de script.cmds[pc] + vm.cmd_timer, exactamente como VnMode ya
+            // lee el Say actual para dibujar el dialogo (ver game/vn_mode.cpp).
+            break;
     }
 }
 
@@ -197,6 +216,20 @@ bool cmd_update(const Cmd& cmd, GameState* state, f32 dt) {
         case CmdKind::Wait:
             state->vm.cmd_timer += dt;
             return state->vm.cmd_timer >= cmd.wait.seconds;
+        case CmdKind::Move:
+            // actors[slot].x/y ya se fijaron al instante en cmd_start (igual que Bg):
+            // esto es solo la pausa antes de seguir con el siguiente comando.
+            if (cmd.move.seconds <= 0.0f) {
+                return true;
+            }
+            state->vm.cmd_timer += dt;
+            return state->vm.cmd_timer >= cmd.move.seconds;
+        case CmdKind::Transition:
+            if (cmd.transition.seconds <= 0.0f) {
+                return true;
+            }
+            state->vm.cmd_timer += dt;
+            return state->vm.cmd_timer >= cmd.transition.seconds;
     }
     return true;
 }
@@ -234,6 +267,10 @@ void cmd_skip_to_end(const Cmd& cmd, GameState* state, const CompiledScript& scr
             break;
         }
         case CmdKind::Bg:
+        case CmdKind::Move:
+        case CmdKind::Transition:
+            // Nada que limpiar: Move ya aplico su destino al instante en cmd_start (igual
+            // que Bg), y Transition no toca GameState en ningun momento (ver cmd_start).
             break;
         case CmdKind::Choice: {
             // No hay UI que elija por el jugador en --autoplay-script ni en el test

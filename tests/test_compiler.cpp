@@ -4,11 +4,15 @@
 // mensaje de fallo de CHECK.
 #include <ostream>
 
+#include <SDL3/SDL.h>
+
 #include <cstdio>
 
+#include "base/arena.h"
 #include "base/hash.h"
 #include "script/compiler.h"
 #include "script/parser.h"
+#include "vm/script_load.h"
 #include "vm/state.h"
 
 TEST_CASE("compiler: resuelve Jump a pc y anade End implicito si falta") {
@@ -100,11 +104,36 @@ TEST_CASE("compiler + write_vnc: el formato binario coincide con SPEC.md #9.3") 
     u32 header[6];
     REQUIRE(std::fread(header, sizeof(header), 1, f) == 1);
     CHECK(header[0] == 0x53434E56u);  // 'VNCS'
-    CHECK(header[1] == 3u);  // M10: Cmd::say/ChoiceOption ganaron key_hash
+    CHECK(header[1] == 4u);  // M12: Cmd crece a 20 bytes (Move/Transition)
     CHECK(header[2] == static_cast<u32>(compiled.data.cmds.size()));
     CHECK(header[3] == static_cast<u32>(compiled.data.string_pool.size()));
     CHECK(header[4] == 0u);  // sin etiquetas en este guion
     CHECK(header[5] == 0u);  // sin choices en este guion
     std::fclose(f);
+    std::remove(path);
+}
+
+TEST_CASE("script_load: un .vnc v3 obsoleto se rechaza con un error claro, no se migra") {
+    // Fabricado a mano, mismo patron que test_save_load.cpp con .vnsave v1: no queda
+    // ningun .vnc v3 real que generar ya con este binario (compiler.cpp escribe v4 desde
+    // M12). El criterio de M12 es justamente que esto se RECHACE (docs/SPEC.md #12): un
+    // .vnc nunca se migra, se regenera siempre desde el .vns fuente, a diferencia de
+    // .vnsave, que si es dato de usuario persistente.
+    SDL_CreateDirectory("assets_baked");  // por si el build no dejo nada horneado antes
+    const char* path = "assets_baked/test_stale_v3.vnc";
+    std::FILE*  f    = std::fopen(path, "wb");
+    REQUIRE(f != nullptr);
+    u32 header[6] = {0x53434E56u, 3u, 0u, 0u, 0u, 0u};  // 'VNCS', version 3, guion vacio
+    std::fwrite(header, sizeof(u32), 6, f);
+    std::fclose(f);
+
+    // Sin pak_mount/pak_unmount aqui: test_main.cpp ya monta "." una vez para todo el
+    // binario de tests, y un pak_unmount() en un solo TEST_CASE lo desmontaria para
+    // cualquier otro test que corra despues (asi se rompio test_map_mode.cpp la primera
+    // vez que se escribio esto).
+    Arena arena = arena_create(1024, "test_stale_vnc");
+    CompiledScript script{};
+    CHECK(script_load("test_stale_v3.vnc", &arena, &script) == ScriptLoadResult::BadFormat);
+    arena_destroy(&arena);
     std::remove(path);
 }

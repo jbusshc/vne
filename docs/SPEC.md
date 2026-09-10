@@ -910,10 +910,12 @@ handle reinicia el sonido en vez de superponer una segunda voz. Colisión por AA
 por punto.
 
 **Criterios:** un guion de demo ejecuta fade, wipe y disolución con la misma ruta de código sin
-que `draw_calls` suba más de 1. `sizeof(Cmd) == 20` y una partida guardada con un `.vnc` v3 se
-migra y carga. `{w=0.5}` retrasa el texto 0.5 s ±50 ms medidos. El modo skip sigue por debajo de
-1 s por cada 1000 comandos. El mismo `@sfx` disparado 5 veces en 100 ms produce 5 voces
-simultáneas.
+que `draw_calls` suba más de 1. `sizeof(Cmd) == 20` y un `.vnc` v3 obsoleto se rechaza con un
+error claro (no hay nada que "migrar": `.vnsave` nunca embebe datos de `Cmd`, solo `vm.pc` y
+`script_id`, así que crecer `Cmd` no afecta a ninguna partida guardada — el `.vnc` en sí nunca
+tuvo migración, se regenera siempre desde `.vns`). `{w=0.5}` retrasa el texto 0.5 s ±50 ms
+medidos. El modo skip sigue por debajo de 1 s por cada 1000 comandos. El mismo `@sfx` disparado
+5 veces en 100 ms produce 5 voces simultáneas.
 
 ### M13 — Integridad de datos y herramientas offline
 

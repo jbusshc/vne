@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "audio/audio.h"
@@ -58,6 +59,73 @@ TEST_CASE("vm: skip_to_end completa Show al instante sin esperar el fade") {
 
     vm_skip_current(&state.vm, &state, script);
     CHECK(state.actors[0].alpha == doctest::Approx(1.0f));
+    CHECK(state.vm.pc == 1);
+}
+
+TEST_CASE("vm: Move fija actors[slot].x/y al instante y cmd_timer solo pacea (M12)") {
+    // Ver el comentario de cmd_start en vm.cpp: al igual que Bg, Move no interpola desde
+    // la posicion anterior -- eso es problema del renderer cuando exista uno -- solo
+    // aplica el destino ya y usa cmd_timer/seconds como pausa antes del siguiente comando.
+    Cmd cmds[2]{};
+    cmds[0].kind         = CmdKind::Move;
+    cmds[0].move.slot    = 2;
+    cmds[0].move.x       = 100.0f;
+    cmds[0].move.y       = 200.0f;
+    cmds[0].move.seconds = 1.0f;
+    cmds[1].kind         = CmdKind::End;
+    CompiledScript script{cmds, 2, "", 0};
+
+    GameState state{};
+    CHECK_FALSE(vm_update(&state.vm, &state, script, 0.016f));
+    // Se aplico al instante, en el primer frame, no gradualmente:
+    CHECK(state.actors[2].x == doctest::Approx(100.0f));
+    CHECK(state.actors[2].y == doctest::Approx(200.0f));
+    CHECK(state.vm.pc == 0);  // sigue pausado: solo paso 0.016s de 1.0s
+
+    CHECK(vm_update(&state.vm, &state, script, 1.0f));
+    CHECK(state.vm.pc == 1);
+}
+
+TEST_CASE("vm: skip_to_end completa Move al instante sin esperar la pausa") {
+    Cmd cmds[2]{};
+    cmds[0].kind         = CmdKind::Move;
+    cmds[0].move.slot    = 0;
+    cmds[0].move.x       = 5.0f;
+    cmds[0].move.y       = 5.0f;
+    cmds[0].move.seconds = 10.0f;
+    cmds[1].kind         = CmdKind::End;
+    CompiledScript script{cmds, 2, "", 0};
+
+    GameState state{};
+    vm_skip_current(&state.vm, &state, script);
+    CHECK(state.actors[0].x == doctest::Approx(5.0f));
+    CHECK(state.vm.pc == 1);
+}
+
+TEST_CASE("vm: Transition no toca GameState, solo pacea con cmd_timer (M12)") {
+    // A proposito: el renderer lee transition_kind y el umbral directamente de
+    // script.cmds[pc] + vm.cmd_timer (ver vm.cpp), sin ningun campo nuevo en GameState.
+    Cmd cmds[2]{};
+    cmds[0].kind                       = CmdKind::Transition;
+    cmds[0].transition.transition_kind = TransitionKind::Wipe;
+    cmds[0].transition.seconds         = 0.5f;
+    cmds[1].kind                       = CmdKind::End;
+    CompiledScript script{cmds, 2, "", 0};
+
+    GameState  state{};
+    GameState  before = state;
+    CHECK_FALSE(vm_update(&state.vm, &state, script, 0.3f));
+    CHECK(state.vm.cmd_timer == doctest::Approx(0.3f));
+
+    // Nada fuera de vm.cmd_timer/cmd_phase cambio: el resto de GameState sigue igual. Se
+    // compara sobre una COPIA, no sobre `state` (seguir usandola despues con el timer
+    // pisado a 0 arruinaria el resto del test).
+    GameState after_for_compare        = state;
+    after_for_compare.vm.cmd_timer = before.vm.cmd_timer;
+    after_for_compare.vm.cmd_phase = before.vm.cmd_phase;
+    CHECK(std::memcmp(&after_for_compare, &before, sizeof(GameState)) == 0);
+
+    CHECK(vm_update(&state.vm, &state, script, 0.2f));
     CHECK(state.vm.pc == 1);
 }
 

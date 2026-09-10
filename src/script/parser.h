@@ -33,6 +33,8 @@ enum class InstrKind : u8 {
     Sfx,
     Bgm,
     StopBgm,
+    Move,
+    Transition,
 };
 
 // Una condicion simple var-OP-valor (SPEC.md #9.1: "confianza >= 3", "valor > 2"). Usada
@@ -63,7 +65,10 @@ struct ParsedInstr {
     std::string sound;    // Sfx/Bgm: nombre logico del sonido/pista
     u8          slot    = 0;
     f32         fade    = 0.0f;
-    f32         seconds = 0.0f;
+    f32         seconds = 0.0f;  // Wait/Bg/Show/Hide: fade o espera. Move/Transition: duracion
+    f32         move_x  = 0.0f;  // Move: destino
+    f32         move_y  = 0.0f;
+    TransitionKind transition_kind = TransitionKind::Fade;  // Transition
 
     std::string     var;         // SetVar/AddVar: nombre de variable
     i32             value = 0;   // SetVar/AddVar: valor

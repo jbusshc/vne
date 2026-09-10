@@ -436,6 +436,54 @@ void parse_block(ParserState& st, usize& i, u32 depth) {
                     parse_f32(fade_str, &instr.fade);
                 }
                 push(st, instr);
+            } else if (cmd == "@move") {
+                // "@move slot N to X Y in S" (M12): sin find_kv aqui, todas las partes son
+                // obligatorias y posicionales con palabras conectoras fijas, a diferencia
+                // de "slot"/"fade" en @show/@hide, que son modificadores opcionales.
+                bool shape_ok = tokens.size() == 8 && tokens[1] == "slot" && tokens[3] == "to" &&
+                                tokens[6] == "in";
+                if (!shape_ok) {
+                    st.error(sl.number, "@move espera 'slot N to X Y in S'");
+                } else {
+                    ParsedInstr instr;
+                    instr.kind = InstrKind::Move;
+                    instr.line = sl.number;
+                    bool ok = parse_u8(tokens[2], &instr.slot) &&
+                              parse_f32(tokens[4], &instr.move_x) &&
+                              parse_f32(tokens[5], &instr.move_y) &&
+                              parse_f32(tokens[7], &instr.seconds);
+                    if (!ok) {
+                        st.error(sl.number, "@move: slot, X, Y y S deben ser numeros");
+                    } else {
+                        push(st, instr);
+                    }
+                }
+            } else if (cmd == "@transition") {
+                if (tokens.size() < 3) {
+                    st.error(sl.number, "@transition espera 'fade|wipe|dissolve segundos'");
+                } else {
+                    ParsedInstr instr;
+                    instr.kind = InstrKind::Transition;
+                    instr.line = sl.number;
+                    if (tokens[1] == "fade") {
+                        instr.transition_kind = TransitionKind::Fade;
+                    } else if (tokens[1] == "wipe") {
+                        instr.transition_kind = TransitionKind::Wipe;
+                    } else if (tokens[1] == "dissolve") {
+                        instr.transition_kind = TransitionKind::Dissolve;
+                    } else {
+                        st.error(sl.number,
+                                  "@transition: tipo desconocido '" + std::string(tokens[1]) +
+                                      "' (fade, wipe o dissolve)");
+                        i += 1;
+                        continue;
+                    }
+                    if (!parse_f32(tokens[2], &instr.seconds)) {
+                        st.error(sl.number, "@transition espera un numero de segundos");
+                    } else {
+                        push(st, instr);
+                    }
+                }
             } else {
                 st.error(sl.number, "comando desconocido: '" + std::string(cmd) + "'");
             }

@@ -9,7 +9,7 @@ namespace {
 // Deben coincidir exactamente con src/script/compiler.cpp (write_vnc). Duplicados a
 // proposito: script/ es una herramienta offline que vm/ (runtime) no debe enlazar.
 constexpr u32 k_vnc_magic   = 0x53434E56u;  // 'VNCS'
-constexpr u32 k_vnc_version = 3u;           // M10: Cmd::say y ChoiceOption ganaron key_hash
+constexpr u32 k_vnc_version = 4u;           // M12: Cmd crece a 20 bytes (Move/Transition)
 }  // namespace
 
 ScriptLoadResult script_load(const char* logical_name, Arena* arena, CompiledScript* out) {
