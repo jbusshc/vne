@@ -1,0 +1,30 @@
+# Guion de prueba de M12: las tres transiciones de pantalla completa y @move.
+#
+# SIN lineas de dialogo a proposito: un `Say` bloquea esperando input (ADR-0039) y en este
+# entorno no hay forma de inyectar pulsaciones (limitacion conocida desde M4), asi que un
+# guion con dialogo nunca llegaria a ejecutar las transiciones en una ventana real. Sin
+# `Say`, el guion se conduce solo y las tres transiciones se pueden observar de verdad.
+#
+# Criterio de M12 (SPEC.md #12): "un guion de demo ejecuta fade, wipe y disolucion con la
+# misma ruta de codigo sin que draw_calls suba mas de 1". Las tres usan el mismo shader y
+# solo cambian la mascara y el sharpness (ver gfx/shaders.h).
+
+:: inicio
+
+@wait 1.0
+@transition fade 2.0
+@wait 0.5
+@transition wipe 2.0
+@wait 0.5
+@transition dissolve 2.0
+@wait 0.5
+
+# @move fija la posicion del actor al instante y usa la duracion como pausa (ver el
+# comentario de cmd_start en vm.cpp): todavia no hay renderer que dibuje actores, asi que
+# esto se verifica sobre GameState, no en pantalla.
+@show marta neutral slot 1
+@move slot 1 to 1280 540 in 0.5
+
+# Sin @jump de vuelta: un bucle infinito haria que --autoplay-script nunca termine (tiene
+# un tope de 1.000.000 de pasos y saldria con error).
+@end

@@ -502,6 +502,20 @@ add_custom_target(vne_bake_script_audio
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_audio.vnc)
 add_dependencies(vne_game vne_bake_script_audio)
 
+# Guion de prueba de M12 (transiciones): @transition fade/wipe/dissolve y @move.
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_transitions.vnc
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
+  COMMAND vne_bake script
+          ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_transitions.vns
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_transitions.vnc
+  DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_transitions.vns
+  COMMENT "vne_bake: compilando demo_transitions.vns a demo_transitions.vnc"
+)
+add_custom_target(vne_bake_script_transitions
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_transitions.vnc)
+add_dependencies(vne_game vne_bake_script_transitions)
+
 # Mapa de prueba de M9 (TMX -> .vnm, ADR de M9 en docs/DECISIONS.md).
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_map.vnm

@@ -38,6 +38,21 @@ struct Recti {
     i32 x, y, w, h;
 };
 
+// Transiciones de pantalla completa (M12, capa Transition = 7). Enum propio de gfx y no
+// el TransitionKind de vm/cmd.h a proposito: gfx es una capa POR DEBAJO de vm y no puede
+// incluir nada suyo (SPEC.md #5). Quien traduce entre los dos es la capa de aplicacion,
+// que ve ambas.
+enum class GfxTransitionMask : u8 { Fade, Wipe, Dissolve };
+
+// Pide dibujar una transicion sobre TODO lo demas al final del frame. Es inmediata como
+// gfx_draw_sprite: hay que volver a llamarla cada frame que la transicion siga activa
+// (gfx_begin_frame la limpia). threshold va de 0 (nada cubierto) a 1 (todo cubierto);
+// color es el tinte RGBA8 premultiplicado con el que se cubre (normalmente negro opaco).
+//
+// Cuesta exactamente una draw call extra, sea cual sea la mascara: las tres comparten
+// shader y solo cambian la textura de mascara y el sharpness (ver gfx/shaders.h).
+void gfx_draw_transition(GfxTransitionMask mask, f32 threshold, u32 color);
+
 [[nodiscard]] bool gfx_init(PlatformWindow* window);
 void               gfx_shutdown();
 

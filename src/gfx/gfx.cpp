@@ -48,6 +48,8 @@ namespace {
 
 sg_shader     g_shader{};
 sg_pipeline   g_pipeline{};
+sg_shader     g_transition_shader{};
+sg_pipeline   g_transition_pipeline{};
 sg_buffer     g_vertex_buffer{};
 sg_image      g_scene_color_image{};
 sg_attachments g_scene_attachments{};
@@ -55,6 +57,18 @@ sg_sampler    g_scene_sampler{};
 
 Sprite* g_sprite_queue = nullptr;
 u32     g_sprite_count = 0;
+
+// Transicion pendiente de este frame (M12). Inmediata como la cola de sprites: se limpia
+// en gfx_begin_frame y hay que volver a pedirla cada frame.
+bool              g_transition_active   = false;
+GfxTransitionMask g_transition_mask     = GfxTransitionMask::Fade;
+f32               g_transition_threshold = 0.0f;
+u32               g_transition_color     = 0xFF000000u;
+
+// Mascaras generadas proceduralmente la primera vez que se usan (no son assets: no hay
+// nada que autorar ni que empaquetar, y evita depender de arte de terceros para una
+// funcion del motor). Ver gfx/shaders.h para que significa cada una en la formula.
+TextureHandle g_transition_mask_textures[3]{};
 
 void sprite_corners(const Sprite& s, Corner out[4]) {
     f32 hw = s.dst_w * 0.5f;
@@ -97,6 +111,76 @@ sg_pipeline_desc sprite_pipeline_desc() {
     return desc;
 }
 
+// Genera la mascara de una transicion (M12). Los tres casos escriben un valor 0..255 en
+// los cuatro canales; el shader solo lee .r, pero replicarlo deja la textura legible si
+// alguna vez se inspecciona a ojo.
+//
+// Los tamanos son pequenos a proposito y se muestrean con NEAREST, igual que todo lo
+// demas: con el sharpness que usa cada transicion, el borde es mas ancho que un texel
+// estirado a 1920x1080, asi que no se ve bandeado. En dissolve el "bloque" grande es
+// justamente el aspecto buscado (SPEC.md #13.2 fija estetica PS2).
+TextureHandle make_transition_mask(GfxTransitionMask kind) {
+    i32 w = 1, h = 1;
+    switch (kind) {
+        case GfxTransitionMask::Fade:     w = 1;   h = 1;  break;
+        case GfxTransitionMask::Wipe:     w = 512; h = 1;  break;
+        case GfxTransitionMask::Dissolve: w = 64;  h = 64; break;
+    }
+
+    TextureHandle tex = texture_create_dynamic(w, h);
+    u8*           pixels = arena_alloc_n<u8>(&g_arena_frame, static_cast<usize>(w) * h * 4);
+    if (pixels == nullptr) {
+        log_error("make_transition_mask: sin espacio en la arena de frame");
+        return tex;
+    }
+
+    // Generador propio y determinista (no <random>, que asigna y no da la misma secuencia
+    // entre implementaciones): un LCG basta de sobra para una mascara de ruido.
+    u32 rng = 0x9E3779B9u;
+    for (i32 y = 0; y < h; ++y) {
+        for (i32 x = 0; x < w; ++x) {
+            u8 value = 0;
+            switch (kind) {
+                case GfxTransitionMask::Fade:
+                    value = 0;  // constante: alpha = threshold * sharpness, fundido lineal
+                    break;
+                case GfxTransitionMask::Wipe:
+                    value = static_cast<u8>((x * 255) / (w - 1));  // degradado izq -> der
+                    break;
+                case GfxTransitionMask::Dissolve:
+                    rng   = rng * 1664525u + 1013904223u;
+                    value = static_cast<u8>((rng >> 24) & 0xFFu);
+                    break;
+            }
+            u8* p = &pixels[(static_cast<usize>(y) * w + x) * 4];
+            p[0] = p[1] = p[2] = value;
+            p[3]                = 255;
+        }
+    }
+    texture_update_dynamic(tex, pixels);
+    return tex;
+}
+
+// Las tres se crean en gfx_init, NO perezosamente en el primer uso: crearlas dentro de
+// gfx_flush significaria llamar a sg_make_image/sg_update_image con una render pass
+// abierta, que sokol_gfx no permite (el juego moria nada mas arrancar la primera vez que
+// se escribio asi).
+TextureHandle transition_mask_texture(GfxTransitionMask kind) {
+    return g_transition_mask_textures[static_cast<u32>(kind)];
+}
+
+// Cuanto "endurece" el borde cada transicion. fade usa 1 a proposito: con su mascara
+// constante 0, alpha = saturate(threshold), que es exactamente un fundido lineal. Las
+// otras dos quieren un borde marcado que barra o disperse.
+f32 transition_sharpness(GfxTransitionMask kind) {
+    switch (kind) {
+        case GfxTransitionMask::Fade:     return 1.0f;
+        case GfxTransitionMask::Wipe:     return 24.0f;
+        case GfxTransitionMask::Dissolve: return 24.0f;
+    }
+    return 1.0f;
+}
+
 }  // namespace
 
 bool gfx_init(PlatformWindow* window) {
@@ -123,6 +207,15 @@ bool gfx_init(PlatformWindow* window) {
 
     sg_pipeline_desc pip_desc = sprite_pipeline_desc();
     g_pipeline                = sg_make_pipeline(&pip_desc);
+
+    // Mismo formato de vertice y mismo blend que los sprites: lo unico que cambia es el
+    // shader (mascara + umbral, ver gfx/shaders.h), asi que se parte del mismo desc.
+    sg_shader_desc trans_shd_desc = gfx_transition_shader_desc(sg_query_backend());
+    g_transition_shader           = sg_make_shader(&trans_shd_desc);
+    sg_pipeline_desc trans_pip_desc = sprite_pipeline_desc();
+    trans_pip_desc.shader           = g_transition_shader;
+    trans_pip_desc.label            = "transition_pipeline";
+    g_transition_pipeline           = sg_make_pipeline(&trans_pip_desc);
 
     sg_buffer_desc vb_desc{};
     vb_desc.size  = static_cast<usize>(k_max_sprites_per_frame) * 6 * sizeof(SpriteVertex);
@@ -152,6 +245,13 @@ bool gfx_init(PlatformWindow* window) {
     smp_desc.label      = "scene_sampler";
     g_scene_sampler     = sg_make_sampler(&smp_desc);
 
+    // Aqui y no en el primer uso: make_transition_mask llama a sg_make_image y
+    // sg_update_image, y sokol_gfx no admite ninguna de las dos con una pasada abierta
+    // (que es donde estaria si se crearan perezosamente desde gfx_flush).
+    for (u32 i = 0; i < 3; ++i) {
+        g_transition_mask_textures[i] = make_transition_mask(static_cast<GfxTransitionMask>(i));
+    }
+
     return true;
 }
 
@@ -166,6 +266,14 @@ void gfx_begin_frame() {
     g_sprite_queue     = arena_alloc_n<Sprite>(&g_arena_frame, k_max_sprites_per_frame);
     g_sprite_count     = 0;
     g_gfx_draw_call_count = 0;
+    g_transition_active   = false;
+}
+
+void gfx_draw_transition(GfxTransitionMask mask, f32 threshold, u32 color) {
+    g_transition_active    = true;
+    g_transition_mask      = mask;
+    g_transition_threshold = threshold;
+    g_transition_color     = color;
 }
 
 void gfx_draw_sprite(const Sprite& s) {
@@ -234,6 +342,23 @@ void gfx_flush() {
         vb_base_offset = sg_append_buffer(g_vertex_buffer, &vb_data);
     }
 
+    // El quad de la transicion se sube ANTES de abrir la pasada, igual que los sprites y
+    // que el blit de letterbox de gfx_present: sg_append_buffer no se llama dentro de una
+    // pasada en este motor.
+    int transition_offset = 0;
+    if (g_transition_active) {
+        const SpriteVertex quad[6] = {
+            {-1.0f, 1.0f, 0.0f, 0.0f, g_transition_color},
+            {1.0f, 1.0f, 1.0f, 0.0f, g_transition_color},
+            {1.0f, -1.0f, 1.0f, 1.0f, g_transition_color},
+            {-1.0f, 1.0f, 0.0f, 0.0f, g_transition_color},
+            {1.0f, -1.0f, 1.0f, 1.0f, g_transition_color},
+            {-1.0f, -1.0f, 0.0f, 1.0f, g_transition_color},
+        };
+        sg_range quad_data{quad, sizeof(quad)};
+        transition_offset = sg_append_buffer(g_vertex_buffer, &quad_data);
+    }
+
     sg_pass pass{};
     pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
     pass.action.colors[0].clear_value = {0.05f, 0.05f, 0.08f, 1.0f};
@@ -264,6 +389,30 @@ void gfx_flush() {
 
             batch_start = batch_end;
         }
+    }
+
+    // Encima de todo lo demas (capa Transition = 7, la mas alta): una sola draw call
+    // extra, la misma para fade/wipe/dissolve -- solo cambian la mascara enlazada y el
+    // sharpness (SPEC.md #12, criterio "sin que draw_calls suba mas de 1").
+    if (g_transition_active) {
+        TextureHandle mask_tex = transition_mask_texture(g_transition_mask);
+        sg_apply_pipeline(g_transition_pipeline);
+
+        sg_bindings bnd{};
+        bnd.vertex_buffers[0]        = g_vertex_buffer;
+        bnd.vertex_buffer_offsets[0] = transition_offset;
+        bnd.images[0]                = texture_gpu_image(mask_tex);
+        bnd.samplers[0]              = texture_gpu_sampler(mask_tex);
+        sg_apply_bindings(&bnd);
+
+        GfxTransitionUniforms uniforms{};
+        uniforms.threshold = g_transition_threshold;
+        uniforms.sharpness = transition_sharpness(g_transition_mask);
+        sg_range uniform_data{&uniforms, sizeof(uniforms)};
+        sg_apply_uniforms(0, &uniform_data);
+
+        sg_draw(0, 6, 1);
+        g_gfx_draw_call_count += 1;
     }
 
     sg_end_pass();

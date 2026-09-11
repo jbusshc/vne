@@ -194,9 +194,19 @@ static int run_autoplay(const char* script_path) {
 }
 
 int main(int argc, char** argv) {
+    // --script <nombre logico> elige que guion carga la ventana (por defecto demo.vnc).
+    // Anadido en M12 para poder observar demo_transitions.vnc sin recompilar: el criterio
+    // de las transiciones es visual y no se puede llegar a el con demo.vnc, cuyos Say
+    // bloquean esperando un input que en este entorno no se puede inyectar.
+    const char* script_name     = "demo.vnc";
+    bool        script_override = false;
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::strcmp(argv[i], "--autoplay-script") == 0) {
             return run_autoplay(argv[i + 1]);
+        }
+        if (std::strcmp(argv[i], "--script") == 0) {
+            script_name     = argv[i + 1];
+            script_override = true;
         }
     }
 
@@ -281,8 +291,8 @@ int main(int argc, char** argv) {
     demo_state.player_y = 3.0f * 64.0f + 32.0f;
 
     CompiledScript demo_script{};
-    if (script_load("demo.vnc", &g_arena_scene, &demo_script) != ScriptLoadResult::Ok) {
-        log_error("No se pudo cargar demo.vnc; ejecuta vne_bake primero.");
+    if (script_load(script_name, &g_arena_scene, &demo_script) != ScriptLoadResult::Ok) {
+        log_error("No se pudo cargar '%s'; ejecuta vne_bake primero.", script_name);
     }
 
     // Pila de modos (SPEC.md #10, M7): VnMode dirige la VM y el cuadro de dialogo real
@@ -323,8 +333,11 @@ int main(int argc, char** argv) {
         log_error("No se pudo cargar demo_map.vnm; ejecuta vne_bake map primero.");
     }
 
+    // Con --script explicito se arranca directamente en VnMode: quien pide un guion
+    // concreto quiere ver ESE guion, no el mapa. Sin el, la base sigue siendo MapMode
+    // ("caminar por un mapa" es el criterio de M9) y VnMode se apila al pisar un trigger.
     ModeStack mode_stack{};
-    if (have_map) {
+    if (have_map && !script_override) {
         mode_stack_push(&mode_stack, &map_mode);
     } else {
         mode_stack_push(&mode_stack, &vn_mode);

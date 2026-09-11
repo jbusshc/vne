@@ -109,8 +109,44 @@ void VnMode::update(const InputState& input, f32 dt) {
     }
 }
 
+namespace {
+
+// La capa gfx no puede incluir vm/cmd.h (SPEC.md #5: gfx esta por debajo de vm), asi que
+// la traduccion entre los dos enums vive aqui, en la capa que ve a ambos.
+GfxTransitionMask to_gfx_mask(TransitionKind kind) {
+    switch (kind) {
+        case TransitionKind::Fade:     return GfxTransitionMask::Fade;
+        case TransitionKind::Wipe:     return GfxTransitionMask::Wipe;
+        case TransitionKind::Dissolve: return GfxTransitionMask::Dissolve;
+    }
+    return GfxTransitionMask::Fade;
+}
+
+}  // namespace
+
 void VnMode::render() {
-    if (script.cmd_count == 0 || !current_is_say(*this)) {
+    if (script.cmd_count == 0) {
+        return;
+    }
+
+    // Transicion en curso (M12): se lee del comando actual y de vm.cmd_timer, sin ningun
+    // campo nuevo en GameState (ver cmd_start en vm.cpp). Va antes del early-return de
+    // abajo porque una transicion no es un Say y tiene que dibujarse igual.
+    if (state->vm.pc < script.cmd_count) {
+        const Cmd& cur = script.cmds[state->vm.pc];
+        if (cur.kind == CmdKind::Transition && cur.transition.seconds > 0.0f) {
+            f32 threshold = state->vm.cmd_timer / cur.transition.seconds;
+            if (threshold > 1.0f) {
+                threshold = 1.0f;
+            }
+            // Negro opaco premultiplicado: el shader lo multiplica por el alpha que
+            // calcula, asi que aqui va el tinte a plena intensidad.
+            gfx_draw_transition(to_gfx_mask(cur.transition.transition_kind), threshold,
+                                 0xFF000000u);
+        }
+    }
+
+    if (!current_is_say(*this)) {
         return;
     }
 
