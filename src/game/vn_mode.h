@@ -39,7 +39,28 @@ struct VnMode : Mode {
 };
 
 constexpr f32 k_typewriter_glyphs_per_second = 40.0f;
-constexpr f32 k_auto_hold_seconds            = 1.2f;
+
+// Modo auto (M12): el tiempo de espera tras terminar de escribir una linea es proporcional
+// a su longitud, no fijo. Con 1.2 s fijos una linea de tres palabras se quedaba una
+// eternidad en pantalla y un parrafo largo desaparecia antes de poder leerlo.
+//
+// El reparto base + por glifo es el mismo que usa cualquier lector automatico: un minimo
+// para registrar que la linea cambio, mas tiempo de lectura real. 0.04 s/glifo son unos
+// 25 caracteres por segundo, ritmo de lectura comodo y algo por debajo de la velocidad de
+// escritura (40 glifos/s), para que la pausa no se sienta mas corta que el tecleo.
+constexpr f32 k_auto_hold_base_seconds      = 0.5f;
+constexpr f32 k_auto_hold_seconds_per_glyph = 0.04f;
+
+// Tope para que una linea larguisima (o un layout roto) no deje el juego colgado.
+constexpr f32 k_auto_hold_max_seconds = 8.0f;
+
+// Expuesta (y no escondida en el .cpp) para poder verificar el criterio directamente en un
+// test, sin tener que conducir un VnMode entero con reloj.
+inline f32 vn_auto_hold_seconds(u32 glyph_count) {
+    f32 seconds = k_auto_hold_base_seconds +
+                  k_auto_hold_seconds_per_glyph * static_cast<f32>(glyph_count);
+    return seconds < k_auto_hold_max_seconds ? seconds : k_auto_hold_max_seconds;
+}
 // Guarda contra un bucle de comandos instantaneos sin Say/Choice/End en el medio (SPEC.md
 // #12: el modo skip debe recorrer 1000 comandos en menos de 1 segundo, no colgarse).
 constexpr u32 k_skip_steps_per_frame = 64;

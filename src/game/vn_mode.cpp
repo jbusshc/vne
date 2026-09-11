@@ -146,7 +146,7 @@ void VnMode::update(const InputState& input, f32 dt) {
             }
         } else if (auto_mode) {
             auto_hold_timer += dt;
-            if (auto_hold_timer >= k_auto_hold_seconds) {
+            if (auto_hold_timer >= vn_auto_hold_seconds(current_layout.count)) {
                 auto_hold_timer = 0.0f;
                 vm_confirm_say(state);
             }

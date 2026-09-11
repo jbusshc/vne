@@ -197,3 +197,24 @@ TEST_CASE("text_layout: {b} usa la fuente en negrita y engorda los glifos (M12)"
 
     arena_destroy(&arena);
 }
+
+TEST_CASE("modo auto: la espera es proporcional a la longitud de la linea (M12)") {
+    // Hasta M11 era fija (1.2 s) para cualquier linea. Funcion pura: se verifica
+    // directamente, sin conducir un VnMode con reloj.
+    f32 corta  = vn_auto_hold_seconds(5);
+    f32 media  = vn_auto_hold_seconds(40);
+    f32 larga  = vn_auto_hold_seconds(120);
+
+    CHECK(corta < media);
+    CHECK(media < larga);
+
+    // Una linea corta no se queda una eternidad, y una larga da tiempo a leerla.
+    CHECK(corta < 1.0f);
+    CHECK(larga > 3.0f);
+
+    // Tope duro: ni una linea absurda cuelga el juego.
+    CHECK(vn_auto_hold_seconds(100000) == doctest::Approx(k_auto_hold_max_seconds));
+
+    log_info("auto: espera 5 glifos=%.2fs 40=%.2fs 120=%.2fs", static_cast<double>(corta),
+             static_cast<double>(media), static_cast<double>(larga));
+}
