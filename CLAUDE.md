@@ -5,25 +5,64 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** M12 — Presentación y jugabilidad completas (en progreso). Plan por
-etapas: (0) `Move`/`Transition` en `CmdKind`, `sizeof(Cmd)` 16→20, `.vnc` v3→v4 — un v3
-obsoleto se **rechaza** con error claro, no se "migra" (el criterio original de SPEC.md
-§12 hablaba de migrar una partida guardada con un `.vnc` v3, pero `.vnsave` nunca embebe
-datos de `Cmd`, solo `vm.pc`/`script_id`, así que no hay nada que migrar ahí; corregido en
-SPEC.md); sintaxis nueva `@move slot N to X Y in S` / `@transition <fade|wipe|dissolve> S`,
-sin especificar en ningún sitio hasta ahora; (1) shader de transición (HLSL+GLSL a mano,
-ADR-0010), fórmula única `alpha = saturate((threshold - mask) * sharpness)` para fade/
-wipe/dissolve, máscaras generadas proceduralmente en código (no assets, evita "inventar
-contenido"); (2) `{w=n}`/`{speed=n}` reales vía un array paralelo de eventos en
-`TextLayout`; (3) `{b}` con negrita sintética de FreeType (`FT_GlyphSlot_Embolden`, no hay
-asset de fuente en negrita) — exige que `GlyphQuad` sepa de qué fuente viene cada glifo;
-(4) modo auto proporcional a la longitud de línea; (5) polifonía real de `@sfx` — verificado
-empíricamente con `heap_guard` que `ma_sound_init_copy` no asigna heap en esta versión de
-miniaudio, así que no hace falta una cuarta excepción a la regla de cero heap; (6) colisión
-AABB en `MapMode` en vez de por punto. Detalle completo en docs/DECISIONS.md cuando se
-cierre.
+**Hito activo:** ninguno. M0–M12 están cerrados. El siguiente por defecto es **M13**
+(integridad de datos y herramientas offline).
 
-**Último hito completado:** M11 — Sistema de assets y empaquetado.
+**Último hito completado:** M12 — Presentación y jugabilidad completas.
+`CmdKind` gana `Move` y `Transition`, los dos últimos valores de SPEC.md §8.1 que
+faltaban: `sizeof(Cmd)` sube de 16 a 20 bytes y el `.vnc` a v4. Un `.vnc` v3 obsoleto se
+**rechaza** con error claro, no se "migra" — el criterio original hablaba de migrar una
+partida, pero `.vnsave` nunca embebe datos de `Cmd` (solo `vm.pc`/`script_id`), así que no
+hay nada que migrar; corregido en SPEC.md. Sintaxis nueva `@move slot N to X Y in S` y
+`@transition <fade|wipe|dissolve> S`, que no estaba especificada en ningún sitio. El shader
+de transición (HLSL+GLSL a mano, ADR-0010) cubre las tres variantes con **una sola fórmula**
+(`alpha = saturate((threshold - mask) * sharpness)`), con máscaras generadas
+proceduralmente en código, no assets. `{w=n}` y `{speed=n}` pasan de reconocerse y
+descartarse a tener efecto real, vía un array paralelo de `TypewriterEvent` en `TextLayout`;
+`{b}` usa negrita sintética de FreeType (`FT_GlyphSlot_Embolden`: no hay ningún TTF en
+negrita entre los assets). El modo auto pasa de 1.2 s fijos a base + por glifo. Polifonía
+real de efectos y colisión AABB en `MapMode`.
+
+**Ojo con dos cosas que este hito destapó y que contradicen lo que el propio proyecto daba
+por bueno:**
+
+1. **`ma_sound_init_copy` NO servía para la polifonía**, pese a que el plan de M12 lo daba
+   por hecho. Exige `pResourceManagerDataSource`, que solo rellena `ma_sound_init_from_file`;
+   el camino empaquetado de M11 usa `ma_sound_init_from_data_source` y lo deja a `NULL`.
+   Medido: `MA_INVALID_OPERATION` en `.pak`, `MA_SUCCESS` en suelto. Habría funcionado en
+   desarrollo y estado muerta en el juego distribuido. Además asigna (2 por clon). La
+   solución (ADR-0056) crea las 8 voces en `audio_load`, no por reproducción.
+2. **La regla de cero heap por frame nunca se había verificado de verdad** (ADR-0058).
+   `heap_guard` solo veía `operator new`, y las siete librerías de terceros son C y llaman a
+   `malloc`. Al instalarles sus hooks aparecieron cuatro infracciones reales que llevaban
+   hitos ocurriendo. Ahora `heap_allocs_frame_max=0` significa lo que dice. **Si añades una
+   dependencia, instálale su hook** o volverá a ser invisible: la tabla está en ADR-0058 y en
+   el skill `vne-memory-model`.
+
+Criterios verificados con números: `draw_calls` 3→4 con las tres transiciones (+1 exacto,
+criterio "no más de 1"); `{w=0.5}` medido en **0.525 s** (criterio 0.5 ±0.05); modo skip en
+**120 µs** en Ship y **510 µs** en Debug+ASan por cada 1000 comandos (criterio <1 s); el
+mismo `@sfx` cinco veces da **5 voces simultáneas con 5 `voice_id` distintos y 0
+asignaciones**, verificado en los **dos** backends (suelto y empaquetado, con un `.pak`
+fabricado en el test); modo auto 0.70/2.10/5.30 s para 5/40/120 glifos; negrita con ancho de
+tinta 75.0→82.0; AABB deteniendo al jugador con su borde en x=65.47 frente a una pared que
+acaba en 64. 143/143 tests en Dev, 142/143 en Debug+ASan (solo el de rendimiento de M2, no
+representativo sin optimizar, ADR-0018) y 142/142 en Ship, sin reportes de ASan. Los cuatro
+guiones de demo completan vía `--autoplay-script` (185/20/11/11 comandos) y el juego arranca
+con `heap_allocs_frame_max=0`.
+
+Decisiones nuevas: ADR-0056 (polifonía por voces pre-creadas), ADR-0057 (contador de
+asignaciones de audio) y ADR-0058 (`heap_guard` ve a las librerías de terceros).
+
+**Lo que M12 NO resuelve, y conviene saberlo:** `@move` guarda la posición del actor pero
+**no se ve moverse nada**, porque no existe renderizado de sprites de actor en el motor —
+`@show`/`@hide`/`@move` mantienen estado que nadie dibuja. Falta el arte y el pipeline de
+sprites, no el comando. Tampoco se probó nada con teclado real en la ventana interactiva
+(limitación de siempre en este entorno): transiciones, `{w=}`, auto, polifonía y AABB se
+verificaron con tests y con arranques instrumentados. Windows sigue siendo la única
+plataforma verificada (ADR-0013).
+
+M11 — Sistema de assets y empaquetado (hito anterior).
 `platform/files.{h,cpp}` sobre SDL3 unifica el filesystem y deja `audio.cpp` sin ningún
 `#if` de plataforma (la deuda que SPEC.md §2 nombraba). `assets/pak.{h,cpp}` implementa el
 `.pak` de §11 con dos backends tras la misma interfaz (directorio suelto en Debug/Dev,
@@ -57,10 +96,9 @@ sprite por nombre todavía, y añadir una API sin llamante es lo que SPEC.md §1
 se hace. Lo necesita M15. Windows sigue siendo la única plataforma verificada (ADR-0013).
 Detalle completo en docs/DECISIONS.md.
 
-M0–M10 están cerrados. La hoja de ruta se amplió con **M11–M15** (ADR-0050) tras comprobar
-que cerrar en M10 dejaba fuera partes enteras de la especificación: M11 (cerrado), M12
-presentación y jugabilidad completas (`Move`/`Transition`, `{w=}`/`{speed=}`/`{b}` con
-efecto real, polifonía, AABB), M13 integridad de datos y herramientas offline (validar
+La hoja de ruta se amplió con **M11–M15** (ADR-0050) tras comprobar
+que cerrar en M10 dejaba fuera partes enteras de la especificación: M11 y M12 (cerrados),
+M13 integridad de datos y herramientas offline (validar
 actores, detectar colisiones de hash, `vne_bake font`, TMX robusto), M14 configuración y
 localización completas (`config.ini`, backlog relocalizable, `.vnsave` v3) y M15
 interacción y testabilidad de la UI (ratón, grabar/reproducir input, arte de UI real,
@@ -356,8 +394,8 @@ tests/                  tests con doctest
 Dos directorios existen pero están **vacíos**, y conviene saberlo antes de buscar algo
 dentro: `shaders/` (SPEC.md §11 los quería en GLSL compilados por `sokol-shdc`, pero
 ADR-0010 decidió escribirlos a mano por backend y viven en `src/gfx/shaders.h`) y
-`src/assets/` (SPEC.md §7.4 nunca se implementó; lo construye M11). `src/modes/` tampoco
-tiene nada: los modos acabaron en `src/game/`.
+`src/modes/` (los modos acabaron en `src/game/`). `src/assets/` sí tiene contenido desde
+M11 (`pak`, `assets`, `hot_reload`).
 
 ## Comunicación
 

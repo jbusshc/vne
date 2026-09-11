@@ -76,11 +76,32 @@ Los nombres de actor, pose y fondo se internan a IDs numéricos al compilar, per
 validan contra ningún registro de assets** (ADR-0022): un nombre mal escrito no da error,
 simplemente se convierte en un ID distinto y en pantalla no aparece nada.
 
-**`@move` no existe todavía.** Aparece en el ejemplo de `docs/SPEC.md` §9.1 y en el skill
-`vne-script-dsl`, pero ni el parser ni `CmdKind` lo tienen (ver el comentario de cabecera
-de `src/vm/cmd.h`): escribirlo da error de compilación. Lo mismo con `@transition`, que no
-tiene sintaxis asignada. Para mover un actor hoy hay que ocultarlo y volver a mostrarlo en
-otro slot.
+### Mover un actor y transiciones de pantalla
+
+```
+@move slot 1 to 0.7 0.5 in 0.4
+@transition fade 0.8
+@transition wipe 0.5
+@transition dissolve 1.0
+```
+
+Ambos existen desde M12; hasta entonces aparecían en el ejemplo de `docs/SPEC.md` §9.1 pero
+el parser los rechazaba con "comando desconocido".
+
+`@move` escribe la posición del actor en `GameState.actors[slot].x/y` y ocupa `in` segundos
+(el comando bloquea ese tiempo; la posición se fija al instante, igual que hace `@bg`). La
+convención de X e Y es normalizada 0..1, siguiendo el ejemplo de `docs/SPEC.md` §9.1.
+
+**Aviso honesto:** ese valor todavía no lo dibuja nadie. No existe renderizado de sprites de
+actor en el motor —`@show`/`@hide`/`@move` mantienen el estado, pero en pantalla no aparece
+ningún personaje—, así que la posición se guarda, sobrevive a un guardado y se puede
+inspeccionar, pero no se ve moverse nada. Lo que hace falta es el arte y el pipeline de
+sprites de actor, no el comando.
+
+`@transition` sí tiene efecto visible: cubre la pantalla con una máscara animada. Las tres
+variantes comparten shader y ruta de código (`alpha = saturate((threshold - mask) *
+sharpness)`), no hay un sistema por comando. Las máscaras se generan proceduralmente en
+código, no son assets.
 
 ## Variables y condiciones
 
