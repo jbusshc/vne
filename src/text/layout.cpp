@@ -71,14 +71,18 @@ u32 utf8_decode(std::string_view s, usize i, usize* out_len) {
 }
 
 // --- Marcado inline: {b} {/b} {color=#rrggbb} {/color} {ruby=..} {/ruby} {w=n} {speed=n}
-// {w=}/{speed=} se reconocen y se descartan: son temporizacion de la maquina de escribir,
-// que conduce la VM (M7), no este modulo (ver docs/DECISIONS.md, hito M2).
+// {w=}/{speed=} no cambian la geometria, pero desde M12 si dejan rastro: se acumulan en
+// el segmento que empiezan y acaban convertidos en TypewriterEvent (ver layout.h). Hasta
+// M11 se reconocian y se tiraban.
 
 struct Segment {
     std::string_view text;
     std::string_view ruby;
     u32              color;
     bool             bold;
+    // Temporizacion del efecto de maquina de escribir, vigente al empezar este segmento.
+    f32              pause_before     = 0.0f;  // segundos de {w=n} justo antes
+    f32              speed_multiplier = 1.0f;  // ultimo {speed=n} visto
 };
 
 constexpr u32 k_max_segments = 256;
@@ -100,16 +104,61 @@ u32 parse_hex_color(std::string_view hex) {
     return (r) | (g << 8) | (b << 16) | (0xFFu << 24);
 }
 
+// Sin std::stof (asigna y lanza) ni from_chars<f32> (no siempre disponible en todas las
+// STL para flotantes): un parser minimo para "1.5" basta, el marcado no necesita mas.
+// Devuelve false si la cadena no es un numero simple, para no aceptar {w=hola} en silencio.
+bool parse_markup_float(std::string_view s, f32* out) {
+    if (s.empty()) {
+        return false;
+    }
+    f32   value    = 0.0f;
+    f32   fraction = 0.0f;
+    f32   scale    = 0.1f;
+    bool  after_dot = false;
+    bool  any_digit = false;
+    for (char c : s) {
+        if (c == '.') {
+            if (after_dot) {
+                return false;
+            }
+            after_dot = true;
+            continue;
+        }
+        if (c < '0' || c > '9') {
+            return false;
+        }
+        any_digit = true;
+        if (after_dot) {
+            fraction += static_cast<f32>(c - '0') * scale;
+            scale *= 0.1f;
+        } else {
+            value = value * 10.0f + static_cast<f32>(c - '0');
+        }
+    }
+    if (!any_digit) {
+        return false;
+    }
+    *out = value + fraction;
+    return true;
+}
+
 u32 parse_markup(std::string_view utf8, u32 base_color, Segment* out_segments) {
     u32   count     = 0;
     u32   color     = base_color;
     bool  bold      = false;
     usize run_start = 0;
     usize i         = 0;
+    // Temporizacion pendiente de aplicar al siguiente segmento que se emita.
+    f32 pending_pause = 0.0f;
+    f32 speed         = 1.0f;
 
     auto push_segment = [&](std::string_view text, std::string_view ruby) {
         if (!text.empty() && count < k_max_segments) {
-            out_segments[count] = Segment{text, ruby, color, bold};
+            out_segments[count] = Segment{text, ruby, color, bold, pending_pause, speed};
+            // La pausa es un evento puntual: se consume en el primer segmento que la
+            // sigue, no se repite en los demas. La velocidad, en cambio, es un estado
+            // que se mantiene hasta el siguiente {speed=}.
+            pending_pause = 0.0f;
             count += 1;
         }
     };
@@ -148,8 +197,19 @@ u32 parse_markup(std::string_view utf8, u32 base_color, Segment* out_segments) {
             i         = (ruby_close == std::string_view::npos) ? utf8.size() : ruby_close + 7;
             run_start = i;
             continue;
+        } else if (tag.rfind("w=", 0) == 0) {
+            f32 seconds = 0.0f;
+            if (parse_markup_float(tag.substr(2), &seconds)) {
+                // Se suman si hay varios seguidos: {w=0.2}{w=0.3} pausa 0.5s.
+                pending_pause += seconds;
+            }
+        } else if (tag.rfind("speed=", 0) == 0) {
+            f32 multiplier = 0.0f;
+            if (parse_markup_float(tag.substr(6), &multiplier) && multiplier > 0.0f) {
+                speed = multiplier;
+            }
         }
-        // {/ruby} suelto, {w=..}, {speed=..}: no producen segmento propio.
+        // {/ruby} suelto o una etiqueta desconocida: no producen segmento propio.
 
         run_start = close + 1;
         i         = close + 1;
@@ -179,6 +239,10 @@ struct Chunk {
     u32              ruby_glyph_count = 0;
     bool             forbidden_start = false;
     bool             forbidden_end   = false;
+    // Heredados del segmento del que salio este chunk (M12). La pausa solo va en el
+    // PRIMER chunk del segmento: es un evento puntual, no una propiedad de cada trozo.
+    f32              pause_before     = 0.0f;
+    f32              speed_multiplier = 1.0f;
 };
 
 constexpr u32 k_max_chunks = 1024;
@@ -194,7 +258,20 @@ u32 last_codepoint(std::string_view s) {
     return cp;
 }
 
+// Propaga la temporizacion del segmento a los chunks que acaba de producir (M12). Se hace
+// al final y de una vez, y no en cada uno de los cinco sitios donde se construye un Chunk
+// aqui dentro: menos ruido y, sobre todo, imposible olvidarse de uno.
+void apply_segment_timing(const Segment& seg, Chunk* out_chunks, u32 first, u32 count) {
+    for (u32 i = first; i < count; ++i) {
+        out_chunks[i].speed_multiplier = seg.speed_multiplier;
+    }
+    if (count > first) {
+        out_chunks[first].pause_before = seg.pause_before;  // puntual: solo el primero
+    }
+}
+
 u32 chunk_segment(const Segment& seg, Chunk* out_chunks, u32 max_chunks, u32 count) {
+    const u32 first_chunk = count;
     if (!seg.ruby.empty()) {
         if (count < max_chunks) {
             Chunk c;
@@ -207,6 +284,7 @@ u32 chunk_segment(const Segment& seg, Chunk* out_chunks, u32 max_chunks, u32 cou
             c.forbidden_end     = is_forbidden_end(last_codepoint(seg.text));
             out_chunks[count++] = c;
         }
+        apply_segment_timing(seg, out_chunks, first_chunk, count);
         return count;
     }
 
@@ -259,6 +337,7 @@ u32 chunk_segment(const Segment& seg, Chunk* out_chunks, u32 max_chunks, u32 cou
         c.color             = seg.color;
         out_chunks[count++] = c;
     }
+    apply_segment_timing(seg, out_chunks, first_chunk, count);
     return count;
 }
 
@@ -399,6 +478,16 @@ TextLayout text_layout(FontHandle font, std::string_view utf8, f32 max_width, Ar
     }
     u32 quad_count = 0;
 
+    // Eventos de maquina de escribir (M12). Como mucho uno por chunk, y solo se emite
+    // cuando algo cambia de verdad respecto al chunk anterior.
+    TypewriterEvent* events = arena_alloc_n<TypewriterEvent>(arena, chunk_count + 1);
+    if (events == nullptr) {
+        log_error("text_layout: sin espacio en la arena para events");
+        return result;
+    }
+    u32 event_count      = 0;
+    f32 current_speed    = 1.0f;
+
     constexpr f32 k_ruby_scale       = 0.5f;
     f32           ruby_extra_height  = font_data->line_height * k_ruby_scale;
     f32           layout_width       = 0.0f;
@@ -423,6 +512,15 @@ TextLayout text_layout(FontHandle font, std::string_view utf8, f32 max_width, Ar
         for (u32 c = chunk_begin; c < chunk_end; ++c) {
             Chunk& chunk        = chunks[c];
             f32    chunk_start_x = line_pen_x;
+
+            // Anclado en quad_count, que es exactamente el indice de glifo que cuenta
+            // visible_glyphs al dibujar (incluidos los de furigana): asi VnMode puede
+            // comparar los dos sin traducir nada.
+            if (chunk.pause_before > 0.0f || chunk.speed_multiplier != current_speed) {
+                events[event_count++] =
+                    TypewriterEvent{quad_count, chunk.pause_before, chunk.speed_multiplier};
+                current_speed = chunk.speed_multiplier;
+            }
 
             for (u32 g = 0; g < chunk.glyph_count; ++g) {
                 const ShapedGlyph& sg = chunk.glyphs[g];
@@ -491,7 +589,9 @@ TextLayout text_layout(FontHandle font, std::string_view utf8, f32 max_width, Ar
     // pen_y avanzo una linea de mas tras la ultima iteracion; se descuenta para quedarse
     // con la altura real del bloque, hasta el descendente de la ultima linea.
     result.height = (pen_y - font_data->line_height) + font_data->descender;
-    result.line_count = line_count;
+    result.line_count  = line_count;
+    result.events      = events;
+    result.event_count = event_count;
     return result;
 }
 

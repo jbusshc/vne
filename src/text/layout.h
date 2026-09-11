@@ -21,18 +21,33 @@ struct GlyphQuad {
     bool          is_ruby;
 };
 
-struct TextLayout {
-    GlyphQuad* quads      = nullptr;
-    u32        count      = 0;
-    f32        width      = 0.0f;
-    f32        height     = 0.0f;
-    u32        line_count = 0;
+// Orden de temporizacion para el efecto de maquina de escribir (M12): al llegar a
+// glyph_index, esperar pause_seconds antes de seguir revelando, y a partir de ahi avanzar
+// a speed_multiplier veces la velocidad base.
+//
+// El layout no "ejecuta" nada de esto: solo dice EN QUE glifo cambia que, que es lo unico
+// que se puede saber al maquetar. Quien lo consume es VnMode, que es quien tiene el reloj
+// (skill vne-rendering: text_layout no se llama por frame, el efecto avanza sobre el
+// layout ya calculado).
+struct TypewriterEvent {
+    u32 glyph_index      = 0;
+    f32 pause_seconds    = 0.0f;
+    f32 speed_multiplier = 1.0f;
 };
 
-// Marcado soportado en utf8: {b}/{/b}, {color=#rrggbb}/{/color}, {ruby=..}/{/ruby}.
-// {w=n} y {speed=n} se reconocen y se descartan sin afectar al layout: son ordenes de
-// temporizacion para el efecto de maquina de escribir, que conduce la VM (M7), no este
-// modulo (ver docs/DECISIONS.md).
+struct TextLayout {
+    GlyphQuad*       quads       = nullptr;
+    u32              count       = 0;
+    f32              width       = 0.0f;
+    f32              height      = 0.0f;
+    u32              line_count  = 0;
+    TypewriterEvent* events      = nullptr;  // ordenados por glyph_index ascendente
+    u32              event_count = 0;
+};
+
+// Marcado soportado en utf8: {b}/{/b}, {color=#rrggbb}/{/color}, {ruby=..}/{/ruby},
+// {w=n} y {speed=n}. Los dos ultimos no afectan a la geometria: se traducen a
+// TypewriterEvent (ver arriba) para que VnMode los aplique al revelar el texto.
 TextLayout text_layout(FontHandle font, std::string_view utf8, f32 max_width, Arena* arena,
                         u32 base_color = 0xFFFFFFFFu);
 

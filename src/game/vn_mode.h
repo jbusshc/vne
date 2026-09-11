@@ -20,6 +20,12 @@ struct VnMode : Mode {
     u32        layout_pc         = 0xFFFFFFFFu;  // pc para el que se construyo current_layout
     u32        layout_locale_gen = 0xFFFFFFFFu;  // catalog_generation() de ese momento (M10)
     f32        visible_glyphs_f = 0.0f;
+    // Temporizacion de {w=n}/{speed=n} (M12). next_event es el indice del siguiente
+    // TypewriterEvent de current_layout que queda por aplicar; pause_timer es lo que
+    // queda de la pausa en curso.
+    u32        next_event         = 0;
+    f32        pause_timer        = 0.0f;
+    f32        typewriter_speed  = 1.0f;
 
     bool skip_mode = false;
     bool auto_mode = false;

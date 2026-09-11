@@ -41,12 +41,12 @@ hablante. Cualquier otra línea suelta da `linea no reconocida`.
 | `{color=#rrggbb}...{/color}` | Cambia el color del tramo. Funciona. |
 | `{ruby=lectura}base{/ruby}` | Furigana sobre el texto base. Funciona. |
 | `{b}...{/b}` | Se parsea y el tramo queda marcado como negrita, **pero no cambia el dibujado**: no hay una fuente negrita cargada que usar. |
-| `{w=n}` | Pausa de n segundos. **Se reconoce y se descarta**, sin efecto. |
-| `{speed=n}` | Velocidad de la máquina de escribir. **Se reconoce y se descarta**, sin efecto. |
+| `{w=n}` | Pausa de n segundos antes de seguir revelando. Funciona (M12). Varios seguidos se suman: `{w=0.2}{w=0.3}` pausa 0.5 s. |
+| `{speed=n}` | Multiplica la velocidad de la máquina de escribir desde ahí hasta el final de la línea o hasta el siguiente `{speed=}`. Funciona (M12). |
 
-Las tres marcas sin efecto están anotadas en "Pendientes observados" de
-`docs/DECISIONS.md`; se reconocen para que un guion escrito hoy no tenga que reescribirse
-cuando se implementen.
+Solo queda `{b}` sin efecto visual, anotado en "Pendientes observados" de
+`docs/DECISIONS.md`. Se reconoce igual para que un guion escrito hoy no tenga que
+reescribirse cuando se implemente.
 
 ## Etiquetas y flujo
 

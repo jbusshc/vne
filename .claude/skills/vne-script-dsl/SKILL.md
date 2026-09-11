@@ -58,10 +58,7 @@ Marcado inline dentro del texto: `{b}`, `{color=#rrggbb}`, `{ruby=lectura}`, `{w
 `src/script/parser.cpp`; la referencia completa y al día para escribir guiones es
 `docs/SCRIPT_LANGUAGE.md`):
 
-- `@move` y `@transition` no están implementados: el parser responde "comando desconocido".
-  Los añade M12, y `@move` hará crecer `sizeof(Cmd)` de 16 a 20.
-- `{b}` se parsea pero no cambia el dibujado (no hay fuente negrita cargada), y `{w=}` /
-  `{speed=}` se reconocen y se descartan sin efecto. También los arregla M12.
+- `{b}` se parsea pero todavía no cambia el dibujado: no hay fuente negrita cargada.
 - `@sfx` necesita el nombre **con extensión** (se resuelve como `assets_src/ogg/<nombre>`),
   mientras que `@bgm` va **sin extensión** porque resuelve por catálogo (ADR-0034). La
   asimetría es deliberada: la pista de música tiene que sobrevivir a un guardado.
@@ -73,15 +70,14 @@ fallo silencioso en runtime.
 
 ## Comandos: tagged union
 
-Estado real hoy (`src/vm/cmd.h`). `Move` y `Transition` **no** están en el enum todavía: los
-`switch` sin `default` del intérprete obligan a cubrir exactamente lo que existe, así que
-declararlos antes de implementarlos rompería el build.
+Estado real hoy (`src/vm/cmd.h`). Desde M12 el enum está completo: `Move` y `Transition`
+eran los dos últimos valores de SPEC.md §8.1 que faltaban.
 
 ```cpp
 enum class CmdKind : u8 {
     Nop, Say, Show, Hide, Bg, Wait, Jump, Label, End,
     SetVar, AddVar, JumpIf, Choice, ChoiceEnd, Call, Return, LuaCall,
-    Sfx, Bgm, StopBgm,
+    Sfx, Bgm, StopBgm, Move, Transition,
 };
 
 struct Cmd {
@@ -95,15 +91,22 @@ struct Cmd {
     };
 };
 
-static_assert(sizeof(Cmd) == 16);
+static_assert(sizeof(Cmd) == 20);
 static_assert(std::is_trivially_copyable_v<Cmd>);
 ```
 
 Sin vtables. Sin asignación. Tamaño fijo. El guion completo es un array contiguo.
 
-El `sizeof` es **16**, no los 20 de SPEC.md §8.1: ese valor lo fijaba `Move` con sus tres
-`f32`, y `Move` no existe todavía. Cuando M12 lo añada, el `static_assert` pasará a 20 y habrá
-que subir la versión del `.vnc` con su migración.
+El `sizeof` son los **20** que fija SPEC.md §8.1: hasta M11 fueron 16, porque el valor lo
+determinaba `Move` con sus tres `f32` y `Move` no existía. Añadirlo en M12 subió el `.vnc`
+a v4 — y un `.vnc` v3 se **rechaza** con error, no se migra: el `.vnc` se regenera siempre
+desde el `.vns`, a diferencia de `.vnsave`, que sí es dato de usuario persistente.
+
+**Ojo con `-Wswitch`**: este archivo decía que los `switch` sin `default` del intérprete te
+obligan a cubrir un `CmdKind` nuevo. Eso es cierto en GCC/Clang, pero **no en MSVC bajo
+`/W4`** (el aviso equivalente, C4062, está desactivado). Añadir `Move`/`Transition` compiló
+limpio sin tocar ninguno de los tres `switch` de `vm.cpp`. Complétalos a mano y no confíes
+en que el compilador te avise aquí.
 
 Todo campo que se serialice lleva su relleno explícito (`_pad`): el relleno implícito del
 compilador no se preserva de forma fiable a través de copias bajo MSVC, lo que rompía el

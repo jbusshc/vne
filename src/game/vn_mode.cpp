@@ -36,6 +36,48 @@ void rebuild_layout_if_needed(VnMode* vn) {
     vn->layout_pc           = vn->state->vm.pc;
     vn->layout_locale_gen = gen;
     vn->visible_glyphs_f   = 0.0f;
+    // Empezar de cero la temporizacion de {w=}/{speed=}: es propia de esta linea.
+    vn->next_event        = 0;
+    vn->pause_timer       = 0.0f;
+    vn->typewriter_speed = 1.0f;
+}
+
+// Avanza el efecto de maquina de escribir aplicando los TypewriterEvent de la linea
+// (M12). Devuelve el nuevo valor de visible_glyphs_f.
+//
+// El bucle consume TODOS los eventos que ya se hayan alcanzado antes de avanzar: varios
+// pueden caer en el mismo indice de glifo (p. ej. "{speed=2}{w=0.5}texto"), y una pausa
+// que empieza no debe tragarse el evento siguiente.
+void advance_typewriter(VnMode* vn, f32 dt) {
+    const TextLayout& l = vn->current_layout;
+
+    // Una pausa en curso congela la revelacion, pero sigue consumiendo tiempo.
+    if (vn->pause_timer > 0.0f) {
+        vn->pause_timer -= dt;
+        if (vn->pause_timer > 0.0f) {
+            return;
+        }
+        // Sobra tiempo de este frame: se usa para revelar, no se tira.
+        dt              = -vn->pause_timer;
+        vn->pause_timer = 0.0f;
+    }
+
+    while (vn->next_event < l.event_count &&
+           l.events[vn->next_event].glyph_index <= static_cast<u32>(vn->visible_glyphs_f)) {
+        const TypewriterEvent& ev = l.events[vn->next_event];
+        vn->next_event += 1;
+        vn->typewriter_speed = ev.speed_multiplier;
+        if (ev.pause_seconds > 0.0f) {
+            vn->pause_timer = ev.pause_seconds - dt;
+            if (vn->pause_timer > 0.0f) {
+                return;  // la pausa se come el resto del frame
+            }
+            dt              = -vn->pause_timer;
+            vn->pause_timer = 0.0f;
+        }
+    }
+
+    vn->visible_glyphs_f += k_typewriter_glyphs_per_second * vn->typewriter_speed * dt;
 }
 
 }  // namespace
@@ -75,6 +117,10 @@ void VnMode::update(const InputState& input, f32 dt) {
         }
         rebuild_layout_if_needed(this);
         visible_glyphs_f = static_cast<f32>(current_layout.count);
+        // Completar la linea de golpe cancela cualquier {w=n} en curso: si no, el texto
+        // ya estaria entero en pantalla pero el avance seguiria bloqueado esperando una
+        // pausa que ya no tiene sentido.
+        pause_timer = 0.0f;
         return;
     }
 
@@ -85,13 +131,17 @@ void VnMode::update(const InputState& input, f32 dt) {
 
     if (waiting_on_say) {
         if (!typewriter_done) {
-            visible_glyphs_f += k_typewriter_glyphs_per_second * dt;
+            advance_typewriter(this, dt);
             // El primer confirmar mientras el efecto de maquina de escribir esta en
             // marcha lo completa al instante en vez de avanzar de linea (convencion
             // estandar de novela visual): igual que skip_to_end pero solo para el
             // texto, no para el resto del comando.
             if (confirm_pressed(input)) {
                 visible_glyphs_f = static_cast<f32>(current_layout.count);
+        // Completar la linea de golpe cancela cualquier {w=n} en curso: si no, el texto
+        // ya estaria entero en pantalla pero el avance seguiria bloqueado esperando una
+        // pausa que ya no tiene sentido.
+        pause_timer = 0.0f;
             }
         } else if (auto_mode) {
             auto_hold_timer += dt;
