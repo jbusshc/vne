@@ -48,8 +48,11 @@ struct TextLayout {
 // Marcado soportado en utf8: {b}/{/b}, {color=#rrggbb}/{/color}, {ruby=..}/{/ruby},
 // {w=n} y {speed=n}. Los dos ultimos no afectan a la geometria: se traducen a
 // TypewriterEvent (ver arriba) para que VnMode los aplique al revelar el texto.
+// bold_font es la variante en negrita de `font` (text_load_font(..., bold=true)). Los
+// tramos entre {b} y {/b} se shapean y rasterizan con ella. Si no se pasa ninguna, o no
+// es valida, {b} se dibuja como texto normal en vez de fallar (SPEC.md #4).
 TextLayout text_layout(FontHandle font, std::string_view utf8, f32 max_width, Arena* arena,
-                        u32 base_color = 0xFFFFFFFFu);
+                        u32 base_color = 0xFFFFFFFFu, FontHandle bold_font = FontHandle{});
 
 // Dibuja los primeros visible_glyphs quads de l (capa DialogueText). No relayoutea nada:
 // es seguro llamarlo todos los frames mientras avanza el efecto de maquina de escribir.

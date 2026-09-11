@@ -16,7 +16,7 @@ FT_Library                  g_ft_library = nullptr;
 
 }  // namespace
 
-FontHandle text_load_font(const char* logical_name, u32 px_size) {
+FontHandle text_load_font(const char* logical_name, u32 px_size, bool bold) {
     if (g_ft_library == nullptr) {
         if (FT_Init_FreeType(&g_ft_library) != 0) {
             log_error("text_load_font: FT_Init_FreeType fallo");
@@ -78,6 +78,7 @@ FontHandle text_load_font(const char* logical_name, u32 px_size) {
     // aqui, a diferencia del resto de callers de pak_resolve.
     data->raw_bytes       = bytes;
     data->raw_bytes_owned = owned;
+    data->synthetic_bold  = bold;
 
     return handle;
 }

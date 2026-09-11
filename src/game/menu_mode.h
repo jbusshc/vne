@@ -23,6 +23,11 @@ struct MenuMode : Mode {
     FontHandle* dialogue_font_slot = nullptr;
     FontHandle  latin_font;
     FontHandle  cjk_font;
+    // M12: la variante en negrita tiene que seguir al idioma igual que la normal, o {b}
+    // dibujaria glifos latinos engordados sobre texto japones.
+    FontHandle* bold_font_slot = nullptr;
+    FontHandle  latin_bold_font;
+    FontHandle  cjk_bold_font;
     static constexpr u32 k_locale_count               = 2;
     const char*           locale_names[k_locale_count] = {"Espanol", "Nihongo (placeholder)"};
     const char*           locale_vnl_paths[k_locale_count] = {nullptr, "ja.vnl"};

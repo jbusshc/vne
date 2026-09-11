@@ -40,13 +40,12 @@ hablante. Cualquier otra línea suelta da `linea no reconocida`.
 |---|---|
 | `{color=#rrggbb}...{/color}` | Cambia el color del tramo. Funciona. |
 | `{ruby=lectura}base{/ruby}` | Furigana sobre el texto base. Funciona. |
-| `{b}...{/b}` | Se parsea y el tramo queda marcado como negrita, **pero no cambia el dibujado**: no hay una fuente negrita cargada que usar. |
+| `{b}...{/b}` | Negrita. Funciona (M12), con negrita **sintética**: no hay ningún TTF en negrita entre los assets, así que se engorda el contorno de la misma fuente al rasterizar. Si no hay variante en negrita cargada, el tramo se dibuja como texto normal en vez de fallar. |
 | `{w=n}` | Pausa de n segundos antes de seguir revelando. Funciona (M12). Varios seguidos se suman: `{w=0.2}{w=0.3}` pausa 0.5 s. |
 | `{speed=n}` | Multiplica la velocidad de la máquina de escribir desde ahí hasta el final de la línea o hasta el siguiente `{speed=}`. Funciona (M12). |
 
-Solo queda `{b}` sin efecto visual, anotado en "Pendientes observados" de
-`docs/DECISIONS.md`. Se reconoce igual para que un guion escrito hoy no tenga que
-reescribirse cuando se implemente.
+Desde M12 las cinco marcas tienen efecto real. `{b}` es la única que no usa un asset
+propio: engorda la fuente que ya haya cargada.
 
 ## Etiquetas y flujo
 

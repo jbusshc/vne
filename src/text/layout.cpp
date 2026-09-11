@@ -243,6 +243,7 @@ struct Chunk {
     // PRIMER chunk del segmento: es un evento puntual, no una propiedad de cada trozo.
     f32              pause_before     = 0.0f;
     f32              speed_multiplier = 1.0f;
+    bool             bold             = false;  // {b}: se shapea y rasteriza con bold_font
 };
 
 constexpr u32 k_max_chunks = 1024;
@@ -264,6 +265,7 @@ u32 last_codepoint(std::string_view s) {
 void apply_segment_timing(const Segment& seg, Chunk* out_chunks, u32 first, u32 count) {
     for (u32 i = first; i < count; ++i) {
         out_chunks[i].speed_multiplier = seg.speed_multiplier;
+        out_chunks[i].bold             = seg.bold;
     }
     if (count > first) {
         out_chunks[first].pause_before = seg.pause_before;  // puntual: solo el primero
@@ -391,13 +393,21 @@ bool text_is_kinsoku_forbidden_end(u32 codepoint) {
 u32 g_text_layout_call_count = 0;
 
 TextLayout text_layout(FontHandle font, std::string_view utf8, f32 max_width, Arena* arena,
-                        u32 base_color) {
+                        u32 base_color, FontHandle bold_font) {
     g_text_layout_call_count += 1;
     TextLayout result{};
     FontData*  font_data = font_resolve(font);
     if (font_data == nullptr) {
         log_error("text_layout: FontHandle invalido");
         return result;
+    }
+    // Sin variante en negrita, {b} se dibuja como texto normal: degradar es preferible a
+    // no dibujar (SPEC.md #4). effective_bold_font/bold_data son el par a usar en los
+    // tramos marcados.
+    FontData*  bold_data         = bold_font.valid() ? font_resolve(bold_font) : nullptr;
+    FontHandle effective_bold     = bold_data != nullptr ? bold_font : font;
+    if (bold_data == nullptr) {
+        bold_data = font_data;
     }
 
     // arena_alloc devuelve nullptr si la arena no tiene espacio (skill vne-memory-model):
@@ -422,10 +432,14 @@ TextLayout text_layout(FontHandle font, std::string_view utf8, f32 max_width, Ar
 
     hb_buffer_t* hb_buf = hb_buffer_create();
     for (u32 c = 0; c < chunk_count; ++c) {
-        chunks[c].glyph_count = shape_run(font_data, chunks[c].text, hb_buf, arena,
+        // Los tramos en negrita se shapean con su propia cara: aunque la negrita sintetica
+        // no cambia los avances, hacerlo asi deja el camino listo para una cara en negrita
+        // de verdad (que si los cambia) sin tocar nada mas.
+        FontData* chunk_font = chunks[c].bold ? bold_data : font_data;
+        chunks[c].glyph_count = shape_run(chunk_font, chunks[c].text, hb_buf, arena,
                                            &chunks[c].glyphs, &chunks[c].width);
         if (!chunks[c].ruby.empty()) {
-            chunks[c].ruby_glyph_count = shape_run(font_data, chunks[c].ruby, hb_buf, arena,
+            chunks[c].ruby_glyph_count = shape_run(chunk_font, chunks[c].ruby, hb_buf, arena,
                                                     &chunks[c].ruby_glyphs, &chunks[c].ruby_width);
         }
     }
@@ -524,7 +538,8 @@ TextLayout text_layout(FontHandle font, std::string_view utf8, f32 max_width, Ar
 
             for (u32 g = 0; g < chunk.glyph_count; ++g) {
                 const ShapedGlyph& sg = chunk.glyphs[g];
-                const GlyphInfo*   gi = glyph_cache_get(font, sg.glyph_index);
+                const GlyphInfo*   gi =
+                    glyph_cache_get(chunk.bold ? effective_bold : font, sg.glyph_index);
                 if (gi != nullptr && gi->width > 0.0f) {
                     GlyphQuad& q = quads[quad_count++];
                     q.x          = line_pen_x + sg.x_offset + gi->bearing_x;
@@ -549,7 +564,8 @@ TextLayout text_layout(FontHandle font, std::string_view utf8, f32 max_width, Ar
                 }
                 for (u32 g = 0; g < chunk.ruby_glyph_count; ++g) {
                     const ShapedGlyph& sg = chunk.ruby_glyphs[g];
-                    const GlyphInfo*   gi = glyph_cache_get(font, sg.glyph_index);
+                    const GlyphInfo*   gi =
+                    glyph_cache_get(chunk.bold ? effective_bold : font, sg.glyph_index);
                     if (gi != nullptr && gi->width > 0.0f) {
                         GlyphQuad& q = quads[quad_count++];
                         q.x = ruby_pen_x + (sg.x_offset + gi->bearing_x) * k_ruby_scale;

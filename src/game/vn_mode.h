@@ -14,6 +14,7 @@ struct VnMode : Mode {
     GameState*      state  = nullptr;
     CompiledScript  script;
     FontHandle      font;
+    FontHandle      bold_font;  // variante sintetica para {b} (M12); invalida = {b} sin efecto
     Arena*          layout_arena = nullptr;  // g_arena_scene: el layout sobrevive entre frames
 
     TextLayout current_layout;

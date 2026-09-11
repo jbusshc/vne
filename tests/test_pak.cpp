@@ -17,6 +17,11 @@
 //
 // pak_resolve() es seguro desde cualquier hilo (no toma Arena*, ver pak.h): cada test
 // libera lo que resuelve con pak_release() antes de terminar, emparejado siempre.
+//
+// IMPORTANTE: el backend montado es estado GLOBAL del proceso, y test_main.cpp monta "."
+// una vez para todo el binario. Por eso estos tests terminan con pak_mount(".") y no con
+// pak_unmount(): dejarlo desmontado rompe cualquier test posterior que cargue un asset
+// (asi fallo la fuente en negrita de test_typewriter_timing.cpp la primera vez).
 
 namespace {
 
@@ -92,7 +97,7 @@ TEST_CASE("pak: backend suelto lee un archivo por su ruta logica (via assets_bak
     CHECK(std::memcmp(data, "hola pak", 8) == 0);
 
     pak_release(data, owned);
-    pak_unmount();
+    pak_mount(".");  // restaura el montaje por defecto del binario de tests (ver nota arriba)
     std::remove(path);
 }
 
@@ -114,7 +119,7 @@ TEST_CASE("pak: backend suelto enruta ttf/ y ogg/ a assets_src/, el resto a asse
     CHECK(std::memcmp(data, "no es un ttf de verdad", 23) == 0);
 
     pak_release(data, owned);
-    pak_unmount();
+    pak_mount(".");  // restaura el montaje por defecto del binario de tests (ver nota arriba)
     std::remove(path);
 }
 
@@ -127,7 +132,7 @@ TEST_CASE("pak: backend suelto devuelve false para una ruta que no existe") {
     CHECK(data == nullptr);
     CHECK(size == 0);
     CHECK_FALSE(owned);
-    pak_unmount();
+    pak_mount(".");  // restaura el montaje por defecto del binario de tests (ver nota arriba)
 }
 
 TEST_CASE("pak: pak_resolve_loose_path da la ruta real en suelto, false en empaquetado") {
@@ -135,13 +140,13 @@ TEST_CASE("pak: pak_resolve_loose_path da la ruta real en suelto, false en empaq
     char path[256] = {};
     CHECK(pak_resolve_loose_path("ogg/tema_a.wav", path, sizeof(path)));
     CHECK(std::string(path) == "./assets_src/ogg/tema_a.wav");
-    pak_unmount();
+    pak_mount(".");  // restaura el montaje por defecto del binario de tests (ver nota arriba)
 
     const char* pak_path = "test_pak_loosepath.pak";
     write_test_pak(pak_path);
     pak_mount(pak_path);
     CHECK_FALSE(pak_resolve_loose_path("uno.txt", path, sizeof(path)));
-    pak_unmount();
+    pak_mount(".");  // restaura el montaje por defecto del binario de tests (ver nota arriba)
     std::remove(pak_path);
 }
 
@@ -166,7 +171,7 @@ TEST_CASE("pak: backend empaquetado resuelve por nombre logico") {
     CHECK(std::memcmp(data, "otro contenido", 14) == 0);
     pak_release(data, owned);
 
-    pak_unmount();
+    pak_mount(".");  // restaura el montaje por defecto del binario de tests (ver nota arriba)
     std::remove(path);
 }
 
@@ -182,7 +187,7 @@ TEST_CASE("pak: backend empaquetado devuelve false para un nombre fuera de la ta
     CHECK(data == nullptr);
     CHECK_FALSE(owned);
 
-    pak_unmount();
+    pak_mount(".");  // restaura el montaje por defecto del binario de tests (ver nota arriba)
     std::remove(path);
 }
 
@@ -197,5 +202,6 @@ TEST_CASE("pak: un .pak con magic invalido no se monta (pak_is_packed queda en f
     pak_mount(path);
     CHECK_FALSE(pak_is_packed());
 
+    pak_mount(".");  // restaura el montaje por defecto del binario de tests (ver nota arriba)
     std::remove(path);
 }

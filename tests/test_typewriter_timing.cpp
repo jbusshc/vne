@@ -2,6 +2,7 @@
 
 #include "base/log.h"
 #include "game/vn_mode.h"
+#include "text/font.h"
 #include "platform/input.h"
 #include "test_fonts.h"
 #include "text/layout.h"
@@ -152,6 +153,47 @@ TEST_CASE("text_layout: {w=} y {speed=} generan eventos; sin ellos no hay ningun
     // Un valor no numerico no se acepta en silencio: no genera evento.
     TextLayout bogus = text_layout(g_test_font_latin, "hola{w=rapido}mundo", 1000.0f, &arena);
     CHECK(bogus.event_count == 0);
+
+    arena_destroy(&arena);
+}
+
+TEST_CASE("text_layout: {b} usa la fuente en negrita y engorda los glifos (M12)") {
+    if (!g_test_font_latin.valid()) {
+        return;
+    }
+    // La misma cara cargada aparte y marcada para engordar el contorno al rasterizar: no
+    // hay ningun TTF en negrita entre los assets (ver text_load_font).
+    FontHandle bold = text_load_font("ttf/NotoSans.ttf", 32, /*bold=*/true);
+    REQUIRE(bold.valid());
+
+    Arena arena = arena_create(1u << 20, "test_bold");
+
+    // Mismo texto, misma fuente base: lo unico que cambia es que uno va entre {b}.
+    TextLayout plain = text_layout(g_test_font_latin, "HOLA", 1000.0f, &arena, 0xFFFFFFFFu, bold);
+    TextLayout heavy = text_layout(g_test_font_latin, "{b}HOLA{/b}", 1000.0f, &arena,
+                                    0xFFFFFFFFu, bold);
+    REQUIRE(plain.count > 0);
+    REQUIRE(heavy.count == plain.count);
+
+    // Los glifos engordados ocupan mas ancho de tinta que los normales. Se compara el
+    // total para no depender de un glifo concreto de la fuente.
+    f32 plain_ink = 0.0f, heavy_ink = 0.0f;
+    for (u32 i = 0; i < plain.count; ++i) {
+        plain_ink += plain.quads[i].w;
+        heavy_ink += heavy.quads[i].w;
+    }
+    log_info("bold: ancho de tinta normal=%.1f negrita=%.1f", static_cast<double>(plain_ink),
+             static_cast<double>(heavy_ink));
+    CHECK(heavy_ink > plain_ink);
+
+    // Sin fuente en negrita, {b} no falla: se dibuja como texto normal (SPEC.md #4).
+    TextLayout fallback = text_layout(g_test_font_latin, "{b}HOLA{/b}", 1000.0f, &arena);
+    REQUIRE(fallback.count == plain.count);
+    f32 fallback_ink = 0.0f;
+    for (u32 i = 0; i < fallback.count; ++i) {
+        fallback_ink += fallback.quads[i].w;
+    }
+    CHECK(fallback_ink == doctest::Approx(plain_ink));
 
     arena_destroy(&arena);
 }

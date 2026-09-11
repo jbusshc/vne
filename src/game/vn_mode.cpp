@@ -32,7 +32,8 @@ void rebuild_layout_if_needed(VnMode* vn) {
     // text_layout es la funcion cara de este modulo (skill vne-rendering): solo se llama
     // aqui, cuando la linea de dialogo cambia (o cambia el idioma activo), nunca por
     // frame sin mas.
-    vn->current_layout     = text_layout(vn->font, text, 1700.0f, vn->layout_arena);
+    vn->current_layout     = text_layout(vn->font, text, 1700.0f, vn->layout_arena,
+                                          0xFFFFFFFFu, vn->bold_font);
     vn->layout_pc           = vn->state->vm.pc;
     vn->layout_locale_gen = gen;
     vn->visible_glyphs_f   = 0.0f;

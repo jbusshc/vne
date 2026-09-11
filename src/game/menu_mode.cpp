@@ -63,6 +63,10 @@ void MenuMode::update(const InputState& input, f32 dt) {
     // fuente correcta. locale_index==1 ("japones") es el unico que la necesita por
     // ahora — si se anaden mas idiomas CJK, esto se convertiria en una tabla por idioma
     // en vez de un unico caso especial.
+    if (bold_font_slot != nullptr) {
+        *bold_font_slot =
+            (locale_index == 1 && cjk_bold_font.valid()) ? cjk_bold_font : latin_bold_font;
+    }
     if (dialogue_font_slot != nullptr) {
         *dialogue_font_slot = (locale_index == 1 && cjk_font.valid()) ? cjk_font : latin_font;
     }

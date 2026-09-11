@@ -10,9 +10,14 @@
 // Sincrono: parsear metricas de un TTF es barato, no pasa por el hilo de IO (ver el
 // comentario de text_load_font en font.cpp para el porque).
 //
+// bold = true carga la MISMA cara pero marcada para engordar el contorno al rasterizar
+// (negrita sintetica, M12): no hay ningun TTF en negrita entre los assets, y {b} necesita
+// un FontHandle propio para que el cache de glifos no mezcle los normales con los
+// engordados. Por lo demas es una fuente como cualquier otra.
+//
 // Devuelve un handle invalido (h.valid() == false) si la carga falla; el error concreto
 // queda en el log. No hay placeholder de fuente: sin fuente no hay texto que dibujar.
-FontHandle text_load_font(const char* logical_name, u32 px_size);
+FontHandle text_load_font(const char* logical_name, u32 px_size, bool bold = false);
 
 // Vuelve a cargar una fuente EN EL SITIO (M11, recarga en caliente): el handle no cambia,
 // asi que todo el que ya lo tenga guardado (VnMode, MenuMode...) pasa a usar la version

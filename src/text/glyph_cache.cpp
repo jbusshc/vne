@@ -2,6 +2,10 @@
 
 #include <cstring>
 
+// FT_GlyphSlot_Embolden (negrita sintetica de M12) vive en el modulo de sintesis de
+// FreeType, que no entra con el ft2build.h/FT_FREETYPE_H de font_internal.h.
+#include <freetype/ftsynth.h>
+
 #include "base/arena.h"
 #include "base/assert.h"
 #include "base/log.h"
@@ -152,12 +156,22 @@ const GlyphInfo* glyph_cache_get(FontHandle font, u32 glyph_index) {
         return nullptr;
     }
 
-    if (FT_Load_Glyph(font_data->ft_face, glyph_index, FT_LOAD_RENDER) != 0) {
+    // Negrita sintetica (M12): hay que separar cargar de rasterizar para poder engordar el
+    // contorno en medio. Sin ella, FT_LOAD_RENDER hace las dos cosas de una vez.
+    FT_Int32 load_flags = font_data->synthetic_bold ? FT_LOAD_DEFAULT : FT_LOAD_RENDER;
+    if (FT_Load_Glyph(font_data->ft_face, glyph_index, load_flags) != 0) {
         log_error("glyph_cache_get: FT_Load_Glyph fallo para el glifo %u", glyph_index);
         return nullptr;
     }
-    FT_GlyphSlot slot   = font_data->ft_face->glyph;
-    FT_Bitmap&   bitmap = slot->bitmap;
+    FT_GlyphSlot slot = font_data->ft_face->glyph;
+    if (font_data->synthetic_bold) {
+        FT_GlyphSlot_Embolden(slot);
+        if (FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL) != 0) {
+            log_error("glyph_cache_get: FT_Render_Glyph fallo para el glifo %u", glyph_index);
+            return nullptr;
+        }
+    }
+    FT_Bitmap& bitmap = slot->bitmap;
 
     GlyphInfo info{};
     info.width     = static_cast<f32>(bitmap.width);

@@ -58,7 +58,9 @@ Marcado inline dentro del texto: `{b}`, `{color=#rrggbb}`, `{ruby=lectura}`, `{w
 `src/script/parser.cpp`; la referencia completa y al día para escribir guiones es
 `docs/SCRIPT_LANGUAGE.md`):
 
-- `{b}` se parsea pero todavía no cambia el dibujado: no hay fuente negrita cargada.
+- `{b}` usa negrita **sintética** (`FT_GlyphSlot_Embolden` sobre la misma cara): no hay
+  ningún TTF en negrita entre los assets. Necesita que el llamante pase una `bold_font` a
+  `text_layout`; sin ella el tramo se dibuja normal en vez de fallar.
 - `@sfx` necesita el nombre **con extensión** (se resuelve como `assets_src/ogg/<nombre>`),
   mientras que `@bgm` va **sin extensión** porque resuelve por catálogo (ADR-0034). La
   asimetría es deliberada: la pista de música tiene que sobrevivir a un guardado.

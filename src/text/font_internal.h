@@ -25,6 +25,12 @@ struct FontData {
     // esa descarga.
     const u8*  raw_bytes       = nullptr;
     bool       raw_bytes_owned = false;
+    // M12: negrita sintetica. No hay ningun TTF en negrita en assets_src/ttf/ (NotoSans
+    // trae una sola variante), asi que {b} se dibuja engordando el contorno de la MISMA
+    // cara con FT_GlyphSlot_Embolden al rasterizar. Es un FontHandle aparte, con su
+    // propia cara, para que el cache de glifos (indexado por font.index) no mezcle los
+    // glifos normales con los engordados.
+    bool       synthetic_bold  = false;
 };
 
 FontData* font_resolve(FontHandle h);

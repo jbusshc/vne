@@ -263,6 +263,11 @@ int main(int argc, char** argv) {
     if (!latin_dialogue_font.valid()) {
         log_error("No se pudo cargar la fuente de prueba NotoSans.ttf");
     }
+    // Variantes en negrita para {b} (M12): la misma cara marcada para engordar el contorno
+    // al rasterizar, porque no hay ningun TTF en negrita entre los assets. Una por idioma,
+    // igual que las normales.
+    FontHandle latin_bold_font = text_load_font("ttf/NotoSans.ttf", 28, /*bold=*/true);
+    FontHandle cjk_bold_font   = text_load_font("ttf/NotoSansJP.ttf", 28, /*bold=*/true);
 
     // Recarga en caliente (SPEC.md #7.4, M11): vigila los .ttf de estas dos fuentes y los
     // .png del atlas. Los .vns los vigila el editor aparte, porque recargarlos toca la VM
@@ -301,6 +306,7 @@ int main(int argc, char** argv) {
     vn_mode.state        = &demo_state;
     vn_mode.script        = demo_script;
     vn_mode.font          = latin_dialogue_font;  // idioma base: espanol (M10)
+    vn_mode.bold_font     = latin_bold_font;      // M12: {b}
     vn_mode.layout_arena = &g_arena_scene;
 
     BacklogMode backlog_mode{};
@@ -315,6 +321,9 @@ int main(int argc, char** argv) {
     menu_mode.dialogue_font_slot = &vn_mode.font;  // M10: cambia el idioma de VnMode
     menu_mode.latin_font          = latin_dialogue_font;
     menu_mode.cjk_font            = demo_font;
+    menu_mode.bold_font_slot      = &vn_mode.bold_font;  // M12: {b} sigue al idioma
+    menu_mode.latin_bold_font     = latin_bold_font;
+    menu_mode.cjk_bold_font       = cjk_bold_font;
 
     SaveLoadMode save_load_mode{};
     save_load_mode.state         = &demo_state;
