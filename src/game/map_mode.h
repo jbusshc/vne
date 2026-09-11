@@ -12,6 +12,11 @@
 
 constexpr f32 k_player_speed_px_per_s = 220.0f;
 
+// Media extension de la caja del jugador, en fracciones de tile. Tiene que coincidir con el
+// tamano con el que render() dibuja al jugador (0.6 tiles de lado, centrado en player_x/y):
+// si no coinciden, el jugador choca donde no se le ve o atraviesa lo que si se le ve.
+constexpr f32 k_player_half_extent_tiles = 0.3f;
+
 struct MapMode : Mode {
     GameState* state = nullptr;
 
@@ -36,7 +41,13 @@ struct MapMode : Mode {
     bool load(const char* logical_name, Arena* arena);
 
     bool tile_blocked(i32 tile_x, i32 tile_y) const;
-    i32  trigger_at(i32 tile_x, i32 tile_y) const;
+
+    // Colision AABB (M12): true si la caja del jugador centrada en (center_x, center_y)
+    // solapa ALGUN tile bloqueado. Hasta M12 la colision era por punto, asi que el cuerpo
+    // del jugador se metia media caja dentro de las paredes antes de pararse.
+    bool box_blocked(f32 center_x, f32 center_y) const;
+
+    i32 trigger_at(i32 tile_x, i32 tile_y) const;
 
     void update(const InputState& input, f32 dt) override;
     void render() override;

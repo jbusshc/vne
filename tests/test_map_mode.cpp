@@ -91,3 +91,64 @@ TEST_CASE("MapMode::update: caminar hasta el trigger dispara pending_trigger_scr
 
     arena_destroy(&a);
 }
+
+TEST_CASE("MapMode::box_blocked: la caja del jugador choca antes que su centro (M12)") {
+    Arena   a = arena_create(1 * 1024 * 1024, "test_map");
+    MapMode m;
+    REQUIRE(m.load("demo_map.vnm", &a));
+
+    // demo_map: pared en el borde, interior abierto. El tile (1,1) esta abierto y el
+    // (0,1) es pared. Con tile_size 64 y media extension 0.3*64 = 19.2 px:
+    //
+    //   x = 84  ->  caja [64.8, 103.2]  entera dentro del tile 1: libre
+    //   x = 70  ->  caja [50.8,  89.2]  asoma al tile 0 (pared):  bloqueada
+    //
+    // Y el centro (x=70) sigue estando en el tile 1, que esta abierto: esa es exactamente
+    // la diferencia entre AABB y punto, y es lo que este test fija.
+    const f32 y_open = 1.0f * 64.0f + 32.0f;
+
+    CHECK_FALSE(m.box_blocked(84.0f, y_open));
+    CHECK(m.box_blocked(70.0f, y_open));
+    CHECK_FALSE(m.tile_blocked(1, 1));  // el centro de x=70 cae aqui, y esta abierto
+
+    // Lo mismo en vertical contra la pared de arriba.
+    const f32 x_open = 3.0f * 64.0f + 32.0f;
+    CHECK_FALSE(m.box_blocked(x_open, 84.0f));
+    CHECK(m.box_blocked(x_open, 70.0f));
+
+    arena_destroy(&a);
+}
+
+TEST_CASE("MapMode::update: el jugador no se mete dentro de la pared al empujarla (M12)") {
+    Arena   a = arena_create(1 * 1024 * 1024, "test_map");
+    MapMode m;
+    REQUIRE(m.load("demo_map.vnm", &a));
+
+    GameState state{};
+    state.player_x = 3.0f * 64.0f + 32.0f;
+    state.player_y = 3.0f * 64.0f + 32.0f;
+    m.state        = &state;
+
+    // Empujar contra la pared de la izquierda durante dos segundos enteros.
+    InputState input{};
+    input.key_down[SDL_SCANCODE_A] = true;
+    for (u32 i = 0; i < 120; ++i) {
+        m.update(input, 1.0f / 60.0f);
+    }
+
+    // La pared ocupa el tile 0, o sea x < 64. El borde izquierdo de la caja es
+    // player_x - 19.2 y no puede haber entrado: antes de M12 el centro llegaba hasta
+    // x ~= 64 y el cuerpo se hundia 19.2 px dentro de la pared.
+    const f32 half = 64.0f * k_player_half_extent_tiles;
+    CHECK(state.player_x - half >= 64.0f - 0.5f);
+    MESSAGE("borde izquierdo del jugador tras empujar: " << (state.player_x - half));
+
+    // Y no se ha quedado clavado: sigue pudiendo moverse en el otro eje.
+    f32        y_before = state.player_y;
+    InputState down{};
+    down.key_down[SDL_SCANCODE_S] = true;
+    m.update(down, 1.0f / 60.0f);
+    CHECK(state.player_y > y_before);
+
+    arena_destroy(&a);
+}
