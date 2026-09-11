@@ -6,6 +6,7 @@
 #include "assets/pak.h"
 #include "audio/audio.h"
 #include "base/hash.h"
+#include "base/heap_guard.h"
 
 // audio_init() ya se llamo una vez en test_main.cpp (mismo patron que lua_init()): un
 // unico ma_engine persistente creado fuera del bucle de frame.
@@ -243,4 +244,64 @@ TEST_CASE("audio: audio_stop con un voice_id invalido no hace nada (y no crashea
     audio_stop(0, 0.0f);                 // id nulo
     audio_stop(0xFFFFFFFFu, 0.0f);       // indice fuera de rango
     audio_stop(0x00FF0001u, 0.5f);       // indice valido, generacion que no coincide
+}
+
+TEST_CASE("audio: cargar un sonido nuevo dentro de un frame respeta la regla de cero heap") {
+    // Esto cierra un hueco que CLAUDE.md llevaba arrastrando desde M6 escrito tal cual:
+    // "No se verifico con un contador de heap real que la excepcion de heap_guard cubra el
+    // caso de un @bgm/@sfx disparado dentro de una partida real -- se apoya en la simetria
+    // de codigo con el caso de Lua". No se podia verificar: miniaudio asigna con malloc y
+    // heap_guard solo veia operator new. Desde ADR-0058 si.
+    //
+    // Se copia un wav a un nombre nuevo para forzar una carga de verdad: audio_load cachea
+    // por hash del nombre logico, y los demas tests ya han cargado los tres wav del
+    // directorio.
+    const char* src_path = "assets_src/ogg/puerta_cierra.wav";
+    const char* dst_path = "assets_src/ogg/heapcheck_tmp.wav";
+    {
+        std::FILE* src = std::fopen(src_path, "rb");
+        REQUIRE(src != nullptr);
+        std::fseek(src, 0, SEEK_END);
+        long size = std::ftell(src);
+        std::fseek(src, 0, SEEK_SET);
+        std::vector<u8> bytes(static_cast<usize>(size));
+        REQUIRE(std::fread(bytes.data(), 1, bytes.size(), src) == bytes.size());
+        std::fclose(src);
+        std::FILE* dst = std::fopen(dst_path, "wb");
+        REQUIRE(dst != nullptr);
+        std::fwrite(bytes.data(), 1, bytes.size(), dst);
+        std::fclose(dst);
+    }
+
+    // Los contadores se leen a variables ANTES de que corra ninguna macro de doctest:
+    // REQUIRE/CHECK construyen su descomposicion de expresiones con operator new, asi que
+    // comprobar g_frame_alloc_count dentro de un CHECK mide el propio doctest. (Me paso
+    // al escribir este test: daba 5 asignaciones "del motor" que eran de doctest.)
+    u64 ma_before = audio_alloc_count();
+    heap_guard_reset_frame();
+
+    SoundHandle     h{};
+    AudioLoadResult load_result = audio_load("ogg/heapcheck_tmp.wav", false, &h);
+    u64             after_load  = g_frame_alloc_count;
+    u64             ma_allocs   = audio_alloc_count() - ma_before;
+
+    u32 voice      = audio_play(h, Bus::Sfx, 1.0f, false);
+    u64 after_play = g_frame_alloc_count;
+
+    REQUIRE(load_result == AudioLoadResult::Ok);
+    MESSAGE("miniaudio asigno " << ma_allocs << " veces al cargar un sonido nuevo");
+
+    // miniaudio SI asigna (si no, el test no probaria nada): lo que se comprueba es que la
+    // excepcion acotada de ADR-0035 la absorbe y el contador del frame sigue en cero.
+    CHECK(ma_allocs > 0);
+    CHECK(after_load == 0);
+
+    // Y reproducirlo despues tampoco cuenta nada, que es la otra mitad de la regla: ahi no
+    // hay excepcion ninguna, simplemente no se asigna (ADR-0056).
+    CHECK(voice != 0);
+    CHECK(after_play == 0);
+    audio_stop(voice, 0.0f);
+
+    heap_guard_reset_frame();
+    std::remove(dst_path);
 }

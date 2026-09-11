@@ -54,10 +54,18 @@ con `heap_allocs_frame_max=0`.
 Decisiones nuevas: ADR-0056 (polifonía por voces pre-creadas), ADR-0057 (contador de
 asignaciones de audio) y ADR-0058 (`heap_guard` ve a las librerías de terceros).
 
-**Lo que M12 NO resuelve, y conviene saberlo:** `@move` guarda la posición del actor pero
-**no se ve moverse nada**, porque no existe renderizado de sprites de actor en el motor —
-`@show`/`@hide`/`@move` mantienen estado que nadie dibuja. Falta el arte y el pipeline de
-sprites, no el comando. Tampoco se probó nada con teclado real en la ventana interactiva
+**Lo que M12 NO resuelve, y hay que tener muy presente:** **nada dibuja fondos ni actores.**
+No es solo que `@move` no se vea: `@bg`, `@show` y `@hide` tampoco pintan nada desde que
+existen. Mantienen `bg_id` y `actors[]` en `GameState` correctamente —se serializa, sobrevive
+a un guardado, se ve en el editor— pero ningún código lo convierte en sprites.
+`VnMode::render()` dibuja la transición, el cuadro de diálogo y el texto, y se acabó. Los
+hitos se pudieron cerrar así porque ningún criterio de SPEC.md §12 dice "se ve a un personaje
+en pantalla"; todos miden otra cosa. Está bloqueado por el arte (que no se puede inventar,
+regla 6) y por la falta de un registro de assets que traduzca `actor_id`/`pose_id`/`bg_id` a
+una región del atlas (ADR-0022) — **y ese registro es justo lo que construye M13**, así que
+es el momento de abordarlo. Detalle en "Pendientes observados" de docs/DECISIONS.md.
+
+Tampoco se probó nada con teclado real en la ventana interactiva
 (limitación de siempre en este entorno): transiciones, `{w=}`, auto, polifonía y AABB se
 verificaron con tests y con arranques instrumentados. Windows sigue siendo la única
 plataforma verificada (ADR-0013).
@@ -202,9 +210,12 @@ compilador del DSL sigue siendo exclusivo de herramientas offline incluso en Dev
 Criterio medible de M8 ("editar un `.vns` y ver el cambio sin reiniciar") verificado
 end-to-end de verdad: modificar `demo.vns` mientras `vne_game.exe` (Dev) corría disparó
 la recompilación y recarga sin reiniciar el proceso, con `heap_allocs_frame_max` en 0
-durante todo el proceso (confirma que la excepción de `heap_guard` alrededor del
-subproceso, mismo patrón que Lua/audio, funciona de verdad, no solo por simetría de
-código). `Say` bloqueando de verdad (M7) hizo evidente que `platform/input.h` necesitaba
+durante todo el proceso. **Corrección de M12:** aquella lectura de 0 se presentó como
+"confirma que la excepción de `heap_guard` funciona de verdad, no solo por simetría de
+código", y no confirmaba nada — `system()` asigna con `malloc` y el contador de entonces
+solo veía `operator new`, así que habría dado 0 con excepción o sin ella. Sigue sin poder
+comprobarse (`system()` no tiene hook), pero ahora se sabe que no está comprobado.
+`Say` bloqueando de verdad (M7) hizo evidente que `platform/input.h` necesitaba
 ratón real para que un editor con paneles fuera usable: `InputState` gana posición,
 botones y rueda de ratón (píxeles de ventana reales, la UI de VN sigue siendo solo
 teclado, ADR-0040 no cambia). 94/94 tests en Dev; 93/94 en Debug+ASan (el de rendimiento
@@ -254,10 +265,13 @@ archivo inexistente); se evita comprobando con `fopen` antes de llamar a la libr
 (ADR-0036). Guion de prueba nuevo `demo_audio.vns` (`@bgm`/`@sfx`/`@stopbgm`). 85/85
 tests en Ship; en Debug+ASan 85/86 (el de rendimiento de M2 no representativo sin
 optimizar, ADR-0018), sin ningún reporte de memoria tras el fix del bug de miniaudio.
-Sonidos de prueba: tonos sintéticos generados (no assets de terceros). No se verificó con
-un contador de heap real que la excepción de heap_guard cubra el caso de un `@bgm`/`@sfx`
-disparado dentro de una partida interactiva real (solo se probó vía `--autoplay-script`,
-sin bucle de frame) — se apoya en la simetría de código con el caso de Lua, ya probado.
+Sonidos de prueba: tonos sintéticos generados (no assets de terceros). M6 dejó anotado que
+no se había podido verificar con un contador de heap real que la excepción de `heap_guard`
+cubra un `@bgm`/`@sfx` nuevo, y que se apoyaba en la simetría de código con Lua: **cerrado
+en M12**, porque con el hook de miniaudio (ADR-0058) por fin se puede medir. Medido:
+cargar un sonido nuevo asigna **21 veces** dentro de miniaudio, la excepción de ADR-0035
+las absorbe enteras y el contador del frame se queda en 0; reproducirlo después añade 0.
+Hay test (`test_audio.cpp`).
 Windows sigue siendo la única plataforma verificada (ADR-0013). Detalle completo en
 docs/DECISIONS.md.
 

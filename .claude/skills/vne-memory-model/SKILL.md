@@ -149,6 +149,7 @@ alrededor de la llamada, **nunca más ancho que eso** (por ejemplo: `hb_shape` s
 | Cargar un asset nuevo bajo demanda | El decodificador de terceros asigna al traer datos que aún no estaban en caché: miniaudio al abrir un sonido, qoi al decodificar una textura, FreeType al rasterizar un glifo o al dar métricas en `hb_shape`. | ADR-0035, ampliada en ADR-0058 |
 | Lanzar `vne_bake` desde el editor | `system()` asigna; solo en builds `Dev`. | M8 |
 | `hot_reload_update` | Recorrer los directorios vigilados cuesta 673 asignaciones de SDL cada 500 ms; solo en builds `Debug`/`Dev`. | ADR-0058 |
+| El editor abierto | ImGui asigna al dimensionar sus buffers (54 en su primer frame, luego ~0); solo en builds `Dev`. | ADR-0060 |
 
 Fíjate en que las dos últimas son herramienta de desarrollo: **no existen en Ship**. Las dos
 primeras sí corren en el juego distribuido, y por eso están acotadas al decodificador concreto.
@@ -158,10 +159,24 @@ dos reglas del proyecto; la ampliación de la segunda también. **No amplíes es
 cuenta**: si encuentras un caso nuevo, párate y pregunta. Suspender el guard para tapar una
 asignación propia sería exactamente el abuso que la regla existe para impedir.
 
-Y ojo con el orden causal: estas excepciones no aparecieron todas de golpe en M12. Tres de
-ellas llevaban hitos ocurriendo; lo que cambió es que ADR-0058 hizo el contador capaz de
-verlas. Que algo no salga en el contador no prueba que no asigne — prueba que nadie ha
-mirado.
+Y ojo con el orden causal: estas excepciones no aparecieron todas de golpe en M12. Varias
+llevaban hitos ocurriendo; lo que cambió es que ADR-0058 hizo el contador capaz de verlas.
+**Que algo no salga en el contador no prueba que no asigne — prueba que nadie ha mirado.**
+
+`suspend`/`resume` **se anidan** (llevan profundidad, no un interruptor, ADR-0059) y tienen
+que venir emparejados: un `resume` de más dispara un assert. Antes de M12 eran un `bool` y el
+`resume` interno desprotegía al ámbito externo; pasaba de verdad con `@lua` → `vn.play_sfx` →
+`audio_load` desde M6.
+
+### Cómo medir sin medir el instrumento
+
+Dos veces en M12 se sacó una conclusión falsa por comprobar con la herramienta equivocada, así
+que conviene tenerlo presente:
+
+- `heap_guard` no ve `malloc`: medir con él una librería en C da 0 siempre, asigne o no.
+- **Las macros de doctest (`CHECK`, `REQUIRE`) asignan con `operator new`.** Leer
+  `g_frame_alloc_count` *dentro* de un `CHECK` mide el propio doctest. Copia los contadores a
+  variables locales antes de que corra ninguna macro, y compara esas variables.
 
 ## Hilos
 

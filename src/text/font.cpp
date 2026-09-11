@@ -50,7 +50,14 @@ FontHandle text_load_font(const char* logical_name, u32 px_size, bool bold) {
             log_error("text_load_font: FT_New_Library fallo");
             return FontHandle{};
         }
+        // Las dos llamadas que FT_Init_FreeType hace ademas de FT_New_Library (ver
+        // src/base/ftinit.c): sin la primera no hay ningun driver de fuentes registrado y
+        // no se abre ni un TTF; sin la segunda se ignoraria la variable de entorno
+        // FREETYPE_PROPERTIES. Se replican para que cambiar de FT_Init_FreeType a
+        // FT_New_Library (necesario para poder pasar un asignador, ADR-0058) no altere
+        // ningun otro comportamiento por el camino.
         FT_Add_Default_Modules(g_ft_library);
+        FT_Set_Default_Properties(g_ft_library);
         pool_init(&g_pool);
     }
 

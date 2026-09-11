@@ -10,7 +10,16 @@ thread_local u64 g_frame_alloc_count = 0;
 // hilo exista (M11) — inofensivo en la practica porque su contador nunca se consulta,
 // pero es una carrera de datos real bajo el modelo de memoria de C++. Con thread_local
 // deja de serlo, sin coste ni cambio de comportamiento observable.
-static thread_local bool g_heap_guard_suspended = false;
+// Profundidad, no un bool. Las excepciones SI se anidan, y con un bool el resume interno
+// reactivaba el contador mientras el ambito externo seguia esperando estar suspendido:
+//
+//   - `@lua` suspende y, si el guion llama a vn.play_sfx, audio_load suspende y reanuda
+//     dentro (existe desde M6, nunca se noto porque las asignaciones de Lua son de
+//     terceros en C y hasta ADR-0058 tampoco se contaban).
+//   - hot_reload_update suspende y rebake_atlas_and_reload() suspende y reanuda dentro.
+//
+// Con un contador, solo el resume que cierra el ultimo suspend vuelve a encender el guard.
+static thread_local u32 g_heap_guard_depth = 0;
 
 namespace {
 
@@ -26,6 +35,7 @@ const char* source_name(u32 i) {
         case HeapSource::FreeType:  return "FreeType";
         case HeapSource::MiniAudio: return "miniaudio";
         case HeapSource::Qoi:       return "qoi";
+        case HeapSource::ImGui:     return "ImGui";
         case HeapSource::Count:     break;
     }
     return "?";
@@ -60,16 +70,22 @@ void heap_guard_check_frame() {
 }
 
 void heap_guard_suspend() {
-    g_heap_guard_suspended = true;
+    g_heap_guard_depth += 1;
 }
 
 void heap_guard_resume() {
-    g_heap_guard_suspended = false;
+    // Un resume sin suspend es un bug de emparejamiento en el llamante. Se avisa en vez de
+    // desbordar el contador a 0xFFFFFFFF, que dejaria el guard suspendido para siempre y
+    // convertiria la regla de cero heap en decorativa sin que nadie se enterara.
+    VN_ASSERT(g_heap_guard_depth > 0, "heap_guard_resume sin su heap_guard_suspend");
+    if (g_heap_guard_depth > 0) {
+        g_heap_guard_depth -= 1;
+    }
 }
 
 void heap_guard_count_alloc(HeapSource source) {
 #if defined(VN_DEBUG)
-    if (!g_heap_guard_suspended) {
+    if (g_heap_guard_depth == 0) {
         g_frame_alloc_count += 1;
         g_by_source[static_cast<u32>(source)] += 1;
     }
@@ -85,7 +101,7 @@ void heap_guard_count_alloc(HeapSource source) {
 // Sin excepciones en este proyecto (-fno-exceptions): un fallo de asignacion aborta en
 // vez de lanzar std::bad_alloc.
 void* operator new(usize size) {
-    if (!g_heap_guard_suspended) {
+    if (g_heap_guard_depth == 0) {
         g_frame_alloc_count += 1;
         g_by_source[static_cast<u32>(HeapSource::Engine)] += 1;
     }

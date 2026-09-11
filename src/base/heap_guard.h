@@ -40,13 +40,19 @@ void heap_guard_check_frame();
 // permitida en el bucle de frame; todo lo demas del motor sigue en cero. Las llamadas
 // deben venir siempre en pareja, envolviendo exactamente la ejecucion de sol2 en
 // script/lua_bindings.cpp, nunca un ambito mas amplio.
+//
+// Se anidan: llevan una cuenta de profundidad, no un interruptor. Hace falta porque las
+// excepciones se anidan de verdad (`@lua` que llama a `vn.play_sfx` y acaba en `audio_load`;
+// `hot_reload_update` que lanza `vne_bake`), y con un interruptor el resume interno
+// reactivaba el contador dejando al ambito externo desprotegido sin que nadie lo notara.
+// Las llamadas tienen que venir emparejadas: un resume de mas dispara un assert.
 void heap_guard_suspend();
 void heap_guard_resume();
 
 // De donde vino una asignacion. Saber solo "hubo 3 asignaciones" no sirve para arreglar
 // nada cuando el causante puede ser cualquiera de seis librerias; con el origen, el
 // mensaje del assert apunta directamente al sitio.
-enum class HeapSource : u8 { Engine, Sdl, Sokol, FreeType, MiniAudio, Qoi, Count };
+enum class HeapSource : u8 { Engine, Sdl, Sokol, FreeType, MiniAudio, Qoi, ImGui, Count };
 
 // Punto de entrada para los hooks de asignacion de las librerias de terceros. Cuenta una
 // asignacion igual que lo haria operator new, respetando suspend()/resume(). Existe en

@@ -25,6 +25,7 @@
 
 #include "base/arena.h"
 #include "base/heap_guard.h"
+#include "base/heap_guard_hooks.h"
 #include "base/log.h"
 #include "platform/input.h"
 #include "vm/script_load.h"
@@ -32,6 +33,16 @@
 #include "vm/vm.h"
 
 namespace {
+
+// Firma compartida por ImGui::SetAllocatorFunctions y simgui_allocator_t: las dos piden
+// exactamente void*(size_t, void*) y void(void*, void*).
+void* imgui_alloc_counted(size_t size, void* /*user*/) {
+    return heap_guard_malloc(size, HeapSource::ImGui);
+}
+
+void imgui_free_counted(void* p, void* /*user*/) {
+    heap_guard_free(p);
+}
 
 bool g_active = false;
 bool g_setup  = false;
@@ -205,10 +216,18 @@ void editor_init() {
     // Mismo formato que el swapchain al que gfx_present() ya dibuja (gfx_backend.h): el
     // editor se renderiza dentro de esa misma pasada, despues del blit de letterbox
     // (SPEC.md #6.5).
+    // ImGui y sokol_imgui asignan con malloc, invisible para operator new. El editor corre
+    // en TODOS los frames mientras esta abierto, asi que sin estos hooks la regla de cero
+    // heap (SPEC.md #4) no diria nada sobre el unico camino que mas asigna de todo el juego
+    // en Dev. Ver ADR-0058.
+    ImGui::SetAllocatorFunctions(imgui_alloc_counted, imgui_free_counted, nullptr);
+
     simgui_desc_t desc{};
     desc.color_format = SG_PIXELFORMAT_RGBA8;
     desc.depth_format = SG_PIXELFORMAT_NONE;
     desc.sample_count  = 1;
+    desc.allocator.alloc_fn = imgui_alloc_counted;
+    desc.allocator.free_fn  = imgui_free_counted;
     simgui_setup(&desc);
     g_setup = true;
 }
@@ -240,6 +259,22 @@ void editor_update(const InputState& input, GameState* state, CompiledScript* sc
     if (!g_active) {
         return;
     }
+
+    // Excepcion a la regla de cero heap (SPEC.md #4), de la misma familia que
+    // hot_reload_update y el subproceso `vne_bake`: el editor es herramienta de desarrollo
+    // y no existe en Ship (ADR-0041 lo excluye del build entero a nivel de CMake), asi que
+    // esto no puede degradar el juego que se distribuye.
+    //
+    // Medido en M12 forzando el editor abierto (no se puede pulsar F1 en este entorno):
+    // 54 asignaciones en su primer frame —contexto y atlas de fuentes de ImGui— y 1 en
+    // cuatro frames mas mientras ImGui hace crecer sus draw lists; a partir de ahi 0, que
+    // es el comportamiento esperado de ImGui (reutiliza sus buffers una vez dimensionados).
+    // Acotar en vez de arreglar es lo correcto aqui: esos buffers son de ImGui y no van a
+    // salir de una arena nuestra.
+    heap_guard_suspend();
+    struct GuardResume {
+        ~GuardResume() { heap_guard_resume(); }
+    } guard_resume;
 
     simgui_add_mouse_pos_event(input.mouse_x, input.mouse_y);
     for (u32 i = 0; i < k_max_mouse_buttons; ++i) {
@@ -273,7 +308,11 @@ void editor_render() {
     if (!g_active) {
         return;
     }
+    // Misma excepcion que en editor_update: simgui_render sube los draw lists de ImGui a
+    // la GPU y puede hacer crecer sus buffers.
+    heap_guard_suspend();
     simgui_render();
+    heap_guard_resume();
 }
 
 #endif  // VN_EDITOR

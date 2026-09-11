@@ -1957,6 +1957,70 @@ instale su hook: al añadir una dependencia hay que acordarse de esta tabla.
 
 ---
 
+## ADR-0059 — `heap_guard_suspend` lleva profundidad, no un interruptor
+
+**Fecha:** 2026-09-10
+**Hito:** M12 (revisión de cierre)
+**Estado:** aceptada
+
+**Contexto.** Revisando lo que acababa de escribir para ADR-0058 apareció que
+`heap_guard_suspend`/`resume` usaban un `bool`. Las excepciones **sí se anidan**, y con un
+interruptor el `resume` del ámbito interno volvía a encender el contador dejando al externo
+desprotegido durante el resto de su ejecución:
+
+- `hot_reload_update` suspende y llama a `rebake_atlas_and_reload()`, que suspende y reanuda
+  dentro. Introducido por mí en ADR-0058.
+- Ejecutar un `@lua` suspende (ADR-0032) y, si el guion llama a `vn.play_sfx`, acaba en
+  `audio_load`, que suspende y reanuda dentro. **Esto existía desde M6** y nunca se detectó,
+  porque hasta ADR-0058 las asignaciones de terceros no se contaban: el agujero no podía
+  manifestarse en un contador que ya era ciego.
+
+**Decisión.** `g_heap_guard_depth` es un `u32`: `suspend` incrementa, `resume` decrementa, y
+solo cuenta cuando la profundidad es 0. Un `resume` sin su `suspend` dispara un assert en vez
+de desbordar a `0xFFFFFFFF`, que dejaría el guard suspendido para siempre y convertiría la
+regla en decorativa sin que nadie se enterara. `tests/test_heap_guard.cpp` fija el
+comportamiento anidado, que era exactamente lo que nadie miraba.
+
+**Consecuencias.** Las excepciones se pueden anidar sin pensarlo, que es lo que ya hacían de
+hecho. `heap_guard_reset_frame` deliberadamente **no** toca la profundidad: si la reseteara,
+una suspensión que cruzara el límite de frame se perdería en silencio.
+
+---
+
+## ADR-0060 — ImGui también cuenta, y el editor es una excepción declarada
+
+**Fecha:** 2026-09-10
+**Hito:** M12 (revisión de cierre)
+**Estado:** aceptada
+
+**Contexto.** ADR-0058 dejó dicho que "cualquier librería sin hook sigue siendo invisible".
+El caso peor estaba a la vista y se me había pasado: **ImGui**. El editor corre en todos los
+frames mientras está abierto, es el camino que más asigna de todo el juego en Dev, y su
+asignador nunca se instrumentó. Además no se había medido nunca, porque el editor solo se
+activa con F1 y en este entorno no se pueden inyectar pulsaciones: hubo que forzar
+`g_active = true` temporalmente para verlo.
+
+Medido así: **54 asignaciones en el primer frame del editor** (contexto y atlas de fuentes de
+ImGui) y **1 en cuatro frames más** mientras hace crecer sus draw lists; a partir de ahí 0,
+que es el comportamiento esperado de ImGui una vez sus buffers están dimensionados.
+
+**Decisión.** Se instala el hook en los dos sitios que hacen falta —
+`ImGui::SetAllocatorFunctions` y `simgui_desc_t.allocator`, que piden exactamente la misma
+firma— y se añade `HeapSource::ImGui` al desglose. Y se declara el editor como excepción
+acotada con `heap_guard_suspend`, de la misma familia que `hot_reload_update` y el
+subproceso `vne_bake`: es herramienta de desarrollo y **no existe en Ship** (ADR-0041 lo
+excluye del build entero a nivel de CMake; reverificado con `strings vne_game.exe | grep -i
+imgui` sobre el binario Ship real, 0 coincidencias).
+
+**Alternativas descartadas.** Hacer que ImGui asigne de una arena: sus buffers son suyos y
+tienen su propio ciclo de vida; forzarlos a una arena de frame los rompería.
+
+**Consecuencias.** El camino del editor pasa a estar declarado en vez de simplemente no
+mirado. Queda vivo el mismo residuo de ADR-0058, ahora con un ejemplo concreto de lo fácil
+que es olvidarlo: **al añadir una dependencia, instálale su hook**.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -1967,6 +2031,22 @@ desviarte.
   Destapó y dejó arreglados cuatro sitios que violaban la regla desde hacía hitos. Queda el
   residuo de que **una dependencia nueva sigue siendo invisible hasta que se le instale su
   hook**: al añadir una, hay que acordarse de la tabla de ADR-0058.
+- **Nada dibuja fondos ni actores.** Detectado en la revisión de cierre de M12, y es el hueco
+  más grande del proyecto ahora mismo. `@bg`, `@show`, `@hide` y `@move` mantienen estado
+  correctamente en `GameState` (`bg_id`, `actors[]`), ese estado se serializa, sobrevive a un
+  guardado y se puede inspeccionar en el editor — pero **ningún código lo convierte en
+  sprites**. `VnMode::render()` dibuja la transición, el cuadro de diálogo y el texto, y se
+  acabó. Lo único que llega a las capas `Background`/`Actors` es la rejilla de tiles y el
+  cuadrado del jugador de `MapMode`, más la malla de 5000 sprites que es el banco de pruebas
+  de M1. Verificado buscando en todo `src/` quién lee `bg_id` y `actors[]`: solo `vm.cpp`
+  (escribe), `save.cpp` (serializa) y `editor.cpp` (muestra).
+  Que los hitos se hayan podido cerrar así no es un despiste: cada criterio de SPEC.md §12 se
+  refiere a otra cosa (draw calls, tiempos, voces, bytes), y ninguno dice "se ve a un
+  personaje en pantalla". Está bloqueado por dos cosas reales: no hay arte de personajes ni
+  fondos (y no se puede inventar, regla 6 de CLAUDE.md), y no hay registro de assets que
+  traduzca `actor_id`/`pose_id`/`bg_id` a una región del atlas (ADR-0022: los nombres se
+  internan sin validar contra nada). **M13 construye ese registro**, así que es el momento
+  natural de abordarlo; hasta entonces, no des por hecho que `@show` hace algo visible.
 - El desglose por origen (`HeapSource`) solo distingue librerías, no sitios de llamada. Para
   localizar *dónde* dentro del frame asigna una librería hubo que instrumentar a mano fase
   por fase en `main.cpp`. Si vuelve a pasar, valdría la pena un modo que registre el
