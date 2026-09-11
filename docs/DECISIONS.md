@@ -1788,10 +1788,124 @@ archivos.
 
 ---
 
+## ADR-0056 — Polifonía por voces pre-creadas en `audio_load`, no por `ma_sound_init_copy`
+
+**Fecha:** 2026-09-10
+**Hito:** M12
+**Estado:** aceptada
+
+**Contexto.** M12 exige que el mismo `@sfx` disparado 5 veces en 100 ms produzca 5 voces
+simultáneas. Desde M6 un `SoundHandle` tenía **una** instancia `ma_sound`, así que volver a
+dispararlo la reiniciaba desde el principio en vez de superponerla.
+
+La solución evidente en miniaudio es `ma_sound_init_copy`, que clona un sonido ya cargado, y
+fue la que se planificó. Al ir a implementarla se leyó su código y resultó tener **dos
+defectos que la invalidan**, ambos medidos después, no solo leídos:
+
+1. **No funciona en el backend empaquetado**, que es precisamente el de Ship. `init_copy`
+   empieza con `if (pExistingSound->pResourceManagerDataSource == NULL) return
+   MA_INVALID_OPERATION;`, y ese campo solo lo rellena `ma_sound_init_from_file`. El camino
+   empaquetado de M11 (ADR-0055) usa `ma_decoder_init_memory` +
+   `ma_sound_init_from_data_source`, que lo deja a `NULL`. Medido sobre un `.pak` real:
+   `ma_result = -3` (`MA_INVALID_OPERATION`). En Dev (suelto) devuelve `MA_SUCCESS`. Es
+   decir: habría funcionado en desarrollo y estado muerta en el juego distribuido, sin que
+   ningún test lo detectara.
+2. **Asigna heap en cada reproducción**, o sea dentro del bucle de frame, contra SPEC.md §4.
+   Medido: **2 asignaciones por clon** en el backend suelto.
+
+El agravante es que la medición original que respaldaba el plan ("`init_copy` no asigna")
+era falsa por un hueco real de `heap_guard`: solo sobrecarga `operator new`/`delete`, y
+miniaudio es C y llama a `malloc` directamente, así que el contador **nunca podría** haber
+visto esas asignaciones. Ver el pendiente correspondiente más abajo.
+
+**Decisión.** Las voces se crean **todas en `audio_load`**, no por reproducción.
+
+- Un array global `g_voices[128]` de instancias reproducibles independientes, repartido en
+  bloques de `k_voices_per_sound = 8` por efecto (16 efectos con polifonía completa). Es un
+  bump allocator sin liberación, igual que la caché de sonidos: un sonido cargado vive lo que
+  vive el proceso. Coste estático medido: `sizeof(ma_sound) = 952`, `sizeof(ma_decoder) =
+  552`, unos 192 KB en total.
+- `audio_play` elige la primera voz que no esté sonando y hace `seek(0)` + `start()`. **Cero
+  asignaciones**, verificado con el contador nuevo: 0 en 5 disparos, en ambos backends.
+- Una voz que llega al final se libera sola: el motor llama a `ma_sound_stop` al detectar
+  `ma_sound_at_end` dentro de `ma_engine_node_process`. No hace falta barrer nada por frame.
+- Si las 8 están ocupadas se roba la más antigua en round-robin. Perder un efecto del todo se
+  nota más que cortar su propia copia más vieja.
+- La música (streaming) **no** es polifónica y conserva el camino de M6 intacto: una pista
+  solapándose consigo misma no es algo que nadie quiera, y `ma_sound_init_copy` tampoco sabe
+  clonar streams.
+
+`voice_id` pasa a referenciar dos espacios distintos (voces de efecto y slots de música), así
+que el bit 31 lo etiqueta y la generación baja de 16 a 15 bits — periodo de vuelta de 32768
+reproducciones, holgado.
+
+**Alternativas descartadas.** `ma_sound_init_copy` por reproducción, por lo de arriba. Crear
+las voces perezosamente la primera vez que un efecto necesita solaparse: amortizado no
+asignaría, pero la primera vez sí, dentro del frame, y eso sería una cuarta excepción a la
+regla de cero heap — que el skill `vne-memory-model` reserva explícitamente al usuario. La
+alternativa elegida **no necesita excepción nueva**: cae dentro de la de ADR-0035, que ya
+cubre `audio_load`.
+
+**Consecuencias.** Los efectos se superponen de verdad, en los dos backends, sin asignar en
+el frame y sin ampliar la lista de excepciones. A cambio hay un tope duro de 16 efectos
+distintos con polifonía completa: pasado ese punto se degrada a menos copias simultáneas con
+un `log_warn`, nunca a un fallo. Y `audio_load` es ahora 8 veces más caro para un efecto, lo
+que refuerza que la carga debe ocurrir en la transición de escena y no en mitad del diálogo.
+
+---
+
+## ADR-0057 — El contador de asignaciones de audio se mide con los callbacks de miniaudio
+
+**Fecha:** 2026-09-10
+**Hito:** M12
+**Estado:** aceptada
+
+**Contexto.** Para cerrar ADR-0056 hacía falta poder afirmar "`audio_play` no asigna" con un
+número. `heap_guard` no sirve: solo sobrecarga `operator new`/`delete`, y miniaudio es C. La
+afirmación habría sido exactamente el tipo de suposición que la regla de cero heap existe
+para no tener que hacer.
+
+**Decisión.** `audio_init` instala `ma_allocation_callbacks` propios en el `ma_engine`, que
+cuentan cada `malloc`/`realloc` y delegan en el asignador del sistema. El engine los hereda a
+su gestor de recursos interno, así que cubren tanto `ma_sound_init_from_file` como
+`ma_decoder_*`. `audio_alloc_count()` lo expone y un test comprueba que 5 `audio_play`
+seguidos lo dejan igual.
+
+Se compila **siempre**, también en Ship: es una suma sobre un `u64` en un camino que ya va a
+llamar a `malloc`, no instrumentación cara, y tenerlo solo en Debug significaría no poder
+comprobar en Ship justamente lo que Ship hace distinto.
+
+**Alternativas descartadas.** Interceptar `malloc` globalmente en `heap_guard`: es la
+solución general y correcta, pero cambia el mecanismo central de verificación del proyecto y
+haría aparecer de golpe asignaciones de FreeType, HarfBuzz, Lua y stb que hoy nadie ve.
+Anotado como pendiente para que lo decida el usuario, no aquí de rebote.
+
+**Consecuencias.** El subsistema de audio pasa a tener una verificación real de la regla de
+cero heap en lugar de una por simetría de código (que es lo que M6 dejó escrito
+explícitamente). El resto de subsistemas de terceros siguen sin ella.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
 desviarte.
+
+- **`heap_guard` no ve las asignaciones de las librerías de terceros, que son C.** Solo
+  sobrecarga `operator new`/`delete` (`src/base/heap_guard.cpp`); nunca instrumenta `malloc`,
+  pese a que el skill `vne-memory-model` afirma que "se instrumenta `malloc`". Consecuencia:
+  el contador que verifica la regla de cero asignaciones por frame (SPEC.md §4) es ciego a
+  miniaudio, FreeType, HarfBuzz, Lua y stb, que asignan todas con `malloc`. Descubierto en
+  M12 al comprobar que una medición previa de `ma_sound_init_copy` ("no asigna") era falsa:
+  el clon hace 2 asignaciones y `heap_guard` marcaba 0. M12 tapa el caso concreto de audio
+  con los callbacks de miniaudio (ADR-0057), pero el hueco general sigue abierto. Arreglarlo
+  significa interceptar `malloc` de verdad, lo que probablemente destape asignaciones dentro
+  del frame que hoy pasan inadvertidas; es un cambio al mecanismo central de verificación del
+  proyecto y **lo debe decidir el usuario**, no el agente de rebote en un hito.
+- El tope de polifonía es de 16 efectos distintos con 8 voces cada uno (ADR-0056). Suficiente
+  para los guiones de prueba actuales; si un juego real carga más efectos, `g_voices` se
+  queda corto y los últimos suenan con menos copias simultáneas (avisado con `log_warn`). La
+  salida sería asignar voces por demanda real en vez de un bloque fijo por sonido.
 
 La mayoría de las entradas abiertas de esta lista quedaron asignadas a un hito concreto de
 SPEC.md §12 al ampliar la hoja de ruta con M11–M15 (ADR-0050): el sistema de assets y el

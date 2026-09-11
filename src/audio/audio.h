@@ -20,16 +20,30 @@ void audio_update(f32 dt, f32* out_bgm_position);
 
 AudioLoadResult audio_load(const char* path, bool streaming, SoundHandle* out);
 
-// Simplificacion deliberada de M6 (ver ADR en docs/DECISIONS.md): cada SoundHandle tiene
-// como mucho UNA instancia sonando a la vez. Volver a reproducirlo mientras ya suena lo
-// reinicia desde el principio en vez de superponer una segunda copia.
+// Desde M12 un efecto es polifonico: reproducirlo mientras ya suena superpone una copia
+// nueva en vez de reiniciar la que sonaba (la simplificacion de M6 se levanta). Las voces
+// se crean todas en audio_load, asi que audio_play no asigna heap y sigue valiendo dentro
+// del bucle de frame. La musica (cargada con streaming = true) mantiene el comportamiento
+// de M6: una sola instancia, que se reinicia.
 //
-// Devuelve un voice_id (indice del slot + generacion empaquetados, ver voice_id_pack en
+// Devuelve un voice_id (etiqueta + indice + generacion empaquetados, ver voice_id_pack en
 // audio.cpp) o 0 si el handle no resuelve a nada. audio_stop() valida esa generacion, asi
-// que un voice_id de una voz ya liberada no puede acabar parando el sonido equivocado.
+// que un voice_id de una reproduccion ya terminada no puede parar el sonido equivocado.
 u32  audio_play(SoundHandle s, Bus bus, f32 volume, bool loop);
 void audio_stop(u32 voice_id, f32 fade_seconds);
 void audio_set_bus_volume(Bus b, f32 v);
+
+// Cuantas copias de `s` estan sonando ahora mismo. Existe para poder verificar el criterio
+// de polifonia de M12 desde un test sin exponer miniaudio fuera de audio.cpp; el juego no
+// la necesita.
+u32 audio_active_voice_count(SoundHandle s);
+
+// Asignaciones acumuladas hechas por miniaudio desde audio_init(). heap_guard NO las ve:
+// solo sobrecarga operator new/delete, y miniaudio es C y llama a malloc directamente. Con
+// esto se puede comprobar de verdad que audio_play() no asigna dentro del bucle de frame
+// (SPEC.md #4) en vez de darlo por supuesto. Siempre disponible, tambien en Ship: es una
+// suma de un u64, no instrumentacion cara.
+u64 audio_alloc_count();
 
 // Fundido cruzado de musica (criterio de M6: "sin clicks al hacer crossfade"): la pista
 // actual (si hay una) baja de volumen mientras `next` sube, ambas sonando a la vez
