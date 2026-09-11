@@ -19,6 +19,7 @@
 #include "game/mode.h"
 #include "game/save_load_mode.h"
 #include "game/vn_mode.h"
+#include "gfx/atlas.h"
 #include "gfx/gfx.h"
 #include "gfx/texture.h"
 #include "platform/clock.h"
@@ -59,7 +60,6 @@ constexpr u32 k_stress_sprite_count = 5000;
 constexpr u32 k_stress_grid_cols    = 100;
 constexpr u32 k_stress_grid_rows    = 50;  // 100*50 = 5000
 
-constexpr u32 k_atlas_bin_magic = 0x54414E56u;  // 'VNAT', ver tools/bake/main.cpp
 
 static f32 frame_history_p99_ms(const f32* history, u32 count) {
     f32 sorted[k_frame_history_len];
@@ -85,59 +85,11 @@ static f32 frame_history_p99_ms(const f32* history, u32 count) {
     return sorted[p99_index] * 1000.0f;
 }
 
-// Rectangulo de un sprite dentro del atlas (ADR-0025): mismo layout binario que
-// SpriteRect en tools/bake/main.cpp, sin compartir header porque uno es runtime y el
-// otro una herramienta offline.
-struct AtlasSpriteRect {
-    u16 x, y, w, h;
-};
-
-// Lee el manifiesto del atlas horneado por vne_bake (ADR-0025: empaquetador real sobre
-// assets_src/png/, o la rejilla procedural de respaldo si ese directorio esta vacio — en
-// ambos casos, mismo formato de sprites). No hay todavia un modulo assets/ formal: esto
-// es una lectura minima, solo para el stress test de M1. Devuelve nullptr si no se pudo
-// cargar; el llamante debe seguir funcionando igual (placeholder magenta).
-//
-// M11: resuelto contra el backend de assets activo (directorio suelto o .pak, ver
-// assets/pak.h), no una ruta de archivo literal. Requiere que mount_assets_backend() ya
-// se haya llamado.
-static AtlasSpriteRect* read_atlas_manifest(u32* out_count) {
-    *out_count = 0;
-
-    const u8* bytes = nullptr;
-    usize     size  = 0;
-    if (!pak_resolve_into_arena("atlas_00.bin", &g_arena_perm, &bytes, &size)) {
-        log_error("No se encontro atlas_00.bin; ejecuta vne_bake primero.");
-        return nullptr;
-    }
-    if (size < sizeof(u32) * 5) {
-        log_error("atlas_00.bin truncado");
-        return nullptr;
-    }
-    u32 header[5];
-    std::memcpy(header, bytes, sizeof(header));
-    if (header[0] != k_atlas_bin_magic || header[1] != 2u) {
-        log_error("atlas_00.bin invalido o de una version anterior");
-        return nullptr;
-    }
-    u32 count = header[4];
-    if (count == 0) {
-        return nullptr;
-    }
-    if (size < sizeof(header) + static_cast<usize>(count) * sizeof(AtlasSpriteRect)) {
-        log_error("atlas_00.bin truncado");
-        return nullptr;
-    }
-
-    *out_count = count;
-    // const_cast, no cambio de firma: nada escribe atlas_sprites en el llamante (solo
-    // lee por indice para el stress test de M1), y read_atlas_manifest ya devolvia
-    // AtlasSpriteRect* antes de M11 -- pak_resolve_into_arena entrega const u8* porque en
-    // backend empaquetado el puntero cae dentro del .pak residente, que nadie debe
-    // escribir nunca.
-    return const_cast<AtlasSpriteRect*>(
-        reinterpret_cast<const AtlasSpriteRect*>(bytes + sizeof(header)));
-}
+// El lector del manifiesto del atlas vivia aqui suelto desde M1 ("no hay todavia un modulo
+// assets/ formal: esto es una lectura minima, solo para el stress test"). M13 lo saca a
+// gfx/atlas.{h,cpp} porque ahora tiene consumidores de verdad —validacion de @show/@bg al
+// compilar y dibujado de fondos y actores— y necesita busqueda por nombre, no solo por
+// indice.
 
 // Ship monta game.pak (SPEC.md #11: "paquete .pak ... para builds de release"); Debug/Dev
 // montan el directorio suelto, que ademas es lo que hace posible el hot reload de M8/M11
@@ -249,8 +201,10 @@ int main(int argc, char** argv) {
     // (SPEC.md #7.4, criterio de M11). Los primeros frames dibujan magenta a proposito.
     TextureHandle atlas = assets_texture("atlas_00.qoi");
 
-    u32              atlas_sprite_count = 0;
-    AtlasSpriteRect* atlas_sprites      = read_atlas_manifest(&atlas_sprite_count);
+    // El registro de sprites del atlas (M13, gfx/atlas.h). Un fallo no es fatal: el juego
+    // sigue con el placeholder magenta, igual que antes.
+    atlas_load(&g_arena_perm);
+    u32 atlas_count = atlas_sprite_count();
 
     FontHandle demo_font = text_load_font("ttf/NotoSansJP.ttf", 28);
     if (!demo_font.valid()) {
@@ -456,9 +410,10 @@ int main(int argc, char** argv) {
         }
 
         for (u32 i = 0; i < k_stress_sprite_count; ++i) {
-            AtlasSpriteRect rect =
-                atlas_sprite_count > 0 ? atlas_sprites[i % atlas_sprite_count]
-                                       : AtlasSpriteRect{0, 0, 1, 1};
+            AtlasSprite rect{0, 0, 1, 1};
+            if (atlas_count > 0) {
+                atlas_sprite_at(i % atlas_count, &rect);
+            }
 
             Sprite s{};
             s.tex   = atlas;
@@ -504,7 +459,7 @@ int main(int argc, char** argv) {
         editor_diag.frame_times        = frame_times;
         editor_diag.frame_time_count   = frames_recorded;
         editor_diag.max_frame_allocs   = max_frame_allocs;
-        editor_diag.atlas_sprite_count = atlas_sprite_count;
+        editor_diag.atlas_sprite_count = atlas_count;
         editor_update(input, &demo_state, &demo_script, "assets_src/scripts/demo.vns",
                       editor_diag, window_w, window_h, dt);
 #endif

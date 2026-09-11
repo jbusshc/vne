@@ -25,6 +25,8 @@ add_executable(vne_tests
   test_audio.cpp
   test_skip_perf.cpp
   test_mode_stack.cpp
+  test_asset_validate.cpp
+  test_atlas.cpp
   test_heap_guard.cpp
   test_map_mode.cpp
   test_catalog.cpp

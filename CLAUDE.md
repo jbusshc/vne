@@ -5,8 +5,23 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno. M0–M12 están cerrados. El siguiente por defecto es **M13**
-(integridad de datos y herramientas offline).
+**Hito activo:** M13 — Integridad de datos y herramientas offline (en progreso). Plan por
+etapas: (0) registro de assets con nombres lógicos — `atlas_00.bin` sube de v2 a v3 con
+tabla de nombres, que es justo lo que M11 dejó anotado como "lo necesita M15" y resulta que
+lo necesita antes M13; (1) validación en compilación de actor/pose/fondo, que cierra
+ADR-0022 abierto desde M3; (2) detección de colisiones de hash al hornear (variables,
+flags, pistas, claves de catálogo: ADR-0029/0034/0047 aceptaron el riesgo sin detección
+ninguna); (3) escáner TMX robusto — rechazar compresión y varios tilesets nombrando la
+causa, validar `width`/`height` contra las celdas reales; (4) `vne_bake font` con
+subconjunto de glifos para sacar los 9.5 MB de `NotoSansJP.ttf` del repositorio; (5)
+pendientes menores: migración de `.vnm`, catálogo de mapas por `map_id`, `@flag` en el DSL,
+error útil ante indentación irregular; (6) **el consumidor del registro**: que `@bg` y
+`@show`/`@hide`/`@move` dibujen de verdad, con arte libre descargado como placeholder.
+
+La etapa 6 no está en los criterios de M13, y se hace igualmente por dos motivos: sin ella
+el registro sería una API sin llamante, que es exactamente lo que SPEC.md §1 dice que no se
+hace (mismo argumento por el que M11 no puso nombres al atlas); y es el hueco más grande
+del proyecto (ver "Pendientes observados"). Detalle completo en docs/DECISIONS.md al cerrar.
 
 **Último hito completado:** M12 — Presentación y jugabilidad completas.
 `CmdKind` gana `Move` y `Transition`, los dos últimos valores de SPEC.md §8.1 que

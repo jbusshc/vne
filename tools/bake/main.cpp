@@ -9,6 +9,7 @@
 
 #include "base/hash.h"
 #include "game/map_format.h"
+#include "script/asset_validate.h"
 #include "script/compiler.h"
 #include "script/map_bake.h"
 #include "script/parser.h"
@@ -32,6 +33,8 @@
 #include <qoi.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
@@ -100,31 +103,72 @@ static std::vector<std::string> list_png_files(const char* dir) {
 
 namespace {
 
-// Formato de assets_baked/atlas_00.bin (ADR-0025): version 2, un manifiesto generico de
-// rectangulos, el mismo tanto si el atlas vino de PNGs reales como del placeholder
-// procedural de respaldo. No es todavia el atlas.bin final de SPEC.md #11 (sin nombres,
-// sin sub-paginas), pero ya no es una rejilla de celdas iguales.
+// Formato de assets_baked/atlas_00.bin. v2 (ADR-0025) era un manifiesto generico de
+// rectangulos sin nombres; **v3 (M13) le añade la tabla de nombres logicos**, que es lo que
+// convierte al atlas en el registro de assets que SPEC.md #11 pide y que M11 dejo
+// explicitamente aplazado ("no hay ningun consumidor que pida un sprite por nombre
+// todavia"). Ahora si lo hay: el compilador del DSL, para validar @show/@bg (cierra
+// ADR-0022), y el renderizado de fondos y actores.
+//
+// No hay un archivo de registro aparte a proposito: la tabla de nombres del atlas ES el
+// registro. Un segundo formato que dijera lo mismo solo podria desincronizarse.
 struct SpriteRect {
     u16 x, y, w, h;
 };
 
+// Relleno explicito (ADR-0028): lo escribe y lo lee codigo distinto, asi que el layout no
+// puede depender de lo que el compilador decida rellenar.
+struct AtlasEntry {
+    u64 name_hash;    // fnv1a_u64 del nombre logico
+    u32 name_offset;  // offset dentro del pool de nombres
+    u16 x, y, w, h;
+    u8  _pad[4];
+};
+static_assert(sizeof(AtlasEntry) == 24);
+
 bool write_atlas_bin(const char* path, i32 atlas_w, i32 atlas_h,
-                      const std::vector<SpriteRect>& sprites) {
+                      const std::vector<SpriteRect>& sprites,
+                      const std::vector<std::string>& names) {
+    // Pool de nombres + entradas ORDENADAS POR HASH: el runtime las busca por biseccion,
+    // igual que hace pak.cpp con las entradas del .pak.
+    std::string             name_pool;
+    std::vector<AtlasEntry> entries;
+    entries.reserve(sprites.size());
+    for (usize i = 0; i < sprites.size(); ++i) {
+        const std::string& name = i < names.size() ? names[i] : std::string();
+        AtlasEntry         e{};
+        e.name_hash   = fnv1a_u64(name.c_str());
+        e.name_offset = static_cast<u32>(name_pool.size());
+        e.x           = sprites[i].x;
+        e.y           = sprites[i].y;
+        e.w           = sprites[i].w;
+        e.h           = sprites[i].h;
+        entries.push_back(e);
+        name_pool.append(name);
+        name_pool.push_back('\0');
+    }
+    std::sort(entries.begin(), entries.end(),
+              [](const AtlasEntry& a, const AtlasEntry& b) { return a.name_hash < b.name_hash; });
+
     std::FILE* bin = std::fopen(path, "wb");
     if (bin == nullptr) {
         return false;
     }
-    const u32 header[5] = {
+    const u32 header[6] = {
         0x54414E56u,  // 'VNAT'
-        2u,           // version
+        3u,           // version
         static_cast<u32>(atlas_w),
         static_cast<u32>(atlas_h),
-        static_cast<u32>(sprites.size()),
+        static_cast<u32>(entries.size()),
+        static_cast<u32>(name_pool.size()),
     };
     bool ok = std::fwrite(header, sizeof(header), 1, bin) == 1;
-    if (!sprites.empty()) {
-        ok = ok && std::fwrite(sprites.data(), sizeof(SpriteRect), sprites.size(), bin) ==
-                       sprites.size();
+    if (!entries.empty()) {
+        ok = ok && std::fwrite(entries.data(), sizeof(AtlasEntry), entries.size(), bin) ==
+                       entries.size();
+    }
+    if (!name_pool.empty()) {
+        ok = ok && std::fwrite(name_pool.data(), 1, name_pool.size(), bin) == name_pool.size();
     }
     std::fclose(bin);
     return ok;
@@ -157,6 +201,23 @@ int bake_script(const char* in_path, const char* out_path) {
     }
 
     ParseResult parsed = parse_script(source, in_path);
+
+    // Validacion de nombres de asset (M13, cierra ADR-0022): un actor, pose o fondo que no
+    // esta en el registro es error de compilacion con archivo y linea, igual que ya lo era
+    // una etiqueta desconocida.
+    //
+    // Si el atlas todavia no esta horneado no se valida, solo se avisa: compilar un guion en
+    // un arbol recien clonado tiene que seguir funcionando, y el build ya hornea el atlas
+    // antes que los guiones. Hacerlo fatal convertiria un orden de build en un error del
+    // autor del guion, que no tiene nada que ver.
+    AssetRegistry registry;
+    if (AssetRegistry::load_from_atlas_bin("assets_baked/atlas_00.bin", &registry)) {
+        validate_asset_names(parsed.instructions, in_path, registry, &parsed.errors);
+    } else {
+        log_warn("vne_bake: no se pudo leer 'assets_baked/atlas_00.bin'; los nombres de "
+                 "actor, pose y fondo NO se validan en esta compilacion");
+    }
+
     if (!parsed.ok()) {
         for (const ParseError& err : parsed.errors) {
             log_error("%s:%u: %s", err.file.c_str(), err.line, err.message.c_str());
@@ -360,9 +421,23 @@ constexpr i32 k_atlas_w = 1024;
 constexpr i32 k_atlas_h = 1024;
 constexpr i32 k_padding = 1;
 
+// "assets_src/png/actor_marta_neutral.png" -> "actor_marta_neutral". Sin directorio ni
+// extension: el nombre logico es lo que el guion escribe, no una ruta de archivo (misma
+// idea que los nombres logicos del backend de assets, M11).
+std::string logical_name_from_path(const std::string& path) {
+    usize slash = path.find_last_of("/\\");
+    usize start = (slash == std::string::npos) ? 0 : slash + 1;
+    usize dot   = path.find_last_of('.');
+    usize end   = (dot == std::string::npos || dot < start) ? path.size() : dot;
+    return path.substr(start, end - start);
+}
+
 struct DecodedImage {
     i32 w = 0, h = 0;
     u8* pixels = nullptr;  // RGBA8, propiedad de stb_image (stbi_image_free al final)
+    // Nombre logico del sprite (M13): el del archivo sin directorio ni extension, que es
+    // lo que el guion escribe y lo que valida el compilador del DSL.
+    std::string name;
 };
 
 // Shelf packer: ordena por alto descendente y coloca de izquierda a derecha, saltando de
@@ -405,7 +480,7 @@ int bake_atlas_from_png(const std::vector<std::string>& png_paths) {
             log_error("vne_bake: no se pudo decodificar '%s'", path.c_str());
             continue;
         }
-        images.push_back(DecodedImage{w, h, pixels});
+        images.push_back(DecodedImage{w, h, pixels, logical_name_from_path(path)});
     }
     if (images.empty()) {
         log_error("vne_bake: ningun PNG valido en assets_src/png/");
@@ -445,7 +520,12 @@ int bake_atlas_from_png(const std::vector<std::string>& png_paths) {
         log_error("vne_bake: fallo al escribir assets_baked/atlas_00.qoi");
         return 1;
     }
-    if (!write_atlas_bin("assets_baked/atlas_00.bin", k_atlas_w, k_atlas_h, placements)) {
+    std::vector<std::string> names;
+    names.reserve(images.size());
+    for (const DecodedImage& img : images) {
+        names.push_back(img.name);
+    }
+    if (!write_atlas_bin("assets_baked/atlas_00.bin", k_atlas_w, k_atlas_h, placements, names)) {
         log_error("vne_bake: fallo al escribir assets_baked/atlas_00.bin");
         return 1;
     }
@@ -475,7 +555,8 @@ int bake_atlas_procedural_fallback() {
     ensure_directory_exists("assets_baked");
 
     std::vector<u8> pixels(static_cast<usize>(k_h) * k_w * 4);
-    std::vector<SpriteRect> sprites;
+    std::vector<SpriteRect>  sprites;
+    std::vector<std::string> names;
     for (i32 row = 0; row < k_grid_rows; ++row) {
         for (i32 col = 0; col < k_grid_cols; ++col) {
             const u8* rgb = k_colors[row * k_grid_cols + col];
@@ -493,6 +574,15 @@ int bake_atlas_procedural_fallback() {
             sprites.push_back(SpriteRect{static_cast<u16>(col * k_cell_size),
                                           static_cast<u16>(row * k_cell_size), k_cell_size,
                                           k_cell_size});
+            // Nombre sintetico para el respaldo procedural (M13): sin el, un checkout sin
+            // los PNG produciria un atlas sin registro y @show/@bg fallarian a compilar por
+            // una razon que no es la del autor del guion. Se llaman "placeholder_NN" a
+            // proposito, para que se vea en cualquier mensaje de error que no son assets
+            // de verdad.
+            char placeholder_name[32];
+            std::snprintf(placeholder_name, sizeof(placeholder_name), "placeholder_%02zu",
+                          sprites.size() - 1);
+            names.push_back(placeholder_name);
         }
     }
 
@@ -505,7 +595,7 @@ int bake_atlas_procedural_fallback() {
         log_error("vne_bake: fallo al escribir assets_baked/atlas_00.qoi");
         return 1;
     }
-    if (!write_atlas_bin("assets_baked/atlas_00.bin", k_w, k_h, sprites)) {
+    if (!write_atlas_bin("assets_baked/atlas_00.bin", k_w, k_h, sprites, names)) {
         log_error("vne_bake: fallo al escribir assets_baked/atlas_00.bin");
         return 1;
     }
@@ -513,6 +603,81 @@ int bake_atlas_procedural_fallback() {
     log_info("vne_bake: assets_src/png/ vacio, atlas_00.qoi procedural (%dx%d, rejilla "
               "%dx%d) generado como respaldo",
               k_w, k_h, k_grid_cols, k_grid_rows);
+    return 0;
+}
+
+// --- Placeholders de actores y fondos (M13) --------------------------------------------
+//
+// Los guiones de demo usan actores y fondos que no existen como asset, asi que validar
+// nombres en compilacion (que es el criterio de M13) los rompia a todos. Se generan
+// placeholders **obvios** para ellos: rectangulos de color plano con borde y un aspa, el
+// aspecto clasico de "falta el asset" (CLAUDE.md regla 6 pide exactamente esto y dice que
+// hay que decirlo en voz alta: no son arte, no son contenido de juego).
+//
+// Se escriben como PNG normales en assets_src/png/, asi que sustituirlos por arte de verdad
+// es dejar caer un archivo con el mismo nombre; no hay nada especial en ellos.
+//
+// LIMITACION CONOCIDA: los fondos se generan a 256x144 y no a 1920x1080 porque van dentro
+// del atlas de 1024x1024, donde un fondo a resolucion completa no cabe. Al dibujarlos se
+// escalan a pantalla completa y se ven toscos, que para un placeholder es una ventaja. Un
+// fondo de verdad necesitara una textura suelta (SPEC.md #11), que no existe todavia.
+
+struct PlaceholderSpec {
+    const char* name;
+    i32         w, h;
+    u8          r, g, b;
+};
+
+void draw_placeholder(std::vector<u8>* px, i32 w, i32 h, u8 r, u8 g, u8 b) {
+    for (i32 y = 0; y < h; ++y) {
+        for (i32 x = 0; x < w; ++x) {
+            u8* p = &(*px)[(static_cast<usize>(y) * w + x) * 4];
+            // Borde de 4 px y aspa de esquina a esquina, en un tono mas claro: se lee como
+            // "esto falta" a cualquier tamaño y desde cualquier distancia.
+            bool border = x < 4 || y < 4 || x >= w - 4 || y >= h - 4;
+            bool cross   = (x * h / w == y) || ((w - 1 - x) * h / w == y);
+            u8   shade   = (border || cross) ? 255 : 0;
+            p[0] = static_cast<u8>(r + (255 - r) * shade / 255);
+            p[1] = static_cast<u8>(g + (255 - g) * shade / 255);
+            p[2] = static_cast<u8>(b + (255 - b) * shade / 255);
+            p[3] = 255;
+        }
+    }
+}
+
+int bake_placeholders() {
+    // Los que usan los tres guiones de demo, mas nada. La lista es explicita y no se deriva
+    // de los guiones a proposito: si se generara un placeholder por cada nombre que aparece
+    // en un .vns, la validacion de M13 no podria detectar ni un solo typo — se generaria el
+    // asset del nombre mal escrito y compilaria igual.
+    const PlaceholderSpec specs[] = {
+        {"bg_fondo_dia", 256, 144, 90, 130, 170},
+        {"bg_fondo_noche", 256, 144, 30, 35, 70},
+        {"actor_marta_neutral", 128, 256, 150, 80, 90},
+        {"actor_personaje_a_pose_neutral", 128, 256, 80, 130, 90},
+        {"actor_personaje_a_pose_feliz", 128, 256, 110, 160, 90},
+        {"actor_personaje_b_pose_neutral", 128, 256, 120, 100, 160},
+    };
+
+    ensure_directory_exists("assets_src");
+    ensure_directory_exists("assets_src/png");
+
+    for (const PlaceholderSpec& spec : specs) {
+        std::vector<u8> pixels(static_cast<usize>(spec.w) * spec.h * 4);
+        draw_placeholder(&pixels, spec.w, spec.h, spec.r, spec.g, spec.b);
+
+        char path[256];
+        std::snprintf(path, sizeof(path), "assets_src/png/%s.png", spec.name);
+        if (stbi_write_png(path, spec.w, spec.h, 4, pixels.data(), spec.w * 4) == 0) {
+            log_error("vne_bake: fallo al escribir '%s'", path);
+            return 1;
+        }
+    }
+
+    log_info("vne_bake: %zu placeholders de actor/fondo generados en assets_src/png/ "
+              "(rectangulos de color con aspa, NO son arte: sustituyelos dejando caer un "
+              "PNG con el mismo nombre)",
+              sizeof(specs) / sizeof(specs[0]));
     return 0;
 }
 
@@ -671,6 +836,9 @@ int bake_pack(const char* out_path, const char* baked_dir, const char* src_dir) 
 // Sin argumentos (o "atlas"): empaqueta assets_src/png/*.png si hay alguno (ADR-0025), o
 // genera el placeholder procedural de respaldo si no.
 int main(int argc, char** argv) {
+    if (argc >= 2 && std::strcmp(argv[1], "placeholders") == 0) {
+        return bake_placeholders();
+    }
     if (argc >= 2 && std::strcmp(argv[1], "pack") == 0) {
         if (argc < 5) {
             log_error("uso: vne_bake pack <salida.pak> <assets_baked_dir> <assets_src_dir>");

@@ -285,6 +285,7 @@ add_library(vne_base STATIC
   src/assets/pak.cpp
   src/assets/assets.cpp
   src/assets/hot_reload.cpp
+  src/gfx/atlas.cpp
   src/gfx/gfx.cpp
   src/gfx/texture.cpp
   src/text/font.cpp
@@ -371,6 +372,7 @@ add_library(vne_script_tools STATIC
   src/script/lexer.cpp
   src/script/parser.cpp
   src/script/compiler.cpp
+  src/script/asset_validate.cpp
   src/script/map_bake.cpp
 )
 target_include_directories(vne_script_tools PUBLIC src)
@@ -469,6 +471,7 @@ add_custom_command(
           ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo.vnc
   DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo.vns
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
   COMMENT "vne_bake: compilando demo.vns a demo.vnc"
 )
 add_custom_target(vne_bake_script DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo.vnc)
@@ -483,6 +486,7 @@ add_custom_command(
           ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_branching.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_branching.vnc
   DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_branching.vns
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
   COMMENT "vne_bake: compilando demo_branching.vns a demo_branching.vnc"
 )
 add_custom_target(vne_bake_script_branching
@@ -497,6 +501,7 @@ add_custom_command(
           ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_audio.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_audio.vnc
   DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_audio.vns
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
   COMMENT "vne_bake: compilando demo_audio.vns a demo_audio.vnc"
 )
 add_custom_target(vne_bake_script_audio
@@ -511,6 +516,7 @@ add_custom_command(
           ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_transitions.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_transitions.vnc
   DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_transitions.vns
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
   COMMENT "vne_bake: compilando demo_transitions.vns a demo_transitions.vnc"
 )
 add_custom_target(vne_bake_script_transitions
