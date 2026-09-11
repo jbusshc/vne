@@ -8,6 +8,7 @@
 #include "assets/pak.h"
 #include "audio/audio.h"
 #include "base/hash.h"
+#include "base/heap_guard.h"
 #include "base/log.h"
 #include "gfx/texture.h"
 #include "text/font.h"
@@ -270,9 +271,21 @@ void assets_process_completed_loads() {
         // (sokol_gfx no es thread-safe). Si la lectura fallo, el slot se queda con el
         // placeholder que ya tenia: nunca es fatal (SPEC.md #4).
         if (completion.data != nullptr) {
+            // Misma excepcion a la regla de cero heap que ADR-0035, generalizada de audio
+            // a cualquier asset: decodificar un asset recien cargado asigna dentro de
+            // codigo de terceros (alli miniaudio al abrir un OGG, aqui qoi al decodificar
+            // la imagen) y no hay forma de evitarlo sin reescribir la libreria. Es carga,
+            // no trabajo de frame: ocurre una vez por asset, no en cada frame.
+            //
+            // Antes de M12 esto no se veia — qoi asigna con malloc y el contador solo
+            // miraba operator new —, asi que la excepcion no estaba escrita aunque el
+            // comportamiento ya era este desde M11. Medido: 1 asignacion de qoi + 2 de
+            // SDL por textura integrada.
+            heap_guard_suspend();
             texture_finish_load_from_memory(completion.handle, completion.data,
                                              completion.size);
             pak_release(completion.data, completion.owned);
+            heap_guard_resume();
         }
     }
 }

@@ -19,6 +19,7 @@
 #include "assets/pak.h"
 #include "base/hash.h"
 #include "base/heap_guard.h"
+#include "base/heap_guard_hooks.h"
 #include "base/log.h"
 #include "base/pool.h"
 #include "platform/files.h"
@@ -80,25 +81,25 @@ struct CatalogEntry {
     char path[k_max_path] = {};
 };
 
-// Contador de asignaciones hechas por miniaudio (M12). Existe porque heap_guard NO puede
-// verlas: solo sobrecarga operator new/delete, y miniaudio es C puro y llama a malloc
-// directamente. Sin esto, "audio_play no asigna en el frame" seria una afirmacion sobre
-// codigo de terceros que no podemos comprobar — que es exactamente lo que la regla de
-// cero heap (SPEC.md #4) existe para no tener que hacer. Ver el ADR de polifonia de M12.
+// Contador de asignaciones hechas por miniaudio (M12), aparte del de heap_guard. El de
+// heap_guard se resetea en cada frame y sirve para la regla de cero heap (SPEC.md #4);
+// este es acumulativo desde audio_init() para poder medir una operacion concreta en un
+// test, sin depender de que haya un bucle de frame corriendo. Los hooks alimentan a los
+// dos. Ver ADR-0056/ADR-0057.
 u64 g_ma_alloc_count = 0;
 
 void* ma_malloc_counted(size_t size, void* /*user*/) {
     g_ma_alloc_count += 1;
-    return std::malloc(size);
+    return heap_guard_malloc(size, HeapSource::MiniAudio);
 }
 
 void* ma_realloc_counted(void* p, size_t size, void* /*user*/) {
     g_ma_alloc_count += 1;
-    return std::realloc(p, size);
+    return heap_guard_realloc(p, size, HeapSource::MiniAudio);
 }
 
 void ma_free_counted(void* p, void* /*user*/) {
-    std::free(p);
+    heap_guard_free(p);
 }
 
 ma_engine                     g_engine;

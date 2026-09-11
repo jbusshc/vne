@@ -7,8 +7,17 @@
 // frame (SPEC.md #4, skill vne-memory-model): se resetea al empezar el frame y se
 // comprueba justo antes de presentar.
 //
-// No intercepta malloc/free hechos por librerias de terceros (SDL, etc.) en C puro: solo
-// cubre el codigo C++ del motor, que es el que puede y debe pasar por las arenas.
+// Las librerias de terceros escritas en C (SDL3, sokol, FreeType, HarfBuzz, miniaudio,
+// Lua, qoi) NO pasan por operator new: llaman a malloc directamente, y ese camino es
+// invisible aqui. Durante mucho tiempo eso convirtio el contador en una verificacion
+// parcial que se presentaba como total. La solucion NO es interceptar malloc a lo bruto
+// (no hay forma portable de hacerlo, y la portabilidad manda: SPEC.md §2): cada libreria
+// que asigna se inicializa con SU propio hook de asignacion, que llama aqui. Ver
+// heap_guard_install_third_party_hooks() en base/heap_guard_hooks.h.
+//
+// Lo que sigue sin cubrirse, y conviene saberlo: cualquier libreria futura que no ofrezca
+// hook de asignacion, y HarfBuzz, cuyo hook es de tiempo de compilacion (por eso
+// text/layout.cpp reutiliza un hb_buffer_t persistente en vez de crear uno por llamada).
 //
 // thread_local a proposito (M11): el hilo de IO de assets tambien pasa por operator new/
 // delete (leer un archivo a un buffer, por ejemplo), y esas asignaciones no tienen nada
@@ -33,3 +42,17 @@ void heap_guard_check_frame();
 // script/lua_bindings.cpp, nunca un ambito mas amplio.
 void heap_guard_suspend();
 void heap_guard_resume();
+
+// De donde vino una asignacion. Saber solo "hubo 3 asignaciones" no sirve para arreglar
+// nada cuando el causante puede ser cualquiera de seis librerias; con el origen, el
+// mensaje del assert apunta directamente al sitio.
+enum class HeapSource : u8 { Engine, Sdl, Sokol, FreeType, MiniAudio, Qoi, Count };
+
+// Punto de entrada para los hooks de asignacion de las librerias de terceros. Cuenta una
+// asignacion igual que lo haria operator new, respetando suspend()/resume(). Existe en
+// todas las configuraciones (tambien en Ship, donde no hace nada) para que los hooks se
+// escriban una sola vez y no con #ifdef alrededor de cada uno.
+void heap_guard_count_alloc(HeapSource source);
+
+// Desglose del frame actual por origen, para el HUD de debug y para el mensaje del assert.
+u64 heap_guard_count_by_source(HeapSource source);

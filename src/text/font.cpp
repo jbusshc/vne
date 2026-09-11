@@ -2,7 +2,10 @@
 
 #include <hb-ft.h>
 
+#include <freetype/ftmodapi.h>  // FT_New_Library, FT_Add_Default_Modules
+
 #include "assets/pak.h"
+#include "base/heap_guard_hooks.h"
 #include "base/log.h"
 #include "base/pool.h"
 #include "text/font_internal.h"
@@ -14,14 +17,40 @@ constexpr u32 k_max_fonts = 32;
 Pool<FontData, k_max_fonts> g_pool;
 FT_Library                  g_ft_library = nullptr;
 
+// Asignador de FreeType que pasa por el contador de heap_guard. Las firmas las fija
+// FT_MemoryRec_ (freetype/ftsystem.h) y no coinciden con las de heap_guard_hooks.h:
+// FT_Realloc recibe el tamano viejo y el nuevo, y FT_Alloc devuelve void*.
+void* ft_alloc(FT_Memory /*memory*/, long size) {
+    return heap_guard_malloc(static_cast<usize>(size), HeapSource::FreeType);
+}
+
+void ft_free(FT_Memory /*memory*/, void* block) {
+    heap_guard_free(block);
+}
+
+void* ft_realloc(FT_Memory /*memory*/, long /*cur_size*/, long new_size, void* block) {
+    return heap_guard_realloc(block, static_cast<usize>(new_size), HeapSource::FreeType);
+}
+
+FT_MemoryRec_ g_ft_memory_rec = {nullptr, ft_alloc, ft_free, ft_realloc};
+FT_Memory     g_ft_memory     = &g_ft_memory_rec;
+
 }  // namespace
 
 FontHandle text_load_font(const char* logical_name, u32 px_size, bool bold) {
     if (g_ft_library == nullptr) {
-        if (FT_Init_FreeType(&g_ft_library) != 0) {
-            log_error("text_load_font: FT_Init_FreeType fallo");
+        // FT_New_Library en vez de FT_Init_FreeType para poder pasarle un asignador que
+        // cuente: FreeType asigna con malloc, que operator new no ve, y rasteriza glifos
+        // CJK bajo demanda DENTRO del bucle de frame (ver glyph_cache.cpp). Sin esto esas
+        // asignaciones eran invisibles para la regla de cero heap (SPEC.md #4).
+        //
+        // FT_New_Library no registra los modulos, a diferencia de FT_Init_FreeType: hay
+        // que llamar a FT_Add_Default_Modules a mano o no habra ningun driver de fuentes.
+        if (FT_New_Library(g_ft_memory, &g_ft_library) != 0) {
+            log_error("text_load_font: FT_New_Library fallo");
             return FontHandle{};
         }
+        FT_Add_Default_Modules(g_ft_library);
         pool_init(&g_pool);
     }
 

@@ -9,6 +9,12 @@
 #endif
 #define QOI_IMPLEMENTATION
 #define QOI_NO_STDIO
+// qoi asigna el buffer de salida con malloc, invisible para operator new. Codificar una
+// miniatura ocurre dentro del frame (al guardar partida), asi que tiene que contar para la
+// regla de cero heap (SPEC.md #4). El hook de qoi es de tiempo de compilacion: dos macros.
+#include "base/heap_guard_hooks.h"
+#define QOI_MALLOC(sz) heap_guard_malloc(static_cast<usize>(sz), HeapSource::Qoi)
+#define QOI_FREE(p)    heap_guard_free(p)
 #include <qoi.h>
 #if defined(_MSC_VER)
 #pragma warning(pop)

@@ -1886,22 +1886,91 @@ explícitamente). El resto de subsistemas de terceros siguen sin ella.
 
 ---
 
+## ADR-0058 — `heap_guard` ve por fin a las librerías de terceros, vía sus propios hooks
+
+**Fecha:** 2026-09-10
+**Hito:** M12
+**Estado:** aceptada
+
+**Contexto.** El criterio de cero asignaciones de heap por frame (SPEC.md §4) se venía dando
+por verificado desde M1. **No lo estaba.** `heap_guard` solo sobrecargaba `operator new`/
+`delete`, así que únicamente veía el código C++ del motor. Las siete librerías de terceros de
+este proyecto están escritas en C y llaman a `malloc` directamente: SDL3, sokol, FreeType,
+HarfBuzz, miniaudio, Lua y qoi. Todas invisibles.
+
+Se descubrió en M12 (ADR-0056) al comprobar que una medición previa —"`ma_sound_init_copy` no
+asigna"— era falsa: el clon hace 2 asignaciones y el contador marcaba 0. El skill
+`vne-memory-model` afirmaba que "se instrumenta `malloc`"; el código nunca lo hizo. El
+comentario de cabecera de `heap_guard.h`, en cambio, sí decía la verdad. Ganó el skill, que
+era el documento equivocado.
+
+**Decisión.** No se intercepta `malloc` globalmente: no hay forma portable de hacerlo (en
+MSVC haría falta `_CrtSetAllocHook` y el CRT de depuración, en glibc sobrescribir el símbolo),
+y la portabilidad condiciona cada línea que se escribe hoy (SPEC.md §2). En su lugar, **cada
+librería se inicializa con su propio hook de asignación**, que es API pública suya e idéntica
+en los tres sistemas operativos. `base/heap_guard_hooks.{h,cpp}` centraliza los asignadores
+que cuentan; no contiene ni un solo `#if` de plataforma.
+
+| Librería | Hook | Dónde se instala |
+|---|---|---|
+| SDL3 | `SDL_SetMemoryFunctions` (antes de `SDL_Init`) | `platform/window.cpp` |
+| sokol_gfx | `sg_desc.allocator` | `gfx/gfx.cpp` |
+| FreeType | `FT_MemoryRec_` + `FT_New_Library` | `text/font.cpp` |
+| miniaudio | `ma_engine_config.allocationCallbacks` | `audio/audio.cpp` |
+| qoi | macros `QOI_MALLOC`/`QOI_FREE` | `gfx/texture.cpp` |
+
+HarfBuzz queda fuera porque su hook es de tiempo de compilación. En vez de exceptuarlo, se
+**eliminó** su asignación por llamada: `text_layout` reutiliza un `hb_buffer_t` persistente en
+lugar de crear y destruir uno en cada composición.
+
+El contador además se desglosa por origen (`HeapSource`), porque "hubo 673 asignaciones" no
+sirve para arreglar nada cuando el causante puede ser cualquiera de seis librerías.
+
+**Lo que destapó, todo real y todo invisible hasta ahora:**
+
+1. **673 asignaciones de SDL cada 500 ms** en `hot_reload_update`, al recorrer los directorios
+   vigilados. Es herramienta de desarrollo (`#if VN_DEBUG`, inexistente en Ship), de la misma
+   familia que el subproceso `vne_bake` del editor: se marca con `heap_guard_suspend/resume`.
+2. **1 asignación de qoi + 2 de SDL** al integrar una textura recién cargada. Decisión
+   explícita del usuario: es la excepción de ADR-0035 ("primera carga de un sonido: miniaudio
+   decodifica al abrir el archivo") generalizada de audio a cualquier asset, no una cuarta
+   excepción nueva.
+3. **3 asignaciones de SDL, una sola vez**, dentro de `SDL_PollEvent`: inicialización diferida
+   de su subsistema de eventos. No se exceptúa nada — se vacía la cola una vez al crear la
+   ventana para que ocurra durante el arranque, donde asignar es legítimo.
+4. **~108 asignaciones de FreeType** en la primera composición de texto, repartidas entre
+   rasterizar glifos nuevos (`glyph_cache.cpp`) y traer métricas durante `hb_shape`
+   (`layout.cpp`). Misma extensión de ADR-0035: leer del TTF datos que aún no estaban en
+   caché es cargar un asset bajo demanda, y es el diseño que fija el skill `vne-rendering`
+   (el CJK se rasteriza bajo demanda porque hornearlo entero no es viable).
+
+**Alternativas descartadas.** Interceptar `malloc` globalmente: no es portable, que es
+motivo suficiente. `_CrtSetAllocHook`: solo MSVC y solo con el CRT de depuración.
+
+**Consecuencias.** `heap_allocs_frame_max=0` pasa a significar lo que siempre dijo que
+significaba. Tres sitios que violaban la regla desde hace hitos quedan marcados como las
+excepciones acotadas que son, y uno (SDL) eliminado del frame por completo. El precio es que
+las excepciones de `heap_guard_suspend` ahora también tapan asignaciones *del motor* dentro de
+esas ventanas, así que se han dejado lo más estrechas posible —`hb_shape` sola, no
+`text_layout` entera—. Y cualquier librería nueva seguirá siendo invisible hasta que se le
+instale su hook: al añadir una dependencia hay que acordarse de esta tabla.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
 desviarte.
 
-- **`heap_guard` no ve las asignaciones de las librerías de terceros, que son C.** Solo
-  sobrecarga `operator new`/`delete` (`src/base/heap_guard.cpp`); nunca instrumenta `malloc`,
-  pese a que el skill `vne-memory-model` afirma que "se instrumenta `malloc`". Consecuencia:
-  el contador que verifica la regla de cero asignaciones por frame (SPEC.md §4) es ciego a
-  miniaudio, FreeType, HarfBuzz, Lua y stb, que asignan todas con `malloc`. Descubierto en
-  M12 al comprobar que una medición previa de `ma_sound_init_copy` ("no asigna") era falsa:
-  el clon hace 2 asignaciones y `heap_guard` marcaba 0. M12 tapa el caso concreto de audio
-  con los callbacks de miniaudio (ADR-0057), pero el hueco general sigue abierto. Arreglarlo
-  significa interceptar `malloc` de verdad, lo que probablemente destape asignaciones dentro
-  del frame que hoy pasan inadvertidas; es un cambio al mecanismo central de verificación del
-  proyecto y **lo debe decidir el usuario**, no el agente de rebote en un hito.
+- ~~**`heap_guard` no ve las asignaciones de las librerías de terceros, que son C.**~~ —
+  resuelto en M12 (ADR-0058): cada librería se inicializa con su propio hook de asignación.
+  Destapó y dejó arreglados cuatro sitios que violaban la regla desde hacía hitos. Queda el
+  residuo de que **una dependencia nueva sigue siendo invisible hasta que se le instale su
+  hook**: al añadir una, hay que acordarse de la tabla de ADR-0058.
+- El desglose por origen (`HeapSource`) solo distingue librerías, no sitios de llamada. Para
+  localizar *dónde* dentro del frame asigna una librería hubo que instrumentar a mano fase
+  por fase en `main.cpp`. Si vuelve a pasar, valdría la pena un modo que registre el
+  contador en cada fase del bucle en vez de tener que añadir sondas temporales.
 - El tope de polifonía es de 16 efectos distintos con 8 voces cada uno (ADR-0056). Suficiente
   para los guiones de prueba actuales; si un juego real carga más efectos, `g_voices` se
   queda corto y los últimos suenan con menos copias simultáneas (avisado con `log_warn`). La

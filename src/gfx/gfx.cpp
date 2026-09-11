@@ -16,6 +16,7 @@
 
 #include "base/arena.h"
 #include "base/assert.h"
+#include "base/heap_guard_hooks.h"
 #include "base/log.h"
 #include "base/radix_sort.h"
 #include "gfx/gfx_backend.h"
@@ -24,6 +25,16 @@
 #include "gfx/texture_internal.h"
 
 namespace {
+
+// Firma exacta que pide sg_desc.allocator (sokol pasa un puntero de usuario que aqui no
+// se usa). Ver base/heap_guard_hooks.h.
+void* gfx_alloc_counted(size_t size, void* /*user*/) {
+    return heap_guard_malloc(size, HeapSource::Sokol);
+}
+
+void gfx_free_counted(void* p, void* /*user*/) {
+    heap_guard_free(p);
+}
 
 constexpr u32 k_max_sprites_per_frame = 8192;
 
@@ -192,6 +203,11 @@ bool gfx_init(PlatformWindow* window) {
 
     sg_desc desc{};
     desc.environment = gfx_backend_environment();
+    // sokol asigna con malloc, que operator new no ve: sin esto sus asignaciones serian
+    // invisibles para la regla de cero heap por frame (SPEC.md #4), y sokol es de las
+    // pocas librerias que se llaman en TODOS los frames.
+    desc.allocator.alloc_fn = gfx_alloc_counted;
+    desc.allocator.free_fn  = gfx_free_counted;
     sg_setup(&desc);
     if (!sg_isvalid()) {
         log_error("sg_setup fallo");

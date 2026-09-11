@@ -8,6 +8,7 @@
 
 #include "base/arena.h"
 #include "base/assert.h"
+#include "base/heap_guard.h"
 #include "base/log.h"
 #include "gfx/texture.h"
 #include "text/font_internal.h"
@@ -155,6 +156,22 @@ const GlyphInfo* glyph_cache_get(FontHandle font, u32 glyph_index) {
     if (font_data == nullptr) {
         return nullptr;
     }
+
+    // Misma excepcion a la regla de cero heap que ADR-0035, generalizada de audio a
+    // cualquier asset que se carga bajo demanda: rasterizar un glifo que todavia no esta
+    // en la cache es traer datos nuevos del TTF, y FreeType asigna al hacerlo. No es
+    // trabajo de frame: ocurre una vez por glifo, y a partir de ahi sale de la cache (el
+    // early-return de `entry->used` unas lineas mas arriba).
+    //
+    // Es deliberado que esto ocurra dentro del frame y no en una fase de carga: la
+    // rasterizacion CJK bajo demanda es el diseno que fija el skill vne-rendering, porque
+    // hornear miles de glifos por adelantado no es viable. Medido en M12, cuando los hooks
+    // de terceros hicieron visibles los malloc de FreeType: 108 asignaciones la primera
+    // vez que se compone una linea de texto, 0 en los frames siguientes.
+    heap_guard_suspend();
+    struct GuardResume {
+        ~GuardResume() { heap_guard_resume(); }
+    } guard_resume;
 
     // Negrita sintetica (M12): hay que separar cargar de rasterizar para poder engordar el
     // contorno en medio. Sin ella, FT_LOAD_RENDER hace las dos cosas de una vez.

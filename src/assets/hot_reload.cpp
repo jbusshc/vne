@@ -112,6 +112,20 @@ void hot_reload_update(f32 dt) {
     }
     g_timer = 0.0f;
 
+    // Excepcion a la regla de cero heap por frame (SPEC.md #4), de la misma familia que el
+    // subproceso `vne_bake` del editor (M8): herramienta de desarrollo que NO existe en
+    // Ship (todo este archivo esta bajo #if VN_DEBUG), no un camino de juego.
+    //
+    // Medido en M12, cuando los hooks de terceros hicieron visibles los malloc de las
+    // librerias C: recorrer los directorios vigilados cuesta 673 asignaciones dentro de
+    // SDL cada 500 ms. Antes no se veian y la regla parecia cumplirse; no se cumplia.
+    // Suspender el guard aqui es lo mismo que ya se hacia con el editor, y deja el
+    // contador diciendo la verdad sobre el camino que de verdad importa.
+    heap_guard_suspend();
+    struct GuardResume {
+        ~GuardResume() { heap_guard_resume(); }
+    } guard_resume;
+
     for (u32 i = 0; i < g_font_count; ++i) {
         WatchedFont& w     = g_fonts[i];
         i64          mtime = file_mtime_ns(w.source_path);

@@ -105,9 +105,24 @@ almacenes en un struct.
 Entre `arena_reset(&g_arena_frame)` y `gfx_present()` no debe ocurrir ni una sola llamada al
 asignador del sistema.
 
-Se verifica, no se asume. En builds `Debug` y `Dev` se sobrecargan `operator new`,
-`operator delete`, y se instrumenta `malloc`, para incrementar un contador global. Al final
-de cada frame:
+Se verifica, no se asume. En builds `Debug` y `Dev` se sobrecargan `operator new` y
+`operator delete` para incrementar un contador.
+
+**Eso solo cubre el código C++ del motor.** Las librerías de terceros de este proyecto están
+escritas en C y llaman a `malloc` directamente, así que `operator new` no las ve. Durante
+diez hitos ese hueco hizo que el criterio se diera por cumplido sin estarlo (este mismo
+archivo llegó a afirmar que "se instrumenta `malloc`", lo cual nunca fue cierto). Desde M12
+(ADR-0058) cada librería se inicializa con **su propio hook de asignación**, que alimenta el
+mismo contador: SDL3 con `SDL_SetMemoryFunctions`, sokol con `sg_desc.allocator`, FreeType
+con `FT_MemoryRec_`, miniaudio con `ma_engine_config.allocationCallbacks`, qoi con
+`QOI_MALLOC`. No se intercepta `malloc` a lo bruto porque no hay forma portable de hacerlo.
+
+**Si añades una dependencia, instálale su hook.** Sin eso vuelve a ser invisible y el
+contador vuelve a mentir. Si la librería no ofrece hook (le pasa a HarfBuzz, que solo lo
+tiene en tiempo de compilación), la salida no es exceptuarla: es no pedirle memoria — por eso
+`text_layout` reutiliza un `hb_buffer_t` persistente en vez de crear uno por llamada.
+
+Al final de cada frame:
 
 ```cpp
 VN_ASSERT(g_frame_alloc_count == 0, "asignacion de heap dentro del frame");
@@ -121,22 +136,32 @@ offline, pero **no** dentro del frame. Para arrays dinámicos por frame, usa
 `arena_alloc_n<T>(&g_arena_frame, count)` con un tamaño calculado por adelantado, o un
 array de capacidad fija con `VN_ASSERT` sobre el límite.
 
-### Las tres excepciones documentadas
+### Las excepciones documentadas
 
-La regla tiene tres excepciones acotadas, todas por código de terceros que asigna por su
-cuenta y que no se puede reescribir. Se marcan con `heap_guard_suspend()` / `heap_guard_resume()`
-alrededor de la llamada, nunca más ancho que eso:
+La regla tiene excepciones acotadas, todas por código de terceros que asigna por su cuenta y
+que no se puede reescribir. Se marcan con `heap_guard_suspend()` / `heap_guard_resume()`
+alrededor de la llamada, **nunca más ancho que eso** (por ejemplo: `hb_shape` sola, no
+`text_layout` entera):
 
 | Dónde | Por qué | ADR |
 |---|---|---|
 | Ejecución de un `LuaCall` | El intérprete de Lua asigna al evaluar. | ADR-0032 |
-| Primera carga de un sonido | miniaudio decodifica al abrir el archivo. | ADR-0035 |
+| Cargar un asset nuevo bajo demanda | El decodificador de terceros asigna al traer datos que aún no estaban en caché: miniaudio al abrir un sonido, qoi al decodificar una textura, FreeType al rasterizar un glifo o al dar métricas en `hb_shape`. | ADR-0035, ampliada en ADR-0058 |
 | Lanzar `vne_bake` desde el editor | `system()` asigna; solo en builds `Dev`. | M8 |
+| `hot_reload_update` | Recorrer los directorios vigilados cuesta 673 asignaciones de SDL cada 500 ms; solo en builds `Debug`/`Dev`. | ADR-0058 |
+
+Fíjate en que las dos últimas son herramienta de desarrollo: **no existen en Ship**. Las dos
+primeras sí corren en el juego distribuido, y por eso están acotadas al decodificador concreto.
 
 La primera la decidió el usuario tras pararse a preguntar, porque era un conflicto real entre
-dos reglas del proyecto. **No amplíes esta lista por tu cuenta**: si encuentras un cuarto caso,
-párate y pregunta, igual que se hizo con el primero. Suspender el guard para tapar una
+dos reglas del proyecto; la ampliación de la segunda también. **No amplíes esta lista por tu
+cuenta**: si encuentras un caso nuevo, párate y pregunta. Suspender el guard para tapar una
 asignación propia sería exactamente el abuso que la regla existe para impedir.
+
+Y ojo con el orden causal: estas excepciones no aparecieron todas de golpe en M12. Tres de
+ellas llevaban hitos ocurriendo; lo que cambió es que ADR-0058 hizo el contador capaz de
+verlas. Que algo no salga en el contador no prueba que no asigne — prueba que nadie ha
+mirado.
 
 ## Hilos
 

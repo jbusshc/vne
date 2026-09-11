@@ -4,6 +4,7 @@
 
 #include <cstring>
 
+#include "base/heap_guard.h"
 #include "base/log.h"
 #include "gfx/gfx.h"
 #include "gfx/texture.h"
@@ -359,7 +360,19 @@ u32 shape_run(FontData* font_data, std::string_view text, hb_buffer_t* hb_buf, A
     hb_buffer_add_utf8(hb_buf, text.data(), static_cast<int>(text.size()), 0,
                         static_cast<int>(text.size()));
     hb_buffer_guess_segment_properties(hb_buf);
+
+    // Misma excepcion a la regla de cero heap que ADR-0035 (ver glyph_cache.cpp y
+    // assets.cpp): hb_shape va a buscar al TTF, a traves de las callbacks de hb-ft, las
+    // metricas de cada glifo que todavia no habia mirado, y FreeType asigna al traerlas.
+    // Es lectura de un asset bajo demanda, no trabajo de frame: el coste lo paga la
+    // primera linea de dialogo que usa un glifo, no todos los frames.
+    //
+    // Acotado a la llamada a hb_shape y nada mas: el resto de text_layout es codigo del
+    // motor y tiene que seguir contando, que es justo lo que esta regla sirve para vigilar.
+    // Medido en M12: 59 asignaciones de FreeType en la primera composicion, 0 despues.
+    heap_guard_suspend();
     hb_shape(font_data->hb_font, hb_buf, nullptr, 0);
+    heap_guard_resume();
 
     unsigned int          glyph_count = 0;
     hb_glyph_info_t*      infos       = hb_buffer_get_glyph_infos(hb_buf, &glyph_count);
@@ -430,7 +443,19 @@ TextLayout text_layout(FontHandle font, std::string_view utf8, f32 max_width, Ar
         chunk_count = chunk_segment(segments[s], chunks, k_max_chunks, chunk_count);
     }
 
-    hb_buffer_t* hb_buf = hb_buffer_create();
+    // El hb_buffer_t es persistente, no uno nuevo por llamada. HarfBuzz asigna con malloc
+    // y su hook es de tiempo de compilacion (no hay forma de instalarle un asignador en
+    // runtime, a diferencia de SDL/sokol/FreeType/miniaudio), asi que la unica manera de
+    // que text_layout no asigne heap dentro del frame es no pedirle memoria: se crea una
+    // vez y se reutiliza. shape_run ya hace hb_buffer_reset() en cada uso, que es
+    // exactamente lo que hacia falta para que reutilizarlo sea seguro.
+    //
+    // Solo el hilo principal llama a text_layout (el hilo de IO de M11 solo lee bytes,
+    // ADR-0052), asi que un unico buffer compartido no necesita sincronizacion.
+    static hb_buffer_t* hb_buf = nullptr;
+    if (hb_buf == nullptr) {
+        hb_buf = hb_buffer_create();
+    }
     for (u32 c = 0; c < chunk_count; ++c) {
         // Los tramos en negrita se shapean con su propia cara: aunque la negrita sintetica
         // no cambia los avances, hacerlo asi deja el camino listo para una cara en negrita
@@ -443,7 +468,7 @@ TextLayout text_layout(FontHandle font, std::string_view utf8, f32 max_width, Ar
                                                     &chunks[c].ruby_glyphs, &chunks[c].ruby_width);
         }
     }
-    hb_buffer_destroy(hb_buf);
+    // Sin hb_buffer_destroy: vive lo que vive el proceso (ver arriba).
 
     // Pase B (kinsoku basico, SPEC.md #7.2): decide donde empieza cada linea sin emitir
     // quads todavia, para poder mirar un chunk hacia adelante y hacia atras.

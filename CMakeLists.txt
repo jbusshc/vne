@@ -274,6 +274,7 @@ add_library(vne_base STATIC
   src/base/log.cpp
   src/base/arena.cpp
   src/base/heap_guard.cpp
+  src/base/heap_guard_hooks.cpp
   src/base/math.cpp
   src/base/radix_sort.cpp
   src/base/crc32.cpp
