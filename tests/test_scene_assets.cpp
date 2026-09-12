@@ -78,8 +78,10 @@ TEST_CASE("escena: los ids son los MISMOS en dos guiones distintos (ADR-0067)") 
     REQUIRE(symbols_load(&g_arena_perm));
 
     CompiledScript a{}, b{};
-    REQUIRE(script_load("demo.vnc", &g_arena_scene, &a) == ScriptLoadResult::Ok);
-    REQUIRE(script_load("demo_transitions.vnc", &g_arena_scene, &b) == ScriptLoadResult::Ok);
+    // Los dos comparten el actor "marta"; demo.vns usa otros, asi que compararlo con
+    // cualquiera de estos no probaria nada.
+    REQUIRE(script_load("demo_transitions.vnc", &g_arena_scene, &a) == ScriptLoadResult::Ok);
+    REQUIRE(script_load("demo_audio.vnc", &g_arena_scene, &b) == ScriptLoadResult::Ok);
 
     // Se busca un actor que aparezca en los dos y se comprueba que trae el mismo id.
     u32 shared = 0;
@@ -99,7 +101,11 @@ TEST_CASE("escena: los ids son los MISMOS en dos guiones distintos (ADR-0067)") 
             }
         }
     }
+    // Si los guiones dejaran de compartir un actor, este test pasaria sin comprobar NADA.
+    // Paso la primera vez que lo escribi (0 compartidos), asi que la cuenta es parte del
+    // test y no solo un mensaje.
     MESSAGE("actores compartidos entre los dos guiones: " << shared);
+    CHECK(shared > 0);
 }
 
 TEST_CASE("escena: un id fuera de la tabla devuelve cadena vacia, no basura") {

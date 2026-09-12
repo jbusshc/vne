@@ -14,6 +14,7 @@
 #include "editor/editor.h"
 #endif
 #include "game/backlog_mode.h"
+#include "game/config.h"
 #include "game/map_catalog.h"
 #include "game/map_mode.h"
 #include "game/menu_mode.h"
@@ -168,6 +169,9 @@ int main(int argc, char** argv) {
     g_arena_scene = arena_create(k_scene_arena_size, "scene");
     g_arena_frame = arena_create(k_frame_arena_size, "frame");
     mount_assets_backend();
+    // Antes que nada lo que dependa de una preferencia: el idioma y los volumenes salen de
+    // aqui, no de valores por defecto (M14).
+    config_load();
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
     lua_init();
@@ -287,6 +291,18 @@ int main(int argc, char** argv) {
     menu_mode.bold_font_slot      = &vn_mode.bold_font;  // M12: {b} sigue al idioma
     menu_mode.latin_bold_font     = latin_bold_font;
     menu_mode.cjk_bold_font       = cjk_bold_font;
+
+    // Preferencias guardadas (M14): el idioma elegido en una sesion anterior se aplica ahora,
+    // que es el criterio de SPEC.md #12 ("cambiar el idioma, cerrar el proceso y volver a
+    // abrirlo mantiene el idioma elegido"). Va DESPUES de cablear las fuentes: apply_locale
+    // las reasigna segun el idioma.
+    menu_mode.catalog_arena = &g_arena_perm;  // el catalogo sobrevive a un cambio de escena
+    menu_mode.locale_index  = static_cast<i32>(g_config.locale_index);
+    menu_mode.apply_locale();
+    for (u32 i = 0; i < 4; ++i) {
+        demo_state.bus_volume[i] = g_config.bus_volume[i];
+        audio_set_bus_volume(static_cast<Bus>(i), g_config.bus_volume[i]);
+    }
 
     SaveLoadMode save_load_mode{};
     save_load_mode.state         = &demo_state;

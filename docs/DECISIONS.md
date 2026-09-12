@@ -2385,6 +2385,53 @@ Y añadir un guion al proyecto obliga a regenerar la tabla, cosa que CMake ya ha
 
 ---
 
+## ADR-0068 — `config.ini`: texto a propósito, tabla de idiomas, y el ID como identificador
+
+**Fecha:** 2026-09-12
+**Hito:** M14
+**Estado:** aceptada
+
+**Contexto.** SPEC.md §12 pide que idioma, pantalla completa y volúmenes persistan entre
+sesiones, y el skill `vne-serializable-state` ya decía dónde: *"¿es preferencia del jugador
+que no afecta a la partida? va en `config.ini`, aparte"*. No existía nada.
+
+**Decisión, y la tensión que hay que nombrar.** `config.ini` es **texto**, y eso choca de
+frente con "sin parsear texto en builds de release" (CLAUDE.md). Es una excepción deliberada y
+acotada: esa regla existe por los **datos de juego**, que se hornean precisamente para no
+parsearlos; un archivo de preferencias tiene que ser texto para que el jugador lo abra y lo
+edite, lo pide así SPEC.md §12, y son unos cientos de bytes leídos una vez al arrancar, nunca
+dentro del bucle de frame.
+
+El parser es **total**: nunca falla ni reporta un error de sintaxis. Lo que no entiende lo
+ignora y deja el valor por defecto. Es lo correcto para un archivo que se edita a mano — una
+coma de más no puede dejar a nadie sin poder jugar. Hay test con basura deliberada.
+
+**El idioma se guarda por ID (`"es"`, `"ja"`), no por índice.** Un índice deja de significar
+lo mismo en cuanto se reordena o se añade un idioma, y entonces una preferencia guardada pasa
+a apuntar a otro. Es el mismo razonamiento de ADR-0034 con las pistas de música y de ADR-0067
+con los símbolos: **un identificador que se persiste no puede ser una posición.**
+
+**Tabla de idiomas en vez del caso especial.** `menu_mode.cpp` tenía un `locale_index == 1`
+que asumía que *cualquier idioma que no fuera español era japonés* y por tanto necesitaba la
+fuente CJK. Con un tercer idioma latino habría cargado la fuente equivocada en silencio. Ahora
+`k_locales` dice de cada idioma su id, su nombre, su catálogo y si necesita CJK.
+
+**Una mina desactivada por el camino.** `MenuMode` usaba una sola `scratch_arena` para dos
+vidas distintas: los layouts de texto del menú (de usar y tirar) **y el catálogo cargado**,
+que es global y dura lo que dura el idioma. `catalog_load` guarda punteros dentro de la arena
+que se le pase, así que resetear la arena de escena —cuyo propósito documentado es justo ese
+al cambiar de capítulo— habría dejado el catálogo global apuntando a memoria liberada. No
+ocurría todavía porque nadie la resetea, pero en un test ocurrió: **SIGSEGV**, con 24 tests
+posteriores cayendo como "skipped". Ahora son dos arenas separadas y el catálogo vive en
+`g_arena_perm`.
+
+**Consecuencias.** Las preferencias se escriben **al cambiar**, no al salir: si el proceso
+muere de forma anormal, ya están a salvo. El criterio de M14 se verifica de punta a punta sin
+poder pulsar una tecla, simulando la pulsación sobre `MenuMode` y releyendo el archivo como
+haría un arranque nuevo.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni

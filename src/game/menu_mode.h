@@ -18,8 +18,8 @@ struct MenuMode : Mode {
     // Idioma (M10): dialogue_font_slot es la FontHandle que VnMode usa para dibujar
     // dialogo — este modo la reasigna al cambiar de idioma (latin_font para español,
     // cjk_font para japones, "CJK bajo demanda" ya existe desde M2 en el cacheo de
-    // glifos; aqui solo hace falta cargar la fuente correcta). locale_vnl_paths[i] es
-    // nullptr para el idioma base (sin catalogo, cae al texto del propio guion).
+    // glifos; aqui solo hace falta cargar la fuente correcta). Que idiomas hay, con que
+    // catalogo y que fuente, sale de la tabla de game/locales.h (M14).
     FontHandle* dialogue_font_slot = nullptr;
     FontHandle  latin_font;
     FontHandle  cjk_font;
@@ -28,10 +28,20 @@ struct MenuMode : Mode {
     FontHandle* bold_font_slot = nullptr;
     FontHandle  latin_bold_font;
     FontHandle  cjk_bold_font;
-    static constexpr u32 k_locale_count               = 2;
-    const char*           locale_names[k_locale_count] = {"Espanol", "Nihongo (placeholder)"};
-    const char*           locale_vnl_paths[k_locale_count] = {nullptr, "ja.vnl"};
-    i32                   locale_index                     = 0;
+    i32 locale_index = 0;  // indice en k_locales (game/locales.h)
+
+    // Arena donde vive el CATALOGO cargado. Distinta de scratch_arena a proposito (M14): el
+    // catalogo dura lo que dura el idioma elegido, mientras que los layouts de este menu son
+    // de usar y tirar. Usar una sola para las dos cosas hacia que resetear la arena de
+    // escena —cuyo proposito documentado es justo eso al cambiar de capitulo— dejara el
+    // catalogo global apuntando a memoria liberada. No pasaba hoy porque nadie la resetea
+    // todavia, pero era una mina: en un test lo fue, con SIGSEGV.
+    Arena* catalog_arena = nullptr;
+
+    // Aplica el idioma actual: carga su catalogo y pone las fuentes que le tocan. Publica
+    // porque main.cpp la llama al arrancar para aplicar lo que venia en config.ini, sin
+    // tener que simular una pulsacion de tecla.
+    void apply_locale();
 
     // Cache de layouts (skill vne-rendering): solo se reconstruye cuando cambia algo
     // visible (seleccion o un volumen), no en cada render().

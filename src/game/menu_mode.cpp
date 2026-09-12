@@ -6,6 +6,8 @@
 
 #include "audio/audio.h"
 #include "gfx/gfx.h"
+#include "game/config.h"
+#include "game/locales.h"
 #include "text/catalog.h"
 
 namespace {
@@ -40,6 +42,9 @@ void MenuMode::update(const InputState& input, f32 dt) {
             if (v > 1.0f) v = 1.0f;
             state->bus_volume[selected] = v;
             audio_set_bus_volume(static_cast<Bus>(selected), v);
+            // Igual que el idioma: se persiste al cambiar (M14).
+            g_config.bus_volume[selected] = v;
+            config_save();
         }
         return;
     }
@@ -52,23 +57,32 @@ void MenuMode::update(const InputState& input, f32 dt) {
         (locale_index + (input.key_pressed[SDL_SCANCODE_RIGHT] ? 1 : k_locale_count - 1)) %
         static_cast<i32>(k_locale_count);
 
-    const char* vnl_path = locale_vnl_paths[locale_index];
-    if (vnl_path == nullptr) {
-        catalog_clear();
+    apply_locale();
+
+    // Se persiste AL CAMBIAR, no al salir: si el juego se cierra de forma anormal, la
+    // preferencia ya esta guardada (M14, criterio de SPEC.md #12).
+    g_config.locale_index = static_cast<u32>(locale_index);
+    config_save();
+}
+
+void MenuMode::apply_locale() {
+    const LocaleDesc& locale = k_locales[locale_index];
+
+    if (locale.vnl == nullptr) {
+        catalog_clear();  // idioma base: el texto del guion tal cual
     } else {
-        catalog_load(vnl_path, scratch_arena);
+        catalog_load(locale.vnl, catalog_arena != nullptr ? catalog_arena : scratch_arena);
     }
-    // Fuente CJK bajo demanda (M10): la rasterizacion de glifos CJK ya existe desde M2
-    // (glyph_cache la cachea al vuelo); aqui solo hace falta que VnMode dibuje con la
-    // fuente correcta. locale_index==1 ("japones") es el unico que la necesita por
-    // ahora — si se anaden mas idiomas CJK, esto se convertiria en una tabla por idioma
-    // en vez de un unico caso especial.
+
+    // Que fuente usar sale de la TABLA (M14), no de comparar el indice con 1. El caso
+    // especial de M10 asumia que cualquier idioma que no fuera espanol era japones: con un
+    // tercer idioma latino habria cargado la fuente CJK en silencio.
     if (bold_font_slot != nullptr) {
         *bold_font_slot =
-            (locale_index == 1 && cjk_bold_font.valid()) ? cjk_bold_font : latin_bold_font;
+            (locale.needs_cjk && cjk_bold_font.valid()) ? cjk_bold_font : latin_bold_font;
     }
     if (dialogue_font_slot != nullptr) {
-        *dialogue_font_slot = (locale_index == 1 && cjk_font.valid()) ? cjk_font : latin_font;
+        *dialogue_font_slot = (locale.needs_cjk && cjk_font.valid()) ? cjk_font : latin_font;
     }
 }
 
@@ -103,7 +117,7 @@ void MenuMode::render() {
         }
         char locale_line[96];
         std::snprintf(locale_line, sizeof(locale_line), "%sIdioma: %s",
-                      selected == 4 ? "> " : "  ", locale_names[locale_index]);
+                      selected == 4 ? "> " : "  ", k_locales[locale_index].display);
         cached_lines[4]  = text_layout(font, locale_line, 800.0f, scratch_arena);
         cached_selected  = selected;
         cached_locale    = locale_index;

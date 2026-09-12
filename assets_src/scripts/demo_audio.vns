@@ -4,6 +4,11 @@
 
 :: inicio
 
+# M14: el mismo actor que usa demo_transitions.vns. Esta aqui a proposito, para que el test
+# de ids estables entre guiones (ADR-0067) tenga de verdad algo que comparar: sin un nombre
+# compartido pasaba sin comprobar nada.
+@show marta neutral slot 0
+
 @bgm tema_a fade 0.0
 narrador: Empieza la musica de prueba.
 

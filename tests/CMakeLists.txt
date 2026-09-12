@@ -33,6 +33,7 @@ add_executable(vne_tests
   test_heap_guard.cpp
   test_map_mode.cpp
   test_catalog.cpp
+  test_config.cpp
   test_map_bake.cpp
   test_pak.cpp
   test_assets.cpp
