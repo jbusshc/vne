@@ -31,6 +31,15 @@ struct CompiledScriptData {
     // formato .vnc de SPEC.md #9.3 (que solo documenta Cmd[]/string_pool/Label[]): ver
     // ADR de M5 en docs/DECISIONS.md.
     std::vector<ChoiceOption>  choice_options;
+    // Nombres de actor, pose y fondo, en orden de id (el id 1 es el elemento 0; el id 0
+    // esta reservado para "vacio", ver NameInterner). Cada u32 es un offset dentro de
+    // string_pool. Añadido en M13 (.vnc v5) porque el id por si solo no sirve para nada en
+    // runtime: es un indice secuencial de un interner local a este guion, no un hash, asi
+    // que sin esta tabla no hay forma de volver del id al nombre y de ahi al sprite del
+    // atlas. Sin ella no se puede dibujar ni un actor ni un fondo.
+    std::vector<u32>           actor_name_offsets;
+    std::vector<u32>           pose_name_offsets;
+    std::vector<u32>           bg_name_offsets;
     // Todo texto de dialogo (Say y opciones de Choice), para la extraccion de catalogo
     // de M10. No se escribe en el .vnc: tools/bake/main.cpp lo vuelca aparte.
     std::vector<CatalogEntry>  catalog_entries;

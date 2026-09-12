@@ -26,6 +26,17 @@ struct CompiledScript {
     // option_count en Cmd; la tabla en si es una extension del .vnc, ver ADR de M5).
     const ChoiceOption* choice_options       = nullptr;
     u32                 choice_option_count = 0;
+    // Tablas de nombres de actor, pose y fondo (.vnc v5, M13). Cada u32 es un offset
+    // dentro de string_pool; se indexan con id-1 porque el id 0 significa "vacio".
+    // Existen porque el id es un indice secuencial de un interner local al guion, no un
+    // hash: sin esta tabla no hay forma de saber que sprite corresponde a un actor_id, y
+    // por tanto no se puede dibujar.
+    const u32* actor_names      = nullptr;
+    u32        actor_name_count = 0;
+    const u32* pose_names       = nullptr;
+    u32        pose_name_count  = 0;
+    const u32* bg_names         = nullptr;
+    u32        bg_name_count    = 0;
 };
 
 inline const char* script_string(const CompiledScript& script, u32 text_id) {
@@ -33,6 +44,27 @@ inline const char* script_string(const CompiledScript& script, u32 text_id) {
         return "";
     }
     return script.string_pool + text_id;
+}
+
+// Nombre de un actor, pose o fondo a partir de su id (.vnc v5, M13). Devuelve "" si el id
+// es 0 ("vacio") o esta fuera de la tabla, nunca un puntero invalido: el llamante dibuja
+// menos, no revienta (SPEC.md #4).
+inline const char* script_name_from_table(const CompiledScript& script, const u32* table,
+                                           u32 count, u16 id) {
+    if (id == 0 || table == nullptr || id > count) {
+        return "";
+    }
+    return script_string(script, table[id - 1]);
+}
+
+inline const char* script_actor_name(const CompiledScript& s, u16 id) {
+    return script_name_from_table(s, s.actor_names, s.actor_name_count, id);
+}
+inline const char* script_pose_name(const CompiledScript& s, u16 id) {
+    return script_name_from_table(s, s.pose_names, s.pose_name_count, id);
+}
+inline const char* script_bg_name(const CompiledScript& s, u16 id) {
+    return script_name_from_table(s, s.bg_names, s.bg_name_count, id);
 }
 
 // Busqueda lineal por hash de nombre (SPEC.md #9.4, vn.jump): el numero de etiquetas de

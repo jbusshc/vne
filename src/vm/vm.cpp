@@ -45,8 +45,19 @@ void cmd_start(const Cmd& cmd, GameState* state, const CompiledScript& script) {
         case CmdKind::Show: {
             u8 slot = cmd.show.slot < k_max_actor_slots ? cmd.show.slot : 0;
             ActorSlot& actor = state->actors[slot];
+            bool       was_empty = actor.actor_id == 0;
             actor.actor_id   = cmd.show.actor_id;
             actor.pose_id    = cmd.show.pose_id;
+            // Posicion por defecto derivada del slot (M13): coordenadas normalizadas 0..1,
+            // los ocho slots repartidos a lo ancho y los pies cerca del borde inferior.
+            // Hasta M13 nadie ponia x/y en Show, asi que un actor recien mostrado se quedaba
+            // en (0,0); no se notaba porque nada lo dibujaba. Solo se aplica al ocupar un
+            // slot vacio, para que un @show que cambia de pose no deshaga un @move previo.
+            if (was_empty) {
+                actor.x     = (static_cast<f32>(slot) + 0.5f) / static_cast<f32>(k_max_actor_slots);
+                actor.y     = 0.75f;
+                actor.scale = 1.0f;
+            }
             actor.alpha      = cmd.show.fade > 0.0f ? actor.alpha : 1.0f;
             break;
         }

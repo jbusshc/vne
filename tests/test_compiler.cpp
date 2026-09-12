@@ -104,7 +104,7 @@ TEST_CASE("compiler + write_vnc: el formato binario coincide con SPEC.md #9.3") 
     u32 header[6];
     REQUIRE(std::fread(header, sizeof(header), 1, f) == 1);
     CHECK(header[0] == 0x53434E56u);  // 'VNCS'
-    CHECK(header[1] == 4u);  // M12: Cmd crece a 20 bytes (Move/Transition)
+    CHECK(header[1] == 5u);  // M13: tablas de nombres de actor/pose/fondo
     CHECK(header[2] == static_cast<u32>(compiled.data.cmds.size()));
     CHECK(header[3] == static_cast<u32>(compiled.data.string_pool.size()));
     CHECK(header[4] == 0u);  // sin etiquetas en este guion
@@ -115,8 +115,8 @@ TEST_CASE("compiler + write_vnc: el formato binario coincide con SPEC.md #9.3") 
 
 TEST_CASE("script_load: un .vnc v3 obsoleto se rechaza con un error claro, no se migra") {
     // Fabricado a mano, mismo patron que test_save_load.cpp con .vnsave v1: no queda
-    // ningun .vnc v3 real que generar ya con este binario (compiler.cpp escribe v4 desde
-    // M12). El criterio de M12 es justamente que esto se RECHACE (docs/SPEC.md #12): un
+    // ningun .vnc v3 real que generar ya con este binario (compiler.cpp escribe v5 desde
+    // M13). El criterio de M12 es justamente que esto se RECHACE (docs/SPEC.md #12): un
     // .vnc nunca se migra, se regenera siempre desde el .vns fuente, a diferencia de
     // .vnsave, que si es dato de usuario persistente.
     SDL_CreateDirectory("assets_baked");  // por si el build no dejo nada horneado antes

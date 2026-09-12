@@ -2,6 +2,8 @@
 
 #include <SDL3/SDL.h>
 
+#include "base/log.h"
+#include "gfx/atlas.h"
 #include "gfx/gfx.h"
 #include "text/catalog.h"
 #include "vm/script_load.h"
@@ -175,10 +177,113 @@ GfxTransitionMask to_gfx_mask(TransitionKind kind) {
 
 }  // namespace
 
+
+namespace {
+
+// Concatena en un buffer fijo sin asignar y sin pasar por snprintf. Trunca en silencio si
+// no cabe; los nombres logicos reales son de unos pocos bytes.
+void append_cstr(char* dst, usize cap, usize* len, const char* src) {
+    while (*src != '\0' && *len + 1 < cap) {
+        dst[(*len)++] = *src++;
+    }
+    dst[*len] = '\0';
+}
+
+// Dibuja el fondo y los actores que hay en GameState (M13).
+//
+// Hasta M13 esto no existia: @bg, @show, @hide y @move mantenian bg_id y actors[] pero
+// NADIE los convertia en sprites, asi que una escena de novela visual solo pintaba el
+// cuadro de dialogo. El registro de nombres del atlas (gfx/atlas.h) y las tablas de
+// nombres del .vnc v5 son lo que hacia falta para poder resolver un actor_id a un sprite.
+void draw_scene(const VnMode& vn) {
+    const GameState& state = *vn.state;
+
+    // Fondo, escalado a la resolucion virtual completa. Los placeholders son de 256x144,
+    // asi que se ven deliberadamente toscos al estirarlos (ver vne_bake placeholders).
+    const char* bg_name = script_bg_name(vn.script, state.bg_id);
+    if (bg_name[0] != '\0') {
+        char  name[96];
+        usize len = 0;
+        name[0]   = '\0';
+        append_cstr(name, sizeof(name), &len, "bg_");
+        append_cstr(name, sizeof(name), &len, bg_name);
+
+        AtlasSprite rect{};
+        if (atlas_find(name, &rect)) {
+            Sprite s{};
+            s.tex   = vn.atlas_tex;
+            s.src_x = static_cast<f32>(rect.x);
+            s.src_y = static_cast<f32>(rect.y);
+            s.src_w = static_cast<f32>(rect.w);
+            s.src_h = static_cast<f32>(rect.h);
+            s.dst_x = 0.0f;
+            s.dst_y = 0.0f;
+            s.dst_w = static_cast<f32>(k_virtual_width);
+            s.dst_h = static_cast<f32>(k_virtual_height);
+            s.layer = static_cast<u16>(GfxLayer::Background);
+            gfx_draw_sprite(s);
+        }
+    }
+
+    // Actores. x/y son normalizados 0..1 (SPEC.md #9.1) y marcan el punto de APOYO: el
+    // sprite se centra horizontalmente ahi y se apoya con su base en esa altura, que es lo
+    // que hace que cambiar de pose a otra de distinto alto no haga saltar al personaje.
+    for (u32 i = 0; i < k_max_actor_slots; ++i) {
+        const ActorSlot& a = state.actors[i];
+        if (a.actor_id == 0 || a.alpha <= 0.0f) {
+            continue;
+        }
+        char  name[96];
+        usize len = 0;
+        name[0]   = '\0';
+        append_cstr(name, sizeof(name), &len, "actor_");
+        append_cstr(name, sizeof(name), &len, script_actor_name(vn.script, a.actor_id));
+        append_cstr(name, sizeof(name), &len, "_");
+        append_cstr(name, sizeof(name), &len, script_pose_name(vn.script, a.pose_id));
+
+        AtlasSprite rect{};
+        if (!atlas_find(name, &rect)) {
+            continue;  // sin sprite no se dibuja nada; nunca es fatal (SPEC.md #4)
+        }
+
+        // Una partida guardada antes de que existiera `scale` (o un GameState puesto a cero
+        // a mano) trae scale = 0, que dibujaria un sprite de area nula e invisible sin una
+        // sola pista de por que.
+        f32 scale = a.scale > 0.0f ? a.scale : 1.0f;
+        f32 w     = static_cast<f32>(rect.w) * scale;
+        f32 h     = static_cast<f32>(rect.h) * scale;
+
+        Sprite s{};
+        s.tex   = vn.atlas_tex;
+        s.src_x = static_cast<f32>(rect.x);
+        s.src_y = static_cast<f32>(rect.y);
+        s.src_w = static_cast<f32>(rect.w);
+        s.src_h = static_cast<f32>(rect.h);
+        s.dst_x = a.x * static_cast<f32>(k_virtual_width) - w * 0.5f;
+        s.dst_y = a.y * static_cast<f32>(k_virtual_height) - h;
+        s.dst_w = w;
+        s.dst_h = h;
+        // El alpha va en el canal alto del color, premultiplicado como pide gfx.h: el
+        // fundido de @show/@hide ya lo mantiene vm.cpp en ActorSlot.alpha.
+        u32 alpha_byte = static_cast<u32>(a.alpha * 255.0f) & 0xFFu;
+        s.color        = (alpha_byte << 24) | (alpha_byte << 16) | (alpha_byte << 8) | alpha_byte;
+        s.layer        = static_cast<u16>(GfxLayer::Actors);
+        s.order        = static_cast<u16>(i);
+        gfx_draw_sprite(s);
+    }
+}
+
+}  // namespace
+
 void VnMode::render() {
     if (script.cmd_count == 0) {
         return;
     }
+
+    // Fondo y actores antes que nada: son las capas de abajo (Background/Actors) y el
+    // cuadro de dialogo va encima. Va antes del early-return de "no es un Say" porque la
+    // escena sigue ahi durante un @wait o una transicion, no solo mientras alguien habla.
+    draw_scene(*this);
 
     // Transicion en curso (M12): se lee del comando actual y de vm.cmd_timer, sin ningun
     // campo nuevo en GameState (ver cmd_start en vm.cpp). Va antes del early-return de

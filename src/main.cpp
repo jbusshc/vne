@@ -261,6 +261,7 @@ int main(int argc, char** argv) {
     vn_mode.script        = demo_script;
     vn_mode.font          = latin_dialogue_font;  // idioma base: espanol (M10)
     vn_mode.bold_font     = latin_bold_font;      // M12: {b}
+    vn_mode.atlas_tex     = atlas;                // M13: fondos y actores
     vn_mode.layout_arena = &g_arena_scene;
 
     BacklogMode backlog_mode{};
@@ -486,7 +487,7 @@ int main(int argc, char** argv) {
             log_info(
                 "fps~%.1f frame_p99=%.2fms draw_calls=%u sprites=%u heap_allocs_frame_max=%llu "
                 "text_layout_calls=%u vm_pc=%u/%u",
-                fps, p99_ms, g_gfx_draw_call_count, k_stress_sprite_count,
+                fps, p99_ms, g_gfx_draw_call_count, g_gfx_sprite_count_last_frame,
                 static_cast<unsigned long long>(max_frame_allocs), g_text_layout_call_count,
                 demo_state.vm.pc, demo_script.cmd_count);
         }

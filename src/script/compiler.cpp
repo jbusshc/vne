@@ -8,6 +8,16 @@
 
 namespace {
 
+// Los ids empiezan en 1, no en 0. **Esto era un bug real hasta M13**: ActorSlot documenta
+// `actor_id = 0` como "slot vacio" (SPEC.md #8.2), pero el interner daba 0 al PRIMER actor
+// de cada guion, asi que ese actor era indistinguible de un hueco vacio. Nunca se
+// manifesto porque nada dibujaba actores; al conectar el dibujado (M13) el primer actor de
+// cada guion simplemente no habria aparecido, y el sintoma —"este personaje no sale"— no
+// habria apuntado ni de lejos a la causa.
+//
+// Reservar el 0 cuesta un id de 65536 y elimina la ambiguedad de raiz. Vale para los cuatro
+// interners: bg_id 0 es "sin fondo" por el mismo razonamiento, y para hablante y pose es
+// gratis mantener la coherencia.
 class NameInterner {
 public:
     u16 intern(const std::string& name) {
@@ -15,13 +25,19 @@ public:
         if (it != ids_.end()) {
             return it->second;
         }
-        u16 id      = static_cast<u16>(ids_.size());
+        u16 id     = static_cast<u16>(ids_.size() + 1);
         ids_[name] = id;
+        names_.push_back(name);
         return id;
     }
 
+    // Nombres en orden de id (el id 1 es names()[0]). Los necesita el .vnc v5 para que el
+    // runtime pueda volver del id al nombre y de ahi al sprite del atlas.
+    const std::vector<std::string>& names() const { return names_; }
+
 private:
     std::unordered_map<std::string, u16> ids_;
+    std::vector<std::string>              names_;
 };
 
 // Nombres de variable (SPEC.md #9.4: "vn.get_var(name)") se resuelven por hash modulo la
@@ -234,6 +250,22 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
         data.cmds.push_back(cmd);
     }
 
+    // Tablas de nombres del .vnc v5 (M13): el id de actor/pose/fondo es un indice
+    // secuencial de un interner LOCAL a este guion, no un hash, asi que sin esto el runtime
+    // no tiene forma de volver del id al nombre y de ahi al sprite del atlas. Sin estas tres
+    // tablas no se puede dibujar ni un actor ni un fondo.
+    //
+    // Los ids empiezan en 1 (ver NameInterner), asi que la tabla se indexa con id-1.
+    auto push_names = [&](const std::vector<std::string>& names, std::vector<u32>* out) {
+        out->reserve(names.size());
+        for (const std::string& name : names) {
+            out->push_back(push_string(&data, name));
+        }
+    };
+    push_names(actors.names(), &data.actor_name_offsets);
+    push_names(poses.names(), &data.pose_name_offsets);
+    push_names(bgs.names(), &data.bg_name_offsets);
+
     if (data.cmds.empty() || data.cmds.back().kind != CmdKind::End) {
         Cmd end_cmd{};
         end_cmd.kind = CmdKind::End;
@@ -250,11 +282,14 @@ bool write_vnc(const std::string& path, const CompiledScriptData& data) {
     }
 
     const u32 magic              = 0x53434E56u;  // 'VNCS' (V,N,C,S en memoria little-endian)
-    const u32 version            = 4;  // M12: Cmd crece a 20 bytes (Move/Transition)
+    const u32 version            = 5;  // M13: tablas de nombres de actor/pose/fondo
     const u32 cmd_count          = static_cast<u32>(data.cmds.size());
     const u32 string_pool_size   = static_cast<u32>(data.string_pool.size());
     const u32 label_count        = static_cast<u32>(data.labels.size());
     const u32 choice_option_count = static_cast<u32>(data.choice_options.size());
+    const u32 actor_name_count   = static_cast<u32>(data.actor_name_offsets.size());
+    const u32 pose_name_count    = static_cast<u32>(data.pose_name_offsets.size());
+    const u32 bg_name_count      = static_cast<u32>(data.bg_name_offsets.size());
 
     bool ok = true;
     ok &= std::fwrite(&magic, sizeof(magic), 1, file) == 1;
@@ -263,6 +298,9 @@ bool write_vnc(const std::string& path, const CompiledScriptData& data) {
     ok &= std::fwrite(&string_pool_size, sizeof(string_pool_size), 1, file) == 1;
     ok &= std::fwrite(&label_count, sizeof(label_count), 1, file) == 1;
     ok &= std::fwrite(&choice_option_count, sizeof(choice_option_count), 1, file) == 1;
+    ok &= std::fwrite(&actor_name_count, sizeof(actor_name_count), 1, file) == 1;
+    ok &= std::fwrite(&pose_name_count, sizeof(pose_name_count), 1, file) == 1;
+    ok &= std::fwrite(&bg_name_count, sizeof(bg_name_count), 1, file) == 1;
     if (cmd_count > 0) {
         ok &= std::fwrite(data.cmds.data(), sizeof(Cmd), cmd_count, file) == cmd_count;
     }
@@ -276,6 +314,20 @@ bool write_vnc(const std::string& path, const CompiledScriptData& data) {
     if (choice_option_count > 0) {
         ok &= std::fwrite(data.choice_options.data(), sizeof(ChoiceOption), choice_option_count,
                            file) == choice_option_count;
+    }
+    // Las tres tablas van al final, en este orden, cada una como u32[count] de offsets
+    // dentro de string_pool (M13, .vnc v5).
+    if (actor_name_count > 0) {
+        ok &= std::fwrite(data.actor_name_offsets.data(), sizeof(u32), actor_name_count, file) ==
+              actor_name_count;
+    }
+    if (pose_name_count > 0) {
+        ok &= std::fwrite(data.pose_name_offsets.data(), sizeof(u32), pose_name_count, file) ==
+              pose_name_count;
+    }
+    if (bg_name_count > 0) {
+        ok &= std::fwrite(data.bg_name_offsets.data(), sizeof(u32), bg_name_count, file) ==
+              bg_name_count;
     }
 
     std::fclose(file);

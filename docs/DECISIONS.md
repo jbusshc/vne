@@ -2021,6 +2021,94 @@ que es olvidarlo: **al añadir una dependencia, instálale su hook**.
 
 ---
 
+## ADR-0061 — El atlas es el registro de assets, y la convención de nombres de sprite
+
+**Fecha:** 2026-09-11
+**Hito:** M13
+**Estado:** aceptada
+
+**Contexto.** M13 pide un "registro de assets real que permita validar actor, pose y fondo en
+tiempo de compilación", cerrando ADR-0022. Hacía falta decidir dónde vive ese registro y cómo
+se nombra un sprite.
+
+**Decisión.** No hay archivo de registro aparte: **la tabla de nombres del atlas es el
+registro**. `atlas_00.bin` sube de v2 a v3 y gana un pool de nombres más entradas ordenadas
+por hash. Un segundo formato que dijera lo mismo solo podría desincronizarse del atlas real.
+
+La convención es `actor_<actor>_<pose>` y `bg_<nombre>`, derivada del nombre del archivo PNG
+sin directorio ni extensión. El prefijo no es decorativo: el atlas tiene un espacio de nombres
+plano, así que sin él un fondo llamado "marta" chocaría con un actor llamado "marta".
+
+`atlas_find` compara el nombre completo tras localizar el hash por bisección, en vez de fiarse
+del hash: una colisión no puede devolver el sprite equivocado en silencio, que es justo la
+clase de fallo que M13 persigue en otros sitios.
+
+La validación vive en `script/asset_validate.{h,cpp}`, fuera del parser: `parse_script` no
+tiene por qué saber que existe un atlas horneado, y separarlo permite testear la regla con un
+registro fabricado a mano en vez de depender del contenido de `assets_src/png/`.
+
+**Consecuencias.** M11 había dejado el atlas sin nombres razonando que no había consumidor y
+que una API sin llamante es lo que SPEC.md §1 prohíbe; ese razonamiento era correcto entonces
+y caducó aquí. Los guiones de demo pasan a depender del atlas en CMake, dependencia que antes
+no existía y ahora es real: sin ella `vne_bake script` podía correr antes de que el atlas
+existiera y no validar nada.
+
+Como los guiones usaban actores y fondos inexistentes, validar los rompía a todos: `vne_bake
+placeholders` genera los seis que faltaban como rectángulos de color con borde y aspa
+(CLAUDE.md regla 6), usando `stb_image_write` que ya venía en la dependencia `stb`. La lista
+es **explícita y no se deriva de los guiones**: generar un placeholder por cada nombre que
+aparece en un `.vns` haría que la validación no pudiera detectar ni un solo typo.
+
+Limitación: los fondos se generan a 256x144 porque van dentro del atlas de 1024x1024, donde
+uno a resolución completa no cabe. Se estiran a pantalla completa y se ven toscos, lo cual
+para un placeholder es una ventaja. Un fondo de verdad necesitará textura suelta (SPEC.md §11).
+
+---
+
+## ADR-0062 — `.vnc` v5: tablas de nombres, y los ids de interner empiezan en 1
+
+**Fecha:** 2026-09-11
+**Hito:** M13
+**Estado:** aceptada
+
+**Contexto.** Al ir a dibujar fondos y actores apareció que **no se podía**: `actor_id`,
+`pose_id` y `bg_id` son índices secuenciales de un interner local a cada compilación, no
+hashes, así que en runtime no había ninguna forma de volver del id al nombre y de ahí al
+sprite. El registro de ADR-0061 no servía de nada sin ese eslabón.
+
+**Decisión.** El `.vnc` sube a v5 con tres tablas de `u32` al final, offsets dentro del
+`string_pool`, indexadas por `id - 1`. `script_actor_name`/`script_pose_name`/`script_bg_name`
+resuelven el nombre, y `VnMode` compone `actor_<a>_<p>` en un buffer de pila (sin `snprintf`
+ni asignación) para buscarlo en el atlas.
+
+Se descartó la alternativa de convertir los ids en hashes estables al estilo de ADR-0034
+(`bgm_track_id`). Habría hecho que `actors[]` sobreviviera a un guardado entre guiones
+distintos, que hoy no es cierto, pero obliga a subir `.vnsave` a v3 con una migración que no
+puede migrar nada (los ids viejos no son mapeables) y eso es trabajo de M14. Queda anotado
+como pendiente.
+
+**Y un bug real que esto destapó: el interner empezaba en 0.** `ActorSlot` documenta
+`actor_id = 0` como "slot vacío" (SPEC.md §8.2), pero el primer actor de cada guion recibía
+justamente el id 0, así que era indistinguible de un hueco vacío. Nunca se manifestó porque
+nada dibujaba actores; al conectar el dibujado, ese personaje simplemente no habría aparecido,
+y el síntoma —"este personaje no sale"— no habría apuntado ni de lejos a la causa. Los ids
+empiezan ahora en 1 en los cuatro interners; cuesta un id de 65536 y elimina la ambigüedad.
+
+**Otro que apareció por el mismo camino:** `Show` no ponía `x`/`y`, así que un actor recién
+mostrado se quedaba en (0,0). Ahora, **solo al ocupar un slot vacío** (para no deshacer un
+`@move` previo), toma una posición por defecto derivada del slot: los ocho repartidos a lo
+ancho, `y = 0.75` y el sprite apoyado por su base en esa altura, para que cambiar de pose a
+otra de distinto alto no haga saltar al personaje.
+
+**Consecuencias.** `@bg`, `@show`, `@hide` y `@move` por fin se ven. Añadir fondo y actores
+**no sube `draw_calls`** (medido: sigue en 4): salen del mismo atlas y entran en el mismo
+lote, que es exactamente para lo que existe el atlas. El HUD además deja de mentir: la
+etiqueta `sprites` imprimía la constante del banco de pruebas, así que decía 5000 pasara lo
+que pasara; ahora es un contador real (`g_gfx_sprite_count_last_frame`), y con la escena
+dibujándose marca 5051-5086.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -2031,7 +2119,13 @@ desviarte.
   Destapó y dejó arreglados cuatro sitios que violaban la regla desde hacía hitos. Queda el
   residuo de que **una dependencia nueva sigue siendo invisible hasta que se le instale su
   hook**: al añadir una, hay que acordarse de la tabla de ADR-0058.
-- **Nada dibuja fondos ni actores.** Detectado en la revisión de cierre de M12, y es el hueco
+- ~~**Nada dibuja fondos ni actores.**~~ — resuelto en M13 (ADR-0061 y ADR-0062): el atlas
+  gana tabla de nombres, el `.vnc` v5 permite volver del id al nombre, y `VnMode::render`
+  dibuja fondo y actores. Queda vivo un resto: `actors[]` sigue sin sobrevivir a un guardado
+  **entre guiones distintos**, porque los ids son de un interner local a cada compilacion.
+  Convertirlos en hashes estables al estilo de ADR-0034 obliga a subir `.vnsave` a v3, que es
+  trabajo de M14. Texto original:
+  - **Nada dibuja fondos ni actores.** Detectado en la revisión de cierre de M12, y es el hueco
   más grande del proyecto ahora mismo. `@bg`, `@show`, `@hide` y `@move` mantienen estado
   correctamente en `GameState` (`bg_id`, `actors[]`), ese estado se serializa, sobrevive a un
   guardado y se puede inspeccionar en el editor — pero **ningún código lo convierte en

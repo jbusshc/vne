@@ -1,6 +1,7 @@
 #pragma once
 #include "base/arena.h"
 #include "game/mode.h"
+#include "gfx/texture.h"
 #include "text/layout.h"
 #include "vm/state.h"
 #include "vm/vm.h"
@@ -14,6 +15,7 @@ struct VnMode : Mode {
     GameState*      state  = nullptr;
     CompiledScript  script;
     FontHandle      font;
+    TextureHandle   atlas_tex;  // atlas de sprites (M13): fondos y actores salen de aqui
     FontHandle      bold_font;  // variante sintetica para {b} (M12); invalida = {b} sin efecto
     Arena*          layout_arena = nullptr;  // g_arena_scene: el layout sobrevive entre frames
 

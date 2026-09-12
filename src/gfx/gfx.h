@@ -70,6 +70,11 @@ Recti gfx_letterbox_rect(i32 window_w, i32 window_h, i32 virtual_w, i32 virtual_
 // gfx_begin_frame (el blit de letterbox de gfx_present tambien cuenta).
 extern u32 g_gfx_draw_call_count;
 
+// Sprites encolados en el frame que se acaba de dibujar. Hasta M13 el HUD imprimia en su
+// lugar la constante del banco de pruebas, asi que la etiqueta "sprites" decia siempre 5000
+// pasara lo que pasara: un contador falso es peor que ninguno.
+extern u32 g_gfx_sprite_count_last_frame;
+
 // Punto de enganche opcional para el editor (SPEC.md #6.5: "editor_render() -> solo si
 // VN_EDITOR", entre el blit de letterbox y el intercambio de buffer). gfx.cpp (vne_base,
 // siempre compilado) no puede llamar a editor_render() directamente: src/editor/ ni

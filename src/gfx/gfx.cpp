@@ -53,6 +53,7 @@ PlatformWindow* g_window = nullptr;
 }  // namespace
 
 u32 g_gfx_draw_call_count = 0;
+u32 g_gfx_sprite_count_last_frame = 0;
 void (*g_editor_render_hook)() = nullptr;
 
 namespace {
@@ -280,6 +281,7 @@ void gfx_shutdown() {
 
 void gfx_begin_frame() {
     g_sprite_queue     = arena_alloc_n<Sprite>(&g_arena_frame, k_max_sprites_per_frame);
+    g_gfx_sprite_count_last_frame = g_sprite_count;  // lo encolado en el frame anterior
     g_sprite_count     = 0;
     g_gfx_draw_call_count = 0;
     g_transition_active   = false;
