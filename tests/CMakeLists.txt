@@ -28,6 +28,7 @@ add_executable(vne_tests
   test_asset_validate.cpp
   test_scene_assets.cpp
   test_atlas.cpp
+  test_hash_collisions.cpp
   test_heap_guard.cpp
   test_map_mode.cpp
   test_catalog.cpp

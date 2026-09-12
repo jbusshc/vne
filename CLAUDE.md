@@ -18,9 +18,9 @@ pendientes menores: migración de `.vnm`, catálogo de mapas por `map_id`, `@fla
 error útil ante indentación irregular; (6) **el consumidor del registro**: que `@bg` y
 `@show`/`@hide`/`@move` dibujen de verdad, con placeholders generados.
 
-**Hechas: 0, 1 y 6** (la 6 se adelantó al final de la 1 para validar el registro con un
-consumidor real en vez de acumular etapas encima de una API sin llamante). Pendientes: 2, 3,
-4 y 5.
+**Hechas: 0, 1, 2 y 6** (la 6 se adelantó al final de la 1 para validar el registro con un
+consumidor real en vez de acumular etapas encima de una API sin llamante). Pendientes: 3, 4
+y 5.
 
 La etapa 6 no está en los criterios de M13, y se hace igualmente por dos motivos: sin ella
 el registro sería una API sin llamante, que es exactamente lo que SPEC.md §1 dice que no se

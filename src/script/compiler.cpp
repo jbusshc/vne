@@ -1,9 +1,11 @@
 #include "script/compiler.h"
 
 #include <cstdio>
+#include <string>
 #include <unordered_map>
 
 #include "base/hash.h"
+#include "script/hash_collisions.h"
 #include "vm/state.h"
 
 namespace {
@@ -102,6 +104,22 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
         return it != label_pcs.end() ? it->second : 0;
     };
 
+    // Deteccion de colisiones de hash (M13). ADR-0029 acepto que dos nombres de variable
+    // distintos puedan caer en el mismo hueco de `vars` sin detectarlo; el sintoma seria una
+    // variable pisando a otra, imposible de rastrear desde el guion. Detectarlo cuesta un
+    // diccionario en una herramienta offline.
+    HashCollisionCheck  var_names;
+    auto check_var = [&](const std::string& name, u16 id, u32 line) {
+        std::string previous;
+        if (!var_names.add(name, id, &previous)) {
+            result.errors.push_back(CompileError{
+                file_name, line,
+                "colision de hash entre las variables '" + name + "' y '" + previous +
+                    "': las dos caen en el hueco " + std::to_string(id) +
+                    " de GameState.vars y se pisarian. Renombra una de las dos."});
+        }
+    };
+
     NameInterner        actors;
     NameInterner        poses;
     NameInterner        bgs;
@@ -158,16 +176,19 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
             case InstrKind::SetVar:
                 cmd.kind             = CmdKind::SetVar;
                 cmd.set_var.var_id   = var_id_of(instr.var);
+                check_var(instr.var, cmd.set_var.var_id, instr.line);
                 cmd.set_var.value    = instr.value;
                 break;
             case InstrKind::AddVar:
                 cmd.kind             = CmdKind::AddVar;
                 cmd.add_var.var_id   = var_id_of(instr.var);
+                check_var(instr.var, cmd.add_var.var_id, instr.line);
                 cmd.add_var.value    = instr.value;
                 break;
             case InstrKind::JumpIf: {
                 cmd.kind                  = CmdKind::JumpIf;
                 cmd.jump_if.var_id        = var_id_of(instr.condition.var);
+                check_var(instr.condition.var, cmd.jump_if.var_id, instr.line);
                 cmd.jump_if.op            = instr.invert_condition
                                                  ? negate_cmp_op(instr.condition.op)
                                                  : instr.condition.op;

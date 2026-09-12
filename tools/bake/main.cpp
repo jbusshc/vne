@@ -10,6 +10,7 @@
 #include "base/hash.h"
 #include "game/map_format.h"
 #include "script/asset_validate.h"
+#include "script/hash_collisions.h"
 #include "script/compiler.h"
 #include "script/map_bake.h"
 #include "script/parser.h"
@@ -265,6 +266,7 @@ int bake_catalog_extract(const char* out_path, int script_count, char** script_p
         return 1;
     }
 
+    HashCollisionCheck catalog_keys;
     usize total_entries = 0;
     for (int i = 0; i < script_count; ++i) {
         std::string source;
@@ -290,6 +292,19 @@ int bake_catalog_extract(const char* out_path, int script_count, char** script_p
             return 1;
         }
         for (const CatalogEntry& entry : compiled.data.catalog_entries) {
+            // Colision de clave de catalogo (M13): ADR-0047 decidio que en runtime solo
+            // cuenta el hash, no archivo:linea. Dos textos distintos con el mismo hash se
+            // resolverian a la MISMA traduccion, y el sintoma —"esta linea sale traducida
+            // como otra"— no apunta a ningun sitio. Es improbabilisimo con 32 bits, pero
+            // detectarlo cuesta un diccionario y no detectarlo cuesta una tarde.
+            std::string previous_text;
+            if (!catalog_keys.add(entry.text, fnv1a_u32(entry.text.c_str()), &previous_text)) {
+                log_error("vne_bake catalog-extract: colision de hash entre dos textos "
+                          "distintos, que compartirian traduccion: '%s' y '%s'",
+                          entry.text.c_str(), previous_text.c_str());
+                std::fclose(out);
+                return 1;
+            }
             std::fwrite(entry.key.data(), 1, entry.key.size(), out);
             std::fputc('\n', out);
             std::fwrite(entry.text.data(), 1, entry.text.size(), out);
@@ -769,6 +784,7 @@ int bake_pack(const char* out_path, const char* baked_dir, const char* src_dir) 
     };
     static_assert(sizeof(OggCatalogRecord) == 68);
     if (!ogg_paths.empty()) {
+        HashCollisionCheck track_ids;
         std::string catalog_bytes;
         for (const std::string& path : ogg_paths) {
             usize       slash    = path.find_last_of("/\\");
@@ -781,6 +797,17 @@ int bake_pack(const char* out_path, const char* baked_dir, const char* src_dir) 
             }
             OggCatalogRecord record{};
             record.track_id = static_cast<u16>(fnv1a_u32(name_no_ext) % 65536u);
+            // Colision de track_id (M13): ADR-0034 acepto el riesgo sin deteccion. Dos
+            // pistas que compartan id se confundirian al restaurar bgm_track_id de una
+            // partida guardada, y el sintoma —"suena la musica de otra escena al cargar"—
+            // no apunta a ningun sitio.
+            std::string previous_track;
+            if (!track_ids.add(name_no_ext, record.track_id, &previous_track)) {
+                log_error("vne_bake pack: colision de hash entre las pistas '%s' y '%s' "
+                          "(las dos dan track_id %u). Renombra una de las dos.",
+                          name_no_ext.c_str(), previous_track.c_str(), record.track_id);
+                return 1;
+            }
             std::snprintf(record.logical_name, sizeof(record.logical_name), "%s",
                           logical.c_str());
             catalog_bytes.append(reinterpret_cast<const char*>(&record), sizeof(record));

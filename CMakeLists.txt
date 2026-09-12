@@ -373,6 +373,7 @@ add_library(vne_script_tools STATIC
   src/script/parser.cpp
   src/script/compiler.cpp
   src/script/asset_validate.cpp
+  src/script/hash_collisions.cpp
   src/script/map_bake.cpp
 )
 target_include_directories(vne_script_tools PUBLIC src)

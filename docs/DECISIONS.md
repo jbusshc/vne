@@ -2109,10 +2109,67 @@ dibujándose marca 5051-5086.
 
 ---
 
+## ADR-0063 — Las colisiones de hash se detectan al hornear, y son más probables de lo que parecía
+
+**Fecha:** 2026-09-11
+**Hito:** M13
+**Estado:** aceptada
+
+**Contexto.** Tres decisiones previas resolvían nombres a ids por `fnv1a % capacidad` sin
+tabla de interning y **aceptaron el riesgo de colisión sin ninguna detección**: ADR-0029
+(variables y flags), ADR-0034 (pistas de música) y ADR-0047 (claves de catálogo). Una
+colisión no da síntoma en el sitio del problema: dos variables comparten hueco y el guion se
+comporta como si una escribiera sobre la otra; dos pistas se confunden al restaurar una
+partida; dos textos comparten traducción. Es un bug de lógica imposible de rastrear desde el
+síntoma.
+
+**Decisión.** `script/hash_collisions.{h,cpp}` (un diccionario id → nombre) se usa en los tres
+sitios, todos en herramientas offline: el compilador del DSL para variables, `vne_bake pack`
+para pistas de música y `vne_bake catalog-extract` para claves de catálogo. El error nombra
+**los dos** nombres que chocan, no solo el segundo: con uno solo, quien lo lee no sabe con qué
+ha chocado ni cuál renombrar.
+
+**Y una medición que cambia el peso de todo esto.** La colisión no es un caso teórico: con
+`k_max_vars = 512`, la paradoja del cumpleaños sitúa el 50% de probabilidad hacia los **27
+nombres distintos**. Medido con una lista de nombres realistas de novela visual
+(`tests/test_hash_collisions.cpp`): **`puntos` y `rumor` chocan con solo 25 nombres**, los dos
+en el hueco 142. Un juego real con tres docenas de variables es bastante probable que lo
+sufra.
+
+Eso significa que esta detección no es una red de seguridad para un caso raro: es la
+diferencia entre que el DSL sea usable a escala o no. También sugiere que ADR-0029 se quedó
+corto de dimensión — pero `k_max_vars` es un valor que SPEC.md §8.2 fija, y las secciones 4–8
+son decisiones tomadas que no se rediseñan por iniciativa propia (CLAUDE.md regla 3). Queda
+anotado como pendiente para que lo decida el usuario.
+
+**Limitaciones conocidas.** Las variables que solo se tocan desde Lua (`vn.get_var("x")`) no
+se ven: el compilador no interpreta el cuerpo de un `@lua`, y hacerlo sería un parser de Lua
+a medias. Los flags tampoco se comprueban todavía porque no hay sintaxis `@flag` en el DSL
+(la añade la etapa 5 de este mismo hito); cuando exista, se conecta igual que las variables.
+
+**Consecuencias.** Un guion con dos variables que chocan deja de compilar en vez de
+comportarse de forma extraña en runtime. El precio es que un nombre perfectamente razonable
+puede ser rechazado por chocar con otro igual de razonable, y el autor tiene que renombrar
+uno de los dos sin ninguna razón visible desde su punto de vista. Eso es mejor que el bug
+silencioso, pero no es gratis.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
 desviarte.
+
+- **`k_max_vars = 512` se queda corto y ahora hay un número que lo respalda.** Medido en M13
+  (ADR-0063): con nombres realistas de novela visual, `puntos` y `rumor` colisionan con solo
+  **25 variables distintas**; la paradoja del cumpleaños pone el 50% hacia los 27. Un juego
+  real lo va a sufrir. Desde M13 al menos falla el horneado con un mensaje claro en vez de
+  comportarse de forma extraña, pero el autor tiene que renombrar variables perfectamente
+  razonables sin ninguna razón visible desde su punto de vista. Las salidas serían ampliar
+  `k_max_vars` (toca `GameState`, sube la versión de `.vnsave`) o darle a las variables una
+  tabla de nombres en el `.vnc` como la que M13 le dio a actores y fondos, que eliminaría las
+  colisiones de raíz. Las dos tocan SPEC.md §8.2, que es una decisión tomada: **lo decide el
+  usuario**, no el agente.
 
 - ~~**`heap_guard` no ve las asignaciones de las librerías de terceros, que son C.**~~ —
   resuelto en M12 (ADR-0058): cada librería se inicializa con su propio hook de asignación.
