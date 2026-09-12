@@ -20,6 +20,14 @@ struct BacklogEntry {
     u32 text_id    = 0;
     u16 voice_id   = 0xFFFFu;  // 0xFFFF = sin voz (no hay audio hasta M6)
     u8  _pad1[2]   = {};  // relleno final explicito, mismo motivo.
+    // Clave de localizacion de la linea (M14): `fnv1a_u32` del texto original, la misma que
+    // lleva `Cmd::say` desde M10. Es lo que permite que el backlog cambie de idioma con el
+    // dialogo, que es un criterio de SPEC.md #12.
+    //
+    // Y arregla algo mas gordo de paso: `text_id` es un offset dentro del pool de strings
+    // del guion ACTUAL, asi que una entrada de otro guion mostraba texto equivocado o basura.
+    // El key_hash no depende de ningun guion.
+    u32 key_hash   = 0;
 };
 
 struct Backlog {
@@ -34,7 +42,7 @@ static_assert(std::is_trivially_copyable_v<Backlog>);
 extern Backlog g_backlog;
 
 void backlog_reset(Backlog* b);
-void backlog_push(Backlog* b, u16 speaker_id, u32 text_id, u16 voice_id);
+void backlog_push(Backlog* b, u16 speaker_id, u32 text_id, u16 voice_id, u32 key_hash);
 
 // Para serializar: `out` debe tener espacio para b.count entradas. Se listan de la mas
 // vieja a la mas nueva, sin exponer el indice fisico del ring buffer (irrelevante fuera

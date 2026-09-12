@@ -61,6 +61,19 @@ void migrate_v2_to_v3(GameState* state) {
 // con el mismo valor. No es recuperable ni tiene por que serlo: en el v3 ese valor ya era
 // el de una variable pisando a la otra.
 void migrate_v3_to_v4(GameState* state) {
+    // Los ids de actor, pose y fondo cambian de significado OTRA VEZ en este salto: en v3
+    // venian del interner de M13 (secuencial pero local a cada compilacion) y ahora son
+    // indices de la tabla de simbolos del proyecto. Tampoco son mapeables —el interner no
+    // viaja en la partida—, asi que se limpian por el mismo motivo que en v2 -> v3:
+    // conservarlos dibujaria el personaje equivocado en vez de ninguno.
+    //
+    // Lo encontro el fixture de tests/saves/v3.vnsave: fabricando el archivo en memoria dentro
+    // del test esto no habria salido, porque el test no habria pensado en comprobarlo.
+    for (u32 i = 0; i < k_max_actor_slots; ++i) {
+        state->actors[i] = ActorSlot{};
+    }
+    state->bg_id = 0;
+
     i32 old_vars[k_max_vars];
     u8  old_flags[k_max_flags / 8];
     std::memcpy(old_vars, state->vars, sizeof(old_vars));
@@ -138,10 +151,11 @@ LoadResult load_game(const char* path, GameState* out_state, Backlog* out_backlo
         log_error("load_game: '%s' no es un .vnsave valido (magic incorrecto)", path);
         return LoadResult::BadFormat;
     }
-    if (version != k_savegame_version && version != 1u && version != 2u && version != 3u) {
-        // Las migraciones se ENCADENAN (SPEC.md #8.3): v1 -> v2 -> v3 -> v4. Cualquier
-        // version por debajo de la mas vieja soportada se rechaza con un mensaje claro en
-        // vez de cargarse a medias.
+    if (version == 0u || version > k_savegame_version) {
+        // Las migraciones se ENCADENAN (SPEC.md #8.3): v1 -> v2 -> v3 -> v4 -> v5, asi que
+        // TODA version historica carga. Lo unico que se rechaza es una del futuro (un
+        // .vnsave de una version del juego mas nueva), con un mensaje claro en vez de
+        // cargarse a medias.
         std::fclose(file);
         log_error("load_game: '%s' es version %u, se esperaba %u (sin migracion desde ahi)",
                   path, version, k_savegame_version);
@@ -191,9 +205,10 @@ LoadResult load_game(const char* path, GameState* out_state, Backlog* out_backlo
         }
     }
 
-    // Cadena de migraciones: un v1 ya paso por migrate_v1_to_v2 arriba, asi que a partir de
-    // aqui todo lo que no sea v3 es un v2 que hay que subir (SPEC.md #8.3: "las migraciones
-    // se encadenan v2 -> v3 -> v4").
+    // Cadena de migraciones: un v1 ya paso por migrate_v1_to_v2 arriba, y de ahi se sube
+    // escalon a escalon (SPEC.md #8.3: "las migraciones se encadenan"). La del backlog
+    // (v4 -> v5) no esta aqui: ocurre al LEER sus entradas, mas abajo, porque cambia el
+    // tamaño de lo que hay en el archivo y no solo su significado.
     // Cadena de migraciones (SPEC.md #8.3): v1 -> v2 -> v3 -> v4, cada salto encadenado.
     if (version < 3u) {
         migrate_v2_to_v3(&state);
@@ -226,8 +241,41 @@ LoadResult load_game(const char* path, GameState* out_state, Backlog* out_backlo
         return LoadResult::BadFormat;
     }
     BacklogEntry ordered[k_backlog_capacity];
-    if (backlog_count > 0 &&
-        std::fread(ordered, sizeof(BacklogEntry), backlog_count, file) != backlog_count) {
+    if (version < 5u) {
+        // Hasta v4 una entrada de backlog no tenia key_hash y medía 12 bytes en vez de 16
+        // (M14). Se leen con el layout viejo y se ensanchan. Los campos que existian se
+        // conservan; key_hash queda a 0, que el visor del backlog interpreta como "esta
+        // linea no se puede relocalizar" y cae al texto del guion, exactamente como antes.
+        //
+        // El hash NO es reconstruible desde aqui: haria falta el texto original, que vive en
+        // el pool de strings del guion que la escribio y puede no estar cargado. Perder la
+        // traduccion de lineas viejas es el precio, y es pequeño comparado con perder el
+        // backlog entero.
+        struct BacklogEntryV4 {
+            u16 speaker_id;
+            u8  _pad0[2];
+            u32 text_id;
+            u16 voice_id;
+            u8  _pad1[2];
+        };
+        static_assert(sizeof(BacklogEntryV4) == 12);
+
+        BacklogEntryV4 old_entries[k_backlog_capacity];
+        if (backlog_count > 0 && std::fread(old_entries, sizeof(BacklogEntryV4), backlog_count,
+                                            file) != backlog_count) {
+            std::fclose(file);
+            log_error("load_game: '%s' esta truncado (entradas de backlog v%u)", path, version);
+            return LoadResult::BadFormat;
+        }
+        for (u32 i = 0; i < backlog_count; ++i) {
+            ordered[i]             = BacklogEntry{};
+            ordered[i].speaker_id = old_entries[i].speaker_id;
+            ordered[i].text_id    = old_entries[i].text_id;
+            ordered[i].voice_id   = old_entries[i].voice_id;
+            ordered[i].key_hash   = 0;
+        }
+    } else if (backlog_count > 0 &&
+               std::fread(ordered, sizeof(BacklogEntry), backlog_count, file) != backlog_count) {
         std::fclose(file);
         log_error("load_game: '%s' esta truncado (entradas de backlog)", path);
         return LoadResult::BadFormat;
@@ -254,7 +302,7 @@ LoadResult load_save_thumbnail(const char* path, u8* out_qoi, u32 cap, u32* out_
     ok &= std::fread(&state_size, sizeof(u32), 1, file) == 1;
     ok &= std::fread(&checksum, sizeof(u32), 1, file) == 1;
     (void)checksum;
-    if (!ok || magic != k_vnsave_magic || (version != k_savegame_version && version != 1u && version != 2u && version != 3u)) {
+    if (!ok || magic != k_vnsave_magic || version == 0u || version > k_savegame_version) {
         std::fclose(file);
         return LoadResult::BadFormat;
     }

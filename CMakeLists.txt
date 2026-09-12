@@ -386,7 +386,9 @@ vne_apply_project_flags(vne_script_tools)
 
 # Herramienta offline: no enlaza vne_base (SDL3/sokol/gfx) porque no abre ventana ni
 # dibuja nada, solo genera y codifica bytes. Solo toma prestado base/log.cpp de vne_base.
-add_executable(vne_bake tools/bake/main.cpp src/base/log.cpp)
+# crc32.cpp va suelto y no via vne_base: vne_bake es una herramienta offline y enlazar
+# vne_base le arrastraria SDL y el sistema grafico enteros para usar una funcion de hash.
+add_executable(vne_bake tools/bake/main.cpp src/base/log.cpp src/base/crc32.cpp)
 target_include_directories(vne_bake PRIVATE src)
 target_link_libraries(vne_bake PRIVATE qoi vne_script_tools stb_image harfbuzz harfbuzz-subset)
 vne_apply_project_flags(vne_bake)

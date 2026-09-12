@@ -17,8 +17,8 @@ TEST_CASE("save_game/load_game: round-trip preserva el estado y el backlog exact
     state.rng_state = 999;
 
     Backlog backlog{};
-    backlog_push(&backlog, 1, 100, 0xFFFFu);
-    backlog_push(&backlog, 2, 200, 0xFFFFu);
+    backlog_push(&backlog, 1, 100, 0xFFFFu, 0xAAAAAAAAu);
+    backlog_push(&backlog, 2, 200, 0xFFFFu, 0xBBBBBBBBu);
 
     const char* path = "test_save.vnsave";
     REQUIRE(save_game(path, state, backlog) == SaveResult::Ok);

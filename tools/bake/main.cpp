@@ -8,7 +8,12 @@
 #include <vector>
 
 #include "base/hash.h"
+#include <cstddef>
+
+#include "base/crc32.h"
 #include "game/map_format.h"
+#include "vm/backlog.h"
+#include "vm/state.h"
 #include "script/asset_validate.h"
 #include "script/hash_collisions.h"
 #include "script/symbols.h"
@@ -454,6 +459,90 @@ int bake_symbols(const char* out_path, int script_count, char** script_paths) {
               out_path, table.count(SymbolKind::Var), table.count(SymbolKind::Flag),
               table.count(SymbolKind::Actor), table.count(SymbolKind::Pose),
               table.count(SymbolKind::Bg), table.count(SymbolKind::Speaker));
+    return 0;
+}
+
+// --- vne_bake save-fixtures: partidas de ejemplo de cada version historica (M14) --------
+//
+// El skill vne-serializable-state pide "una partida de ejemplo de cada version historica en
+// tests/saves/ y un test que verifique que todas cargan", y SPEC.md #12 lo hace criterio de
+// M14. Hasta ahora cada test fabricaba su .vnsave en memoria, lo que prueba la migracion
+// contra lo que el test CREE que escribia un binario viejo — no contra lo que escribia.
+//
+// Esta herramienta escribe cada formato byte a byte tal y como lo habria hecho el binario de
+// su epoca. Se ejecuta UNA vez y los archivos se quedan fijos en el repositorio: si un cambio
+// los rompe, es el cambio el que esta mal.
+int bake_save_fixtures(const char* out_dir) {
+    // Layout de BacklogEntry hasta v4 (12 bytes, sin key_hash).
+    struct BacklogEntryV4 {
+        u16 speaker_id;
+        u8  _pad0[2];
+        u32 text_id;
+        u16 voice_id;
+        u8  _pad1[2];
+    };
+    static_assert(sizeof(BacklogEntryV4) == 12);
+
+    constexpr u32 k_magic = 0x56534E56u;  // 'VNSV'
+
+    auto write_one = [&](u32 version) -> bool {
+        GameState state{};
+        state.vm.pc      = 40 + version;   // algo distinto en cada uno, para poder
+        state.vars[7]    = 100 + version;  // distinguirlos al leerlos
+        state.bg_id      = 3;
+        state.rng_state  = 0xC0FFEEu;
+        state.actors[0].actor_id = 2;
+        state.actors[0].pose_id  = 1;
+        state.actors[0].alpha    = 1.0f;
+        state.bgm_track_id       = 77;
+        if (version >= 2) {
+            state.map_id   = 5;
+            state.player_x = 320.0f;
+            state.player_y = 240.0f;
+        }
+
+        // v1 guardaba un GameState mas corto: hasta map_id, que no existia.
+        usize state_size = version == 1 ? offsetof(GameState, map_id) : sizeof(GameState);
+        u32   checksum   = crc32(&state, state_size);
+
+        char path[256];
+        std::snprintf(path, sizeof(path), "%s/v%u.vnsave", out_dir, version);
+        std::FILE* f = std::fopen(path, "wb");
+        if (f == nullptr) {
+            log_error("vne_bake save-fixtures: no se pudo escribir '%s'", path);
+            return false;
+        }
+        u32 size32 = static_cast<u32>(state_size);
+        std::fwrite(&k_magic, sizeof(u32), 1, f);
+        std::fwrite(&version, sizeof(u32), 1, f);
+        std::fwrite(&size32, sizeof(u32), 1, f);
+        std::fwrite(&checksum, sizeof(u32), 1, f);
+        std::fwrite(&state, 1, state_size, f);
+
+        u32 thumbnail_size = 0;
+        std::fwrite(&thumbnail_size, sizeof(u32), 1, f);
+
+        // Dos entradas de backlog con el layout de su epoca (todas las versiones hasta la 4
+        // comparten los 12 bytes sin key_hash).
+        u32 backlog_count = 2;
+        std::fwrite(&backlog_count, sizeof(u32), 1, f);
+        BacklogEntryV4 entries[2] = {
+            {1, {}, 10, 0xFFFFu, {}},
+            {2, {}, 20, 0xFFFFu, {}},
+        };
+        std::fwrite(entries, sizeof(BacklogEntryV4), 2, f);
+        std::fclose(f);
+
+        log_info("vne_bake save-fixtures: %s (version %u, GameState de %zu bytes)", path,
+                 version, state_size);
+        return true;
+    };
+
+    for (u32 version = 1; version <= 4; ++version) {
+        if (!write_one(version)) {
+            return 1;
+        }
+    }
     return 0;
 }
 
@@ -1119,6 +1208,9 @@ struct OggCatalogRecord {
 // Sin argumentos (o "atlas"): empaqueta assets_src/png/*.png si hay alguno (ADR-0025), o
 // genera el placeholder procedural de respaldo si no.
 int main(int argc, char** argv) {
+    if (argc == 3 && std::strcmp(argv[1], "save-fixtures") == 0) {
+        return bake_save_fixtures(argv[2]);
+    }
     if (argc >= 4 && std::strcmp(argv[1], "symbols") == 0) {
         return bake_symbols(argv[2], argc - 3, argv + 3);
     }

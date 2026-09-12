@@ -19,7 +19,11 @@ struct LocaleDesc {
 };
 
 inline constexpr LocaleDesc k_locales[] = {
-    {"es", "Espanol", nullptr, false},
+    // El idioma base tambien tiene catalogo (M14). Antes era `nullptr` y se caia al texto del
+    // guion, lo que obligaba a que cualquier cosa que mostrara texto tuviera el guion a mano
+    // — imposible para el backlog, que guarda lineas de guiones que quiza ya no estan
+    // cargados. Con es.vnl, resolver una linea es solo su key_hash.
+    {"es", "Espanol", "es.vnl", false},
     {"ja", "Nihongo (placeholder)", "ja.vnl", true},
 };
 inline constexpr u32 k_locale_count = sizeof(k_locales) / sizeof(k_locales[0]);

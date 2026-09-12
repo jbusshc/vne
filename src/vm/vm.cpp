@@ -37,7 +37,8 @@ void cmd_start(const Cmd& cmd, GameState* state, const CompiledScript& script) {
             // Instantanea justo antes de ejecutar el comando (SPEC.md #8.3), y entrada
             // de backlog (SPEC.md #8.4): ambas antes de mutar nada de este comando.
             rollback_capture(&g_rollback, *state);
-            backlog_push(&g_backlog, cmd.say.speaker_id, cmd.say.text_id, 0xFFFFu);
+            backlog_push(&g_backlog, cmd.say.speaker_id, cmd.say.text_id, 0xFFFFu,
+                          cmd.say.key_hash);
             // El avance por input real lo maneja VnMode (M7); aqui solo se registra que
             // hay una linea pendiente de mostrar.
             state->vm.waiting_for_input = 1;

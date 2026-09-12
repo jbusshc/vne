@@ -19,6 +19,7 @@ add_executable(vne_tests
   test_vm.cpp
   test_crc32.cpp
   test_rollback.cpp
+  test_save_fixtures.cpp
   test_save_load.cpp
   test_save_replay.cpp
   test_lua_bindings.cpp

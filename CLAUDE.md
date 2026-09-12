@@ -5,96 +5,67 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** M14 — Configuración y localización completas (en progreso). Hecho: la
-**tabla de símbolos del proyecto** (ADR-0067), que disuelve los dos pendientes que M13 dejó
-en tu tejado sin tocar SPEC.md §8.2. Pendiente: `config.ini`, backlog relocalizable.
+**Hito activo:** ninguno. M0–M14 están cerrados. El siguiente por defecto es **M15**
+(interacción y testabilidad de la UI: ratón, grabar/reproducir input, arte de UI real, visor
+de atlas).
 
-**Lo que hizo la tabla de símbolos, porque cambia cómo se piensa el resto.** Había **seis**
-mecanismos para convertir un nombre en un id, y todos tiraban el nombre al hacerlo: cuatro
-por `fnv1a % capacidad` (variables, flags, pistas, mapas) y dos por un interner local a cada
-compilación (actores, poses, fondos, hablantes). De ahí salían las colisiones, la
-inestabilidad entre guiones y la imposibilidad de dibujar un actor. Ahora hay **una sola
-tabla**, construida por `vne_bake symbols` de todos los guiones a la vez, y el id es el
-índice en ella. Consecuencias que conviene tener presentes:
+**Último hito completado:** M14 — Configuración y localización completas.
+El hilo de M13 y M14 es el mismo: **que un identificador signifique siempre lo mismo**. M13
+descubrió que los nombres se perdían al fabricar los ids; M14 lo terminó con la tabla de
+símbolos y lo aplicó a las preferencias y al backlog.
 
-- Las colisiones de variable **no se detectan: no pueden ocurrir**. El detector de ADR-0063
-  se retiró para variables y banderas (sigue vivo para pistas y mapas, que hashean nombres de
-  archivo).
-- `k_max_vars = 512` pasa a ser una **cuenta real** de 512 variables, no un espacio de hash
-  que valía unos 27.
-- Los ids significan lo mismo en todos los guiones, así que `GameState` sobrevive a un
-  guardado aunque se cargue con otro guion.
-- El `.vnc` **baja** a v6: las tres tablas de nombres por guion de v5 sobran.
+**Tabla de símbolos del proyecto (ADR-0067), lo más importante del hito.** Había **seis**
+mecanismos para convertir un nombre en un id y todos tiraban el nombre: cuatro por
+`fnv1a % capacidad` (variables, flags, pistas, mapas) y dos por un interner local a cada
+compilación (actores, poses, fondos, hablantes). Ahora hay **una sola tabla**, construida por
+`vne_bake symbols` de todos los guiones a la vez, donde el id es el índice. Consecuencias:
+
+- Las colisiones de variable **no se detectan: no pueden ocurrir**. El detector de ADR-0063 se
+  retiró (sigue vivo para pistas y mapas, que hashean nombres de archivo).
+- `k_max_vars = 512` pasa a ser una **cuenta real** de 512, no un espacio de hash que valía
+  unos 27. **SPEC.md §8.2 no se tocó** — el parche habría sido ampliar el array.
+- El `.vnc` **baja** a v6: las tablas de nombres por guion de v5 sobran.
 - Lua y el DSL preguntan a la misma tabla, así que no pueden divergir; y un nombre que no
-  existe ahora se **avisa** en vez de caer en un hueco cualquiera.
-- `.vnsave` v4, con una migración de verdad: los nombres se recolocan a su id nuevo, no se
-  pierden.
+  existe se **avisa** en vez de caer en un hueco cualquiera.
 
-**Si añades un guion, la tabla se regenera sola** (CMake lo encadena). Si tocas cómo se
-fabrica un id, es aquí y en un solo sitio.
+**`config.ini` (ADR-0068).** Idioma, pantalla completa y volúmenes persisten. Es texto, que es
+la única excepción deliberada a "sin parsear texto en release": esa regla existe por los datos
+de juego, y un archivo de preferencias tiene que ser editable a mano. El parser es **total** —
+nunca falla, lo que no entiende lo ignora. El idioma se guarda **por ID** (`"es"`), no por
+índice, por la misma razón que todo lo demás de este hito. Y el `locale_index == 1` que asumía
+que cualquier idioma no-español era japonés pasa a ser una tabla.
 
-**Último hito completado:** M13 — Integridad de datos y herramientas offline.
-El tema del hito es que **el motor deje de fallar en silencio**: donde antes un nombre mal
-escrito, una colisión de hash o un TMX exportado con otra opción producían un resultado
-incorrecto sin decir nada, ahora hay un error que nombra la causa y, cuando se puede, cómo
-arreglarla.
+**Backlog relocalizable (ADR-0069).** `BacklogEntry` gana `key_hash`. Arregla el criterio
+pedido y, de paso, algo peor: `text_id` es un offset del guion **actual**, así que una entrada
+de otro guion mostraba texto equivocado. El idioma base deja de ser un caso especial y carga
+`es.vnl` como cualquier otro — mientras cayera al texto del guion, cualquier cosa que mostrara
+texto necesitaba el guion a mano, que para el backlog es imposible.
 
-**Registro de assets (ADR-0061).** `atlas_00.bin` sube a v3 con tabla de nombres lógicos, y
-**esa tabla es el registro**: no hay un segundo archivo que pueda desincronizarse. Con él,
-`@show`/`@bg` se validan al compilar — **cierra ADR-0022, abierto desde M3**. La convención es
-`actor_<actor>_<pose>` y `bg_<nombre>`; el prefijo existe porque el atlas tiene un espacio de
-nombres plano y un fondo "marta" chocaría con un actor "marta".
+**Criterios verificados, los tres.** El idioma sobrevive a cerrar y reabrir: no se puede
+pulsar una tecla aquí, así que el test **simula la pulsación** sobre `MenuMode`, comprueba que
+`config.ini` queda escrito con `locale=ja`, borra el estado en memoria y lo relee como haría
+un arranque nuevo. Las entradas del backlog cambian de idioma con el diálogo (resuelven por
+`key_hash` y su caché se invalida con `catalog_generation()`). Y **todas** las versiones
+históricas de guardado cargan desde `tests/saves/` — v1 a v4 más la actual, con archivos fijos
+escritos por `vne_bake save-fixtures` byte a byte.
 
-**Fondos y actores por fin se dibujan (ADR-0062).** Era el hueco más grande del proyecto:
-`@bg`, `@show`, `@hide` y `@move` mantenían estado que **nadie convertía en sprites**. Al
-conectarlo resultó que no se podía: los ids son índices de un interner local a cada
-compilación, no hashes, así que no había forma de volver del id al nombre. El `.vnc` sube a v5
-con tres tablas de nombres. `draw_calls` **no sube** al añadir fondo y actores (sigue en 4):
-salen del mismo atlas y entran en el mismo lote.
+196/196 tests en Dev, 195/196 en Debug+ASan (solo el de rendimiento de M2, no representativo
+sin optimizar, ADR-0018) y 192/192 en Ship. Los cuatro guiones completan y el juego arranca
+con `heap_allocs_frame_max=0`.
 
-**Colisiones de hash (ADR-0063), y una medición que importa.** ADR-0029/0034/0047 aceptaron el
-riesgo sin ninguna detección. Ahora se detecta al hornear en los tres espacios (variables,
-pistas, claves de catálogo) nombrando **los dos** nombres que chocan. Lo revelador: con
-`k_max_vars = 512`, **`puntos` y `rumor` colisionan con solo 25 nombres realistas**. No es un
-caso raro; un juego real lo va a sufrir.
+**Dos cosas que encontraron los cambios, no yo.** El fixture `v3.vnsave` destapó que
+`migrate_v3_to_v4` no limpiaba los ids de actor —resolvían a **otro personaje**—, y
+fabricando el archivo dentro del test eso no habría salido. Y `MenuMode` usaba una sola arena
+para dos vidas distintas (los layouts del menú y el **catálogo**, que es global): resetear la
+arena de escena, que es su propósito documentado, habría dejado el catálogo apuntando a
+memoria liberada. En un test ocurrió, con SIGSEGV.
 
-**TMX robusto.** El escáner ignoraba `encoding` y `compression`: un TMX comprimido pasaba por
-el parser CSV, sacaba números del base64 y acababa culpando **al tamaño de la capa**. Ahora
-nombra la compresión y dice cómo cambiarlo en Tiled. Además valida `width`/`height` contra las
-celdas reales dando los dos números, y rechaza varios tilesets explicando por qué.
+**Lo que sigue sin verificarse.** Nada se probó con teclado real en la ventana interactiva ni
+se vio un personaje en pantalla: en este entorno no hay forma de mirar. Windows sigue siendo
+la única plataforma verificada (ADR-0013).
 
-**`vne_bake font` (ADR-0064).** El directorio de fuentes pasa de **11,4 MB a 304 KB** con
-`hb-subset`, que ya estaba dentro de HarfBuzz: cero dependencias nuevas. Se descartó lo que
-pedía la tabla de SPEC.md §11 (atlas de glifos horneado) porque chocaría con rasterizar CJK
-bajo demanda: obligaría a fijar de antemano cada glifo *y cada tamaño de punto*.
-
-**`@flag`, catálogo de mapas y mensajes (ADR-0065).** `@flag x on` / `@if flag x`, con el mismo
-`flag_id` que Lua para que los dos caminos no se contradigan. `map_id` sale de un catálogo y ya
-no de un `1` puesto a mano. Y una indentación de 2 espacios deja de reportarse como "falta
-`@end`" para decir lo que de verdad pasa, apuntando a la línea culpable.
-
-**Criterios verificados, los cuatro, ejecutándolos:** `@show mrata neutral` → `c1.vns:25: actor
-o pose desconocidos ... exit=1`; dos variables que colisionan → `colision de hash entre las
-variables 'v86' y 'v68' ... hueco 207, exit=1`; TMX con `compression="zlib"` → mensaje que
-nombra zlib y dice cómo cambiarlo en Tiled, `exit=1`; y el archivo mayor del repositorio pasa a
-ser de **264 KB** (un wav de prueba), sin ninguna fuente de 9,5 MB.
-
-184/184 tests en Dev, 183/184 en Debug+ASan (solo el de rendimiento de M2, no representativo
-sin optimizar, ADR-0018) y 180/180 en Ship, sin reportes de ASan. Los cuatro guiones de demo
-completan y el juego arranca con `heap_allocs_frame_max=0`.
-
-**Lo que NO se verificó, y conviene saberlo.** Sé que los sprites de fondo y actores se encolan
-con las coordenadas y el sprite correctos, y lo comprobé con logs instrumentados, pero **no he
-visto un personaje en pantalla con mis ojos**: en este entorno no hay forma de mirar la ventana.
-La posición por defecto de los actores (los ocho slots repartidos a lo ancho, el 0 al 6% del
-borde izquierdo) la elegí a ojo y puede quedar apretada. Tampoco se probó `@flag` ni nada más
-con teclado real. Windows sigue siendo la única plataforma verificada (ADR-0013).
-
-**Dos cosas que dejo en tu tejado**, anotadas en "Pendientes observados": `k_max_vars = 512` se
-queda corto de verdad (25 nombres para colisionar), y ampliarlo o dar a las variables una tabla
-de nombres como la de actores toca SPEC.md §8.2; y `actors[]` sigue sin sobrevivir a un guardado
-**entre guiones distintos**, porque los ids son locales a cada compilación — arreglarlo
-implicaría subir `.vnsave` otra vez, que es trabajo de M14.
+M13 — Integridad de datos y herramientas offline (hito anterior). Detalle en
+docs/DECISIONS.md (ADR-0061 a ADR-0066) y en el historial de git.
 
 M12 — Presentación y jugabilidad completas (hito anterior). Detalle en docs/DECISIONS.md
 (ADR-0056 a ADR-0060) y en el historial de git.

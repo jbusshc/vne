@@ -2432,6 +2432,56 @@ haría un arranque nuevo.
 
 ---
 
+## ADR-0069 — El backlog se relocaliza por `key_hash`, y el idioma base deja de ser un caso especial
+
+**Fecha:** 2026-09-12
+**Hito:** M14
+**Estado:** aceptada
+
+**Contexto.** `BacklogEntry` guardaba `text_id`, un offset dentro del pool de strings **del
+guion actual**, y el visor hacía `script_string(*script, entry.text_id)`. Eso tenía dos
+problemas, y el segundo es peor que el que SPEC.md §12 pedía arreglar:
+
+1. El backlog no cambiaba de idioma con el diálogo (el criterio de M14).
+2. Una entrada escrita por otro guion mostraba **texto equivocado o basura**, porque el offset
+   no significa nada fuera del guion que lo generó. Es la misma familia de defecto que
+   ADR-0067 acaba de eliminar en los símbolos.
+
+**Decisión.** `BacklogEntry` gana `key_hash` —el mismo que `Cmd::say` lleva desde M10— y el
+visor resuelve por catálogo. `text_id` se queda **solo** como red de seguridad para entradas
+de un `.vnsave` viejo que no lo tienen.
+
+**Y el idioma base deja de ser `nullptr`: ahora carga `es.vnl` como cualquier otro.** Esto es
+lo que hace que la solución sea limpia en vez de a medias. Mientras el idioma base cayera al
+texto del guion, *cualquier cosa que mostrara texto necesitaba el guion a mano* — imposible
+para el backlog, que guarda líneas de guiones que quizá ya no están cargados. Con `es.vnl`
+(que el build ya horneaba y nadie usaba), mostrar una línea es resolver su `key_hash` y nada
+más.
+
+También hubo que darle al backlog el mismo mecanismo de invalidación que `VnMode` tiene desde
+M10: su caché de layouts solo se reconstruía al hacer scroll, así que cambiar de idioma con el
+backlog abierto lo habría dejado en el idioma anterior.
+
+**`.vnsave` sube a v5**, y esta migración es distinta de las anteriores: cambia el **tamaño**
+de lo que hay en el archivo (12 → 16 bytes por entrada), no solo el significado. Se leen con
+el layout viejo y se ensanchan; `key_hash` queda a 0, que el visor interpreta como "esta línea
+no se puede relocalizar". El hash no es reconstruible —haría falta el texto original, que vive
+en un guion que puede no estar cargado— y perder la traducción de líneas viejas es un precio
+pequeño frente a perder el backlog entero.
+
+**Partidas de ejemplo de verdad en `tests/saves/`.** El skill `vne-serializable-state` lo pide
+desde M4 y no se había hecho: los tests fabricaban cada `.vnsave` en memoria. La diferencia no
+es cosmética — un test que se fabrica su propio archivo prueba la migración contra lo que el
+test **cree** que escribía un binario viejo. `vne_bake save-fixtures` escribe cada formato
+byte a byte y los archivos se quedan fijos en el repositorio.
+
+**Y encontraron un bug a la primera.** El fixture `v3.vnsave` destapó que `migrate_v3_to_v4`
+no limpiaba los ids de actor y fondo: en v3 venían del interner de M13 y bajo M14 son índices
+de la tabla de símbolos, así que **resolvían a otro personaje**. Fabricando el archivo dentro
+del test eso no habría salido, porque el test no habría pensado en comprobarlo.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni

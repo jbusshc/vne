@@ -22,6 +22,10 @@ struct BacklogMode : Mode {
     TextLayout cached_layouts[k_backlog_visible_lines];
     u32        cached_count  = 0;
     i32        cached_scroll = -1;
+    // catalog_generation() con la que se construyo el cache (M14). Sin esto, cambiar de
+    // idioma con el backlog ya abierto dejaria las lineas en el idioma anterior: el cache
+    // solo se reconstruia al hacer scroll. Mismo mecanismo que usa VnMode desde M10.
+    u32        cached_locale_gen = 0xFFFFFFFFu;
 
     void update(const InputState& input, f32 dt) override;
     void render() override;

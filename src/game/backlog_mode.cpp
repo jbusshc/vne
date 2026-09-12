@@ -3,11 +3,13 @@
 #include <SDL3/SDL.h>
 
 #include "gfx/gfx.h"
+#include "text/catalog.h"
 
 namespace {
 
 void rebuild_cache_if_needed(BacklogMode* m) {
-    if (m->cached_scroll == m->scroll || !m->font.valid()) {
+    u32 gen = catalog_generation();
+    if ((m->cached_scroll == m->scroll && m->cached_locale_gen == gen) || !m->font.valid()) {
         return;
     }
     BacklogEntry ordered[k_backlog_capacity];
@@ -17,12 +19,20 @@ void rebuild_cache_if_needed(BacklogMode* m) {
     for (u32 i = 0; i < k_backlog_visible_lines && static_cast<u32>(m->scroll) + i < g_backlog.count;
          ++i) {
         const BacklogEntry& entry = ordered[static_cast<u32>(m->scroll) + i];
-        const char*          text  = m->script != nullptr ? script_string(*m->script, entry.text_id)
-                                                            : "";
+        // Por key_hash contra el catalogo activo (M14): asi el backlog cambia de idioma junto
+        // con el dialogo, que es un criterio de SPEC.md #12. El texto del guion queda solo
+        // como red de seguridad para una entrada de un .vnsave viejo (sin key_hash) — y
+        // solo vale si el guion cargado es el mismo que la escribio, que es justamente la
+        // razon por la que el key_hash tenia que existir.
+        const char* fallback =
+            m->script != nullptr ? script_string(*m->script, entry.text_id) : "";
+        const char* text = entry.key_hash != 0 ? catalog_resolve(entry.key_hash, fallback)
+                                                : fallback;
         m->cached_layouts[m->cached_count] = text_layout(m->font, text, 1700.0f, m->scratch_arena);
         m->cached_count += 1;
     }
-    m->cached_scroll = m->scroll;
+    m->cached_scroll      = m->scroll;
+    m->cached_locale_gen = gen;
 }
 
 }  // namespace
