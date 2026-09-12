@@ -14,6 +14,7 @@
 #include "editor/editor.h"
 #endif
 #include "game/backlog_mode.h"
+#include "game/map_catalog.h"
 #include "game/map_mode.h"
 #include "game/menu_mode.h"
 #include "game/mode.h"
@@ -243,9 +244,12 @@ int main(int argc, char** argv) {
     GameState demo_state{};
     // Posicion inicial dentro de assets_src/maps/demo_map.tmx (M9): el centro de la sala
     // abierta, no (0,0) (que cae en la pared del borde y dejaria al jugador atascado si
-    // esta es una partida nueva, no una cargada). map_id=1: unico mapa del proyecto por
-    // ahora, cualquier valor distinto de 0 basta para "hay un mapa activo".
-    demo_state.map_id   = 1;
+    // esta es una partida nueva, no una cargada).
+    //
+    // M13: map_id sale del catalogo, no de un 1 puesto a mano. Antes guardar y cargar
+    // funcionaba solo porque siempre se cargaba el mismo mapa pasara lo que pasara.
+    map_catalog_init();
+    demo_state.map_id   = map_catalog_id_of("demo_map");
     demo_state.player_x = 4.0f * 64.0f + 32.0f;
     demo_state.player_y = 3.0f * 64.0f + 32.0f;
 
@@ -292,9 +296,14 @@ int main(int argc, char** argv) {
     // ya las usa el rollback de M4 en la base de la pila).
     MapMode map_mode{};
     map_mode.state = &demo_state;
-    bool have_map  = map_mode.load("demo_map.vnm", &g_arena_scene);
+    // El mapa que se carga sale de GameState.map_id via el catalogo (M13), asi que una
+    // partida cargada abre el mapa que tuviera guardado y no uno fijo.
+    const char* map_name = map_catalog_resolve(demo_state.map_id);
+    bool        have_map = map_name != nullptr && map_mode.load(map_name, &g_arena_scene);
     if (!have_map) {
-        log_error("No se pudo cargar demo_map.vnm; ejecuta vne_bake map primero.");
+        log_error("No se pudo cargar el mapa con map_id=%u (%u mapas en el catalogo); "
+                  "ejecuta vne_bake map primero.",
+                  demo_state.map_id, map_catalog_count());
     }
 
     // Con --script explicito se arranca directamente en VnMode: quien pide un guion

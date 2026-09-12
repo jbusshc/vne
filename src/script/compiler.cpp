@@ -52,6 +52,12 @@ u16 var_id_of(const std::string& name) {
     return static_cast<u16>(fnv1a_u32(name) % k_max_vars);
 }
 
+// Mismo criterio para las banderas, y el MISMO que usa script/lua_bindings.cpp: @flag y
+// vn.set_flag tienen que ver la misma bandera o se contradirian (M13).
+u16 flag_id_of(const std::string& name) {
+    return static_cast<u16>(fnv1a_u32(name) % k_max_flags);
+}
+
 u32 push_string(CompiledScriptData* data, const std::string& s) {
     u32 offset = static_cast<u32>(data->string_pool.size());
     data->string_pool.insert(data->string_pool.end(), s.begin(), s.end());
@@ -109,6 +115,7 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
     // variable pisando a otra, imposible de rastrear desde el guion. Detectarlo cuesta un
     // diccionario en una herramienta offline.
     HashCollisionCheck  var_names;
+    HashCollisionCheck  flag_names;
     auto check_var = [&](const std::string& name, u16 id, u32 line) {
         std::string previous;
         if (!var_names.add(name, id, &previous)) {
@@ -117,6 +124,17 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                 "colision de hash entre las variables '" + name + "' y '" + previous +
                     "': las dos caen en el hueco " + std::to_string(id) +
                     " de GameState.vars y se pisarian. Renombra una de las dos."});
+        }
+    };
+
+    auto check_flag = [&](const std::string& name, u16 id, u32 line) {
+        std::string previous;
+        if (!flag_names.add(name, id, &previous)) {
+            result.errors.push_back(CompileError{
+                file_name, line,
+                "colision de hash entre las banderas '" + name + "' y '" + previous +
+                    "': las dos caen en el bit " + std::to_string(id) +
+                    " de GameState.flags y se pisarian. Renombra una de las dos."});
         }
     };
 
@@ -179,6 +197,12 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                 check_var(instr.var, cmd.set_var.var_id, instr.line);
                 cmd.set_var.value    = instr.value;
                 break;
+            case InstrKind::SetFlag:
+                cmd.kind             = CmdKind::SetFlag;
+                cmd.set_flag.flag_id = flag_id_of(instr.var);
+                cmd.set_flag.value   = instr.value != 0 ? 1u : 0u;
+                check_flag(instr.var, cmd.set_flag.flag_id, instr.line);
+                break;
             case InstrKind::AddVar:
                 cmd.kind             = CmdKind::AddVar;
                 cmd.add_var.var_id   = var_id_of(instr.var);
@@ -186,6 +210,19 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                 cmd.add_var.value    = instr.value;
                 break;
             case InstrKind::JumpIf: {
+                // M13: la misma instruccion del parser produce JumpIf o JumpIfFlag segun la
+                // condicion sea sobre una variable o sobre una bandera. invert_condition
+                // (el salto al @else) se aplica de forma distinta en cada caso: negando el
+                // operador en una, volteando el valor esperado en la otra.
+                if (instr.condition.is_flag) {
+                    cmd.kind                       = CmdKind::JumpIfFlag;
+                    cmd.jump_if_flag.flag_id       = flag_id_of(instr.condition.var);
+                    check_flag(instr.condition.var, cmd.jump_if_flag.flag_id, instr.line);
+                    bool expected                  = instr.condition.flag_expected;
+                    cmd.jump_if_flag.expected      = (instr.invert_condition ? !expected : expected) ? 1u : 0u;
+                    cmd.jump_if_flag.target_pc     = resolve_label(instr.name);
+                    break;
+                }
                 cmd.kind                  = CmdKind::JumpIf;
                 cmd.jump_if.var_id        = var_id_of(instr.condition.var);
                 check_var(instr.condition.var, cmd.jump_if.var_id, instr.line);

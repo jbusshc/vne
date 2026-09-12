@@ -85,6 +85,24 @@ void cmd_start(const Cmd& cmd, GameState* state, const CompiledScript& script) {
                 state->vm.pc = cmd.jump_if.target_pc - 1;  // mismo truco que Jump
             }
             break;
+        case CmdKind::SetFlag: {
+            // M13: mismo bitset que ya usaban vn.set_flag/vn.get_flag desde Lua
+            // (script/lua_bindings.cpp), con el mismo flag_id: los dos caminos tienen que
+            // ver la misma bandera o @flag y Lua se contradirian.
+            u8& byte = state->flags[cmd.set_flag.flag_id / 8];
+            u8  bit  = static_cast<u8>(1u << (cmd.set_flag.flag_id % 8));
+            byte     = cmd.set_flag.value != 0 ? static_cast<u8>(byte | bit)
+                                               : static_cast<u8>(byte & ~bit);
+            break;
+        }
+        case CmdKind::JumpIfFlag: {
+            bool on = (state->flags[cmd.jump_if_flag.flag_id / 8] &
+                       (1u << (cmd.jump_if_flag.flag_id % 8))) != 0;
+            if (on == (cmd.jump_if_flag.expected != 0)) {
+                state->vm.pc = cmd.jump_if_flag.target_pc - 1;  // mismo truco que Jump
+            }
+            break;
+        }
         case CmdKind::Choice:
             // Rollback tambien antes de un Choice (SPEC.md #8.3, ADR-0027 cerrado en
             // M5): el jugador debe poder deshacer una decision igual que una linea de
@@ -170,6 +188,8 @@ bool cmd_update(const Cmd& cmd, GameState* state, f32 dt) {
         case CmdKind::SetVar:
         case CmdKind::AddVar:
         case CmdKind::JumpIf:
+        case CmdKind::SetFlag:
+        case CmdKind::JumpIfFlag:
         case CmdKind::ChoiceEnd:
         case CmdKind::Call:
         case CmdKind::Return:
@@ -255,6 +275,8 @@ void cmd_skip_to_end(const Cmd& cmd, GameState* state, const CompiledScript& scr
         case CmdKind::SetVar:
         case CmdKind::AddVar:
         case CmdKind::JumpIf:
+        case CmdKind::SetFlag:
+        case CmdKind::JumpIfFlag:
         case CmdKind::ChoiceEnd:
         case CmdKind::Call:
         case CmdKind::Return:

@@ -24,6 +24,7 @@ enum class InstrKind : u8 {
     End,
     SetVar,
     AddVar,
+    SetFlag,  // M13: @flag <nombre> on|off
     JumpIf,
     Choice,
     ChoiceEnd,
@@ -43,6 +44,10 @@ struct ParsedCondition {
     std::string var;
     CmpOp       op = CmpOp::Eq;
     i32         rhs = 0;
+    // M13, @flag: si is_flag, `var` es el nombre de una bandera de GameState.flags y op/rhs
+    // no significan nada; la condicion es "la bandera vale flag_expected".
+    bool        is_flag       = false;
+    bool        flag_expected = true;
 };
 
 // Una opcion dentro de un bloque @choice: `"texto" [if var OP valor] -> etiqueta`.

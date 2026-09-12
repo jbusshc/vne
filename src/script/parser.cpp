@@ -101,6 +101,24 @@ struct ParserState {
         result.errors.push_back(ParseError{"", line, msg});
     }
 
+    // Mensaje para un bloque (@if/@choice) que no encontro su @end. Si la linea que lo
+    // rompio tiene una indentacion que NO es multiplo de 4, esa es casi seguro la causa
+    // real y decir solo "falta @end" manda a buscar en el sitio equivocado (M13).
+    void error_unclosed_block(u32 header_line, const char* block, usize at_index) {
+        if (at_index < lines->size()) {
+            const SourceLine& bad = (*lines)[at_index];
+            if (bad.leading_spaces % 4 != 0) {
+                error(bad.number,
+                      std::string("indentacion de ") + std::to_string(bad.leading_spaces) +
+                          " espacios: tiene que ser multiplo de 4 (SPEC.md #9.2). El bloque '" +
+                          block + "' de la linea " + std::to_string(header_line) +
+                          " se queda sin cuerpo y sin '@end' por esto.");
+                return;
+            }
+        }
+        error(header_line, std::string("'") + block + "' sin '@end' correspondiente");
+    }
+
     std::string synth_label(const char* suffix) {
         std::string name = "__synth" + std::to_string(synth_counter) + "_" + suffix;
         return name;
@@ -115,6 +133,30 @@ void push(ParserState& st, ParsedInstr instr) {
 // no encaja.
 bool parse_condition_tokens(ParserState& st, const std::vector<std::string_view>& tokens,
                              usize start, u32 line_number, ParsedCondition* out) {
+    // M13: "flag <nombre>" y "not flag <nombre>" ademas de "variable OP valor". Antes leer
+    // una bandera obligaba a bajar a Lua (@lua), que para una condicion booleana es
+    // desproporcionado y ademas suspende el heap_guard (ADR-0032).
+    if (start < tokens.size() && tokens[start] == "flag") {
+        if (start + 1 >= tokens.size()) {
+            st.error(line_number, "se esperaba el nombre de la bandera tras 'flag'");
+            return false;
+        }
+        out->is_flag       = true;
+        out->flag_expected = true;
+        out->var            = std::string(tokens[start + 1]);
+        return true;
+    }
+    if (start + 1 < tokens.size() && tokens[start] == "not" && tokens[start + 1] == "flag") {
+        if (start + 2 >= tokens.size()) {
+            st.error(line_number, "se esperaba el nombre de la bandera tras 'not flag'");
+            return false;
+        }
+        out->is_flag       = true;
+        out->flag_expected = false;
+        out->var            = std::string(tokens[start + 2]);
+        return true;
+    }
+
     if (start + 2 >= tokens.size()) {
         st.error(line_number, "condicion mal formada, se esperaba 'variable OP valor'");
         return false;
@@ -182,7 +224,7 @@ void parse_if(ParserState& st, usize& i, u32 depth) {
     if (i < st.lines->size() && (*st.lines)[i].indent == depth && (*st.lines)[i].text == "@end") {
         i += 1;
     } else {
-        st.error(header.number, "'@if' sin '@end' correspondiente");
+        st.error_unclosed_block(header.number, "@if", i);
     }
 
     ParsedInstr end_lbl;
@@ -224,6 +266,17 @@ void parse_choice(ParserState& st, usize& i, u32 depth) {
                 i += 1;
                 continue;
             }
+            // ChoiceOption tiene un layout fijo en el .vnc (var_id/op/rhs, ADR-0030) que no
+            // tiene sitio para una condicion de bandera. Se rechaza en voz alta en vez de
+            // compilarla mal en silencio, que es lo que pasaria si se dejara pasar.
+            if (option.condition.is_flag) {
+                st.error(line.number,
+                         "una opcion de @choice todavia no puede condicionarse por una "
+                         "bandera (solo 'if variable OP valor'); usa una variable, o un @if "
+                         "alrededor del @choice");
+                i += 1;
+                continue;
+            }
             option.has_condition = true;
             idx += 3;
         }
@@ -240,7 +293,7 @@ void parse_choice(ParserState& st, usize& i, u32 depth) {
     if (i < st.lines->size() && (*st.lines)[i].indent == depth && (*st.lines)[i].text == "@end") {
         i += 1;
     } else {
-        st.error(header.number, "'@choice' sin '@end' correspondiente");
+        st.error_unclosed_block(header.number, "@choice", i);
     }
 
     push(st, choice_instr);
@@ -342,6 +395,32 @@ void parse_block(ParserState& st, usize& i, u32 depth) {
                         instr.value = value;
                         push(st, instr);
                     }
+                }
+            } else if (cmd == "@flag") {
+                // @flag <nombre> on|off (M13). Se acepta tambien true/false y 1/0 porque
+                // los tres pares aparecen en guiones de otros motores y rechazarlos no
+                // aporta nada.
+                bool value = false;
+                bool valid = tokens.size() >= 3;
+                if (valid) {
+                    std::string_view v = tokens[2];
+                    if (v == "on" || v == "true" || v == "1") {
+                        value = true;
+                    } else if (v == "off" || v == "false" || v == "0") {
+                        value = false;
+                    } else {
+                        valid = false;
+                    }
+                }
+                if (!valid) {
+                    st.error(sl.number, "@flag espera 'nombre on|off'");
+                } else {
+                    ParsedInstr instr;
+                    instr.kind  = InstrKind::SetFlag;
+                    instr.line  = sl.number;
+                    instr.var   = std::string(tokens[1]);
+                    instr.value = value ? 1 : 0;
+                    push(st, instr);
                 }
             } else if (cmd == "@add") {
                 if (tokens.size() < 3) {

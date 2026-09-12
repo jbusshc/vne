@@ -52,7 +52,8 @@ std::vector<SourceLine> lex_lines(std::string_view source) {
                 leading += 1;
             }
             u32 indent = static_cast<u32>(leading / 4);
-            lines.push_back(SourceLine{line_number, indent, content});
+            lines.push_back(
+                SourceLine{line_number, indent, static_cast<u32>(leading), content});
         }
 
         line_number += 1;

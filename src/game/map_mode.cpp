@@ -25,8 +25,18 @@ bool MapMode::load(const char* logical_name, Arena* arena) {
 
     u32 header[7];
     std::memcpy(header, bytes, sizeof(header));
-    if (header[0] != k_vnm_magic || header[1] != k_vnm_version) {
-        log_error("MapMode::load: '%s' no es un .vnm valido (magic/version)", logical_name);
+    if (header[0] != k_vnm_magic) {
+        log_error("MapMode::load: '%s' no es un .vnm valido (magic incorrecto)", logical_name);
+        return false;
+    }
+    if (header[1] != k_vnm_version) {
+        // Se RECHAZA, no se migra, y es deliberado (M13): un .vnm es un artefacto generado
+        // desde su .tmx con `vne_bake map`, igual que un .vnc desde su .vns. Los generados
+        // se regeneran; solo los datos de usuario (.vnsave) merecen una funcion de
+        // migracion, porque son lo unico que no se puede reconstruir. Ver ADR-0065.
+        log_error("MapMode::load: '%s' es version %u, se esperaba %u; vuelve a ejecutar "
+                  "'vne_bake map' sobre el .tmx",
+                  logical_name, header[1], k_vnm_version);
         return false;
     }
     grid_w        = header[2];

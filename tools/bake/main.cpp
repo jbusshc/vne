@@ -935,7 +935,15 @@ int bake_pack(const char* out_path, const char* baked_dir, const char* src_dir) 
     // dividir el tamano de la entrada del pak entre sizeof(record), mismo patron que
     // atlas_00.bin con sus SpriteRect). Debe coincidir con audio.cpp (duplicado a
     // proposito, mismo patron que el resto de formatos de este proyecto).
-    struct OggCatalogRecord {
+    // Debe coincidir con src/game/map_catalog.cpp (duplicado a proposito, mismo patron).
+struct MapCatalogRecord {
+    u16  map_id;
+    u8   _pad[2];
+    char logical_name[64];
+};
+static_assert(sizeof(MapCatalogRecord) == 68);
+
+struct OggCatalogRecord {
         u16  track_id;
         u8   _pad[2];
         char logical_name[64];
@@ -972,6 +980,39 @@ int bake_pack(const char* out_path, const char* baked_dir, const char* src_dir) 
         }
         pending.push_back(
             PendingEntry{"ogg_catalog.bin", std::move(catalog_bytes), PakEntryType::Other});
+    }
+
+    // Catalogo de mapas (M13), por el mismo motivo que el de musica: dentro de un .pak no
+    // hay directorio que recorrer, asi que la correspondencia map_id -> nombre logico se
+    // hornea aqui. Ver src/game/map_catalog.h.
+    {
+        HashCollisionCheck map_ids;
+        std::string        map_catalog_bytes;
+        for (const std::string& path : list_files_in_dir(baked_dir, ".vnm")) {
+            usize       slash    = path.find_last_of("/\\");
+            std::string filename = slash == std::string::npos ? path : path.substr(slash + 1);
+            std::string name_no_ext = filename;
+            usize       dot         = name_no_ext.find_last_of('.');
+            if (dot != std::string::npos) {
+                name_no_ext.resize(dot);
+            }
+            MapCatalogRecord record{};
+            record.map_id = static_cast<u16>(fnv1a_u32(name_no_ext.c_str()) % 65536u);
+            std::string previous_map;
+            if (!map_ids.add(name_no_ext, record.map_id, &previous_map)) {
+                log_error("vne_bake pack: colision de hash entre los mapas '%s' y '%s' "
+                          "(los dos dan map_id %u). Renombra uno de los dos.",
+                          name_no_ext.c_str(), previous_map.c_str(), record.map_id);
+                return 1;
+            }
+            std::snprintf(record.logical_name, sizeof(record.logical_name), "%s",
+                          filename.c_str());
+            map_catalog_bytes.append(reinterpret_cast<const char*>(&record), sizeof(record));
+        }
+        if (!map_catalog_bytes.empty()) {
+            pending.push_back(PendingEntry{"map_catalog.bin", std::move(map_catalog_bytes),
+                                           PakEntryType::Other});
+        }
     }
 
     if (pending.empty()) {

@@ -486,6 +486,7 @@ enum class CmdKind : u8 {
     Nop, Say, Show, Hide, Move, Bg, Wait, Sfx, Bgm, StopBgm,
     SetVar, AddVar, Jump, JumpIf, Choice, ChoiceEnd, Call, Return,
     LuaCall, Transition, Label, End,
+    SetFlag, JumpIfFlag,   // M13: @flag en el DSL (ADR-0065)
 };
 
 struct Cmd {

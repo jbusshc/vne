@@ -303,6 +303,7 @@ add_library(vne_base STATIC
   src/game/backlog_mode.cpp
   src/game/menu_mode.cpp
   src/game/save_load_mode.cpp
+  src/game/map_catalog.cpp
   src/game/map_mode.cpp
   ${VNE_GFX_BACKEND_SOURCES}
 )

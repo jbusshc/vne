@@ -64,8 +64,11 @@ Marcado inline dentro del texto: `{b}`, `{color=#rrggbb}`, `{ruby=lectura}`, `{w
 - `@sfx` necesita el nombre **con extensión** (se resuelve como `assets_src/ogg/<nombre>`),
   mientras que `@bgm` va **sin extensión** porque resuelve por catálogo (ADR-0034). La
   asimetría es deliberada: la pista de música tiene que sobrevivir a un guardado.
-- No hay sintaxis de flags: `GameState.flags` solo se toca desde Lua hasta que M13 añada
-  `@flag`.
+- `@flag <nombre> on|off` y `@if flag <nombre>` / `@if not flag <nombre>` existen desde M13
+  (ADR-0065). Usan el MISMO `flag_id` que `vn.set_flag` desde Lua (`fnv1a % k_max_flags`): si
+  divergieran, los dos caminos verian banderas distintas con el mismo nombre. Una opcion de
+  `@choice` no puede condicionarse por bandera (ChoiceOption tiene layout fijo, ADR-0030) y el
+  compilador lo rechaza en voz alta.
 
 **Un identificador desconocido es error de compilación**, con archivo y línea. Nunca un
 fallo silencioso en runtime. Desde M13 eso vale de verdad también para actor, pose y fondo
@@ -82,7 +85,7 @@ eran los dos últimos valores de SPEC.md §8.1 que faltaban.
 enum class CmdKind : u8 {
     Nop, Say, Show, Hide, Bg, Wait, Jump, Label, End,
     SetVar, AddVar, JumpIf, Choice, ChoiceEnd, Call, Return, LuaCall,
-    Sfx, Bgm, StopBgm, Move, Transition,
+    Sfx, Bgm, StopBgm, Move, Transition, SetFlag, JumpIfFlag,
 };
 
 struct Cmd {

@@ -8,6 +8,7 @@
 #include <SDL3/SDL.h>
 
 #include "base/arena.h"
+#include "game/map_catalog.h"
 #include "game/map_mode.h"
 
 // assets_baked/demo_map.vnm ya esta horneado por el propio build (CMakeLists.txt: regla
@@ -151,4 +152,31 @@ TEST_CASE("MapMode::update: el jugador no se mete dentro de la pared al empujarl
     CHECK(state.player_y > y_before);
 
     arena_destroy(&a);
+}
+
+TEST_CASE("map_catalog: resuelve map_id a nombre logico (M13)") {
+    // Hasta M13 map_id estaba puesto a 1 a mano en main.cpp con el comentario "cualquier
+    // valor distinto de 0 basta": guardar y cargar funcionaba solo porque siempre se
+    // cargaba el mismo mapa pasara lo que pasara. Ahora el id sale del nombre, igual que
+    // una pista de musica (ADR-0034), y sobrevive a un guardado de verdad.
+    map_catalog_init();
+    REQUIRE(map_catalog_count() > 0);
+
+    u16         id   = map_catalog_id_of("demo_map");
+    const char* name = map_catalog_resolve(id);
+    REQUIRE(name != nullptr);
+    CHECK(std::string_view(name) == "demo_map.vnm");
+
+    // Y el mapa que resuelve se puede cargar de verdad: la cadena entera id -> nombre ->
+    // archivo, que es lo que hara main.cpp al cargar una partida.
+    Arena   a = arena_create(1 * 1024 * 1024, "test_map_catalog");
+    MapMode m;
+    CHECK(m.load(name, &a));
+    arena_destroy(&a);
+}
+
+TEST_CASE("map_catalog: un map_id que no existe devuelve nullptr, no un mapa cualquiera") {
+    map_catalog_init();
+    CHECK(map_catalog_resolve(0) == nullptr);
+    CHECK(map_catalog_resolve(0xFFFFu) == nullptr);
 }

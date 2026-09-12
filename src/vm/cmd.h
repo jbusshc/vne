@@ -40,6 +40,11 @@ enum class CmdKind : u8 {
     StopBgm,
     Move,
     Transition,
+    // M13: @flag en el DSL. SPEC.md #8.1 no los listaba, pero SPEC.md #12 los pide
+    // explicitamente para M13 ("@flag en el DSL, para no tener que bajar a Lua solo para
+    // leer una flag"); la lista de #8.1 queda actualizada. Ver ADR-0065.
+    SetFlag,
+    JumpIfFlag,
 };
 
 // Operadores de comparacion de JumpIf y de las condiciones opcionales de @choice
@@ -70,6 +75,10 @@ struct Cmd {
         struct { u32 target_pc; }                                 jump;
         struct { u32 name_hash; }                                 label;
         struct { u16 var_id; i32 value; }                         set_var;
+        // M13. Relleno explicito (ADR-0028): estos structs viajan en el .vnc, que lo
+        // escribe una herramienta y lo lee el juego.
+        struct { u16 flag_id; u8 value; u8 _pad_f[1]; }           set_flag;
+        struct { u16 flag_id; u8 expected; u8 _pad_jf[1]; u32 target_pc; } jump_if_flag;
         struct { u16 var_id; i32 value; }                         add_var;
         // u8 _pad explicito antes de rhs (ADR-0028: relleno de alineacion implicito no
         // se preserva de forma fiable a traves de copias bajo MSVC).

@@ -147,7 +147,33 @@ nombre se resuelve a un hueco por `fnv1a % 512`, sin tabla de nombres (ADR-0029)
 nombres distintos podrían colisionar en el mismo hueco. No hay forma de detectarlo al
 compilar, así que conviene mantener el conjunto de variables pequeño y revisado.
 
-No hay sintaxis de flags en el DSL: `GameState.flags` solo se toca desde Lua.
+## Banderas
+
+```
+@flag vio_carta on          # tambien valen true/1
+@flag tiene_llave off       # tambien valen false/0
+
+@if flag vio_carta
+    marta: Ya sabes lo que pasó.
+@else
+    marta: Deja que te cuente.
+@end
+
+@if not flag tiene_llave
+    "La puerta no cede."
+@end
+```
+
+Las banderas son bits de `GameState.flags` (2048 huecos) y sobreviven a un guardado. Existen
+desde M13; antes había que bajar a `@lua` solo para leer un booleano.
+
+**`@flag` y Lua comparten la misma bandera**: el id es `fnv1a % 2048` en los dos caminos, así
+que `@flag x on` y `vn.get_flag("x")` hablan del mismo bit. Las colisiones entre dos nombres
+de bandera se detectan al hornear, igual que con las variables.
+
+Una opción de `@choice` **no** puede condicionarse por bandera (`"texto" if flag x -> ...`):
+la tabla de opciones del `.vnc` tiene un layout fijo sin sitio para eso, y el compilador lo
+rechaza diciéndolo. La vuelta es usar una variable, o envolver el `@choice` en un `@if`.
 
 ## Elecciones
 

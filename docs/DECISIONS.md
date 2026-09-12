@@ -2210,6 +2210,63 @@ modificadas.
 
 ---
 
+## ADR-0065 — `@flag` en el DSL, catálogo de mapas, y por qué `.vnm` no se migra
+
+**Fecha:** 2026-09-11
+**Hito:** M13
+**Estado:** aceptada
+
+Tres decisiones pequeñas de la última etapa de M13, agrupadas porque ninguna da para un ADR
+propio.
+
+**`@flag` añade dos valores a `CmdKind`.** SPEC.md §8.1 fija una lista de 22 valores que no
+incluye `SetFlag` ni `JumpIfFlag`, y las secciones 4–8 son decisiones tomadas (CLAUDE.md
+regla 3). Pero SPEC.md §12 pide `@flag` explícitamente para M13 ("para no tener que bajar a
+Lua solo para leer una flag"), así que la propia especificación se contradice consigo misma y
+gana la instrucción concreta: se añaden los dos valores y **la lista de §8.1 queda
+actualizada**, igual que se hizo en M12 cuando `Cmd` creció a 20 bytes.
+
+Sintaxis: `@flag <nombre> on|off` (se aceptan también `true/false` y `1/0`) y, en las
+condiciones, `@if flag <nombre>` / `@if not flag <nombre>`. El `flag_id` es
+`fnv1a % k_max_flags`, **exactamente el mismo cálculo que `script/lua_bindings.cpp`**: si los
+dos caminos usaran hashes distintos, `@flag` y `vn.set_flag` verían banderas diferentes con el
+mismo nombre y se contradirían sin que nada lo avisara. Hay un test que lo fija.
+
+Una opción de `@choice` **no** puede condicionarse por bandera: `ChoiceOption` tiene un layout
+fijo en el `.vnc` (`var_id`/`op`/`rhs`, ADR-0030) sin sitio para eso. Se rechaza con un mensaje
+que lo dice y propone la alternativa, en vez de compilarlo mal en silencio.
+
+**El catálogo de mapas es el de música otra vez (ADR-0034).** `GameState.map_id` es un `u16`
+fijo por SPEC.md §8.2 que debe sobrevivir a un guardado, así que no puede ser un índice en una
+tabla que dependa del orden del sistema de archivos. `map_id = fnv1a(nombre) % 65536`, con el
+catálogo escaneado de `assets_baked/` en backend suelto y horneado a `map_catalog.bin` en
+empaquetado. Hasta aquí `map_id` estaba puesto a `1` a mano en `main.cpp` con el comentario
+"cualquier valor distinto de 0 basta": guardar y cargar funcionaba **solo porque siempre se
+cargaba el mismo mapa pasara lo que pasara**.
+
+**`.vnm` no tiene función de migración, y es deliberado.** M13 listaba "migración de versión de
+`.vnm`, que tiene `k_vnm_version` pero ninguna función de migración" como algo que faltaba. Al
+mirarlo de cerca la premisa no se sostiene: un `.vnm` es un artefacto **generado** desde su
+`.tmx` con `vne_bake map`, igual que un `.vnc` desde su `.vns`. M12 ya decidió que los
+generados se **rechazan y se regeneran**, nunca se migran; solo `.vnsave` merece migración
+porque es lo único que no se puede reconstruir. Escribir `migrate_vnm_v1_to_v2` contradiría
+esa decisión y además no hay ninguna v1 obsoleta de la que migrar.
+
+Lo que sí faltaba era el mensaje: el cargador juntaba magic y versión en un
+`"no es un .vnm valido (magic/version)"` que no dice cuál de las dos falló ni qué hacer. Ahora
+son dos mensajes y el de versión dice qué versión trae, cuál se esperaba y que hay que volver
+a ejecutar `vne_bake map`.
+
+**Indentación irregular.** El lexer divide los espacios iniciales entre 4 redondeando hacia
+abajo, así que indentar con 2 espacios da nivel 0 y el cuerpo de un `@if` se queda vacío; el
+error que salía era `'@if' sin '@end' correspondiente`, que manda a buscar el problema al
+sitio equivocado — el `@end` está donde debe. `SourceLine` guarda ahora los espacios sin
+dividir, y cuando un bloque se queda sin cerrar se mira si la línea que lo rompió tiene una
+indentación que no es múltiplo de 4: si lo es, ese es el mensaje, y apunta a **esa** línea, no
+a la cabecera del bloque.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
