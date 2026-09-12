@@ -134,3 +134,123 @@ TEST_CASE("tmx_parse: un TMX sin las capas que exige el subconjunto falla con me
     CHECK_FALSE(tmx_parse("no soy xml", &map, &error));
     CHECK_FALSE(error.empty());
 }
+
+// --- Robustez del escaner (M13) --------------------------------------------------------
+//
+// Hasta M13 estos cuatro casos producian un .vnm silenciosamente incorrecto o culpaban a la
+// causa equivocada: encoding y compression se ignoraban por completo, asi que un CSV
+// comprimido pasaba por parse_csv_u16, sacaba numeros del base64 y acababa quejandose del
+// TAMANO de la capa. El criterio de SPEC.md #12 para M13 es justamente que se rechace
+// nombrando la compresion.
+
+TEST_CASE("tmx_parse: una capa comprimida se rechaza NOMBRANDO la compresion (criterio M13)") {
+    std::string tmx =
+        "<map width=\"2\" height=\"2\" tilewidth=\"64\">\n"
+        " <layer name=\"tiles\">\n"
+        "  <data encoding=\"base64\" compression=\"zlib\">eJxjYGBgYGAAAAAFAAE=</data>\n"
+        " </layer>\n"
+        " <layer name=\"collision\">\n"
+        "  <data encoding=\"csv\">1,0,0,1</data>\n"
+        " </layer>\n"
+        "</map>\n";
+
+    ParsedMap   map;
+    std::string error;
+    REQUIRE_FALSE(tmx_parse(tmx, &map, &error));
+    MESSAGE("mensaje: " << error);
+    CHECK(error.find("zlib") != std::string::npos);
+    CHECK(error.find("comprimida") != std::string::npos);
+    // Y NO culpa al tamano, que es lo que hacia antes.
+    CHECK(error.find("tamano") == std::string::npos);
+}
+
+TEST_CASE("tmx_parse: gzip y zstd tambien se nombran, no solo zlib") {
+    for (const char* algo : {"gzip", "zstd"}) {
+        std::string tmx = std::string(
+            "<map width=\"2\" height=\"2\" tilewidth=\"64\">\n"
+            " <layer name=\"tiles\">\n"
+            "  <data encoding=\"base64\" compression=\"") + algo + "\">xxxx</data>\n"
+            " </layer>\n"
+            "</map>\n";
+        ParsedMap   map;
+        std::string error;
+        REQUIRE_FALSE(tmx_parse(tmx, &map, &error));
+        CHECK(error.find(algo) != std::string::npos);
+    }
+}
+
+TEST_CASE("tmx_parse: un encoding que no es csv se rechaza nombrandolo") {
+    std::string tmx =
+        "<map width=\"2\" height=\"2\" tilewidth=\"64\">\n"
+        " <layer name=\"tiles\">\n"
+        "  <data encoding=\"base64\">eJxjYGBgYGAAAAAFAAE=</data>\n"
+        " </layer>\n"
+        "</map>\n";
+
+    ParsedMap   map;
+    std::string error;
+    REQUIRE_FALSE(tmx_parse(tmx, &map, &error));
+    MESSAGE("mensaje: " << error);
+    CHECK(error.find("base64") != std::string::npos);
+}
+
+TEST_CASE("tmx_parse: width/height que no cuadran con las celdas del CSV dan los numeros") {
+    // El <map> declara 3x3 = 9 celdas pero el CSV solo trae 4. Antes esto daba "capa
+    // ausente o de tamano incorrecto", sin decir cuantas esperaba ni cuantas encontro.
+    std::string tmx =
+        "<map width=\"3\" height=\"3\" tilewidth=\"64\">\n"
+        " <layer name=\"tiles\">\n"
+        "  <data encoding=\"csv\">1,2,3,4</data>\n"
+        " </layer>\n"
+        " <layer name=\"collision\">\n"
+        "  <data encoding=\"csv\">0,0,0,0,0,0,0,0,0</data>\n"
+        " </layer>\n"
+        "</map>\n";
+
+    ParsedMap   map;
+    std::string error;
+    REQUIRE_FALSE(tmx_parse(tmx, &map, &error));
+    MESSAGE("mensaje: " << error);
+    CHECK(error.find("9") != std::string::npos);  // las que declara
+    CHECK(error.find("4") != std::string::npos);  // las que hay
+}
+
+TEST_CASE("tmx_parse: dos tilesets se rechazan explicando por que (gid crudo)") {
+    std::string tmx =
+        "<map width=\"2\" height=\"2\" tilewidth=\"64\">\n"
+        " <tileset firstgid=\"1\" source=\"a.tsx\"/>\n"
+        " <tileset firstgid=\"50\" source=\"b.tsx\"/>\n"
+        " <layer name=\"tiles\">\n"
+        "  <data encoding=\"csv\">1,2,3,4</data>\n"
+        " </layer>\n"
+        " <layer name=\"collision\">\n"
+        "  <data encoding=\"csv\">0,0,0,0</data>\n"
+        " </layer>\n"
+        "</map>\n";
+
+    ParsedMap   map;
+    std::string error;
+    REQUIRE_FALSE(tmx_parse(tmx, &map, &error));
+    MESSAGE("mensaje: " << error);
+    CHECK(error.find("tileset") != std::string::npos);
+    CHECK(error.find("firstgid") != std::string::npos);
+}
+
+TEST_CASE("tmx_parse: un solo tileset sigue siendo valido") {
+    // Guarda contra pasarse de estricto: el caso normal tiene exactamente un tileset.
+    std::string tmx =
+        "<map width=\"2\" height=\"2\" tilewidth=\"64\">\n"
+        " <tileset firstgid=\"1\" source=\"a.tsx\"/>\n"
+        " <layer name=\"tiles\">\n"
+        "  <data encoding=\"csv\">1,2,3,4</data>\n"
+        " </layer>\n"
+        " <layer name=\"collision\">\n"
+        "  <data encoding=\"csv\">0,0,0,0</data>\n"
+        " </layer>\n"
+        "</map>\n";
+
+    ParsedMap   map;
+    std::string error;
+    INFO("error: " << error);
+    CHECK(tmx_parse(tmx, &map, &error));
+}

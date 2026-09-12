@@ -59,24 +59,39 @@ std::vector<u16> parse_csv_u16(std::string_view csv) {
     return values;
 }
 
+// Por que puede fallar la extraccion de una capa. Antes era un `bool` y todos los fallos
+// acababan en el mismo mensaje ("capa ausente o de tamano incorrecto"), que para un TMX
+// comprimido nombraba una causa **que no era**: el CSV comprimido pasaba por parse_csv_u16,
+// que se salta lo que no sean digitos, sacaba numeros de un base64 y terminaba quejandose
+// del tamano. M13 exige nombrar la compresion como causa (SPEC.md #12).
+enum class LayerScan {
+    Ok,
+    NotFound,
+    UnsupportedEncoding,   // encoding distinto de "csv" (base64, xml implicito...)
+    Compressed,            // compression="zlib" | "gzip" | "zstd"
+    Malformed,             // <data> sin cerrar o fuera de su <layer>
+};
+
 // Extrae el contenido de <data encoding="csv">...</data> dentro de la primera capa cuyo
-// atributo name coincida, buscando desde `from`.
-bool extract_layer_csv(std::string_view xml, std::string_view layer_name, usize from,
-                        std::vector<u16>* out_values) {
+// atributo name coincida, buscando desde `from`. En los casos UnsupportedEncoding y
+// Compressed deja en *out_detail el valor literal que traia el TMX, para que el mensaje de
+// error pueda repetirlo tal cual en vez de describirlo de memoria.
+LayerScan extract_layer_csv(std::string_view xml, std::string_view layer_name, usize from,
+                             std::vector<u16>* out_values, std::string* out_detail) {
     usize search_from = from;
     for (;;) {
         usize layer_start = xml.find("<layer", search_from);
         if (layer_start == std::string_view::npos) {
-            return false;
+            return LayerScan::NotFound;
         }
         usize header_end = xml.find('>', layer_start);
         if (header_end == std::string_view::npos) {
-            return false;
+            return LayerScan::Malformed;
         }
         std::string_view header      = xml.substr(layer_start, header_end - layer_start);
         usize             layer_close = xml.find("</layer>", header_end);
         if (layer_close == std::string_view::npos) {
-            return false;
+            return LayerScan::Malformed;
         }
 
         if (find_tag_attr(header, "name") == layer_name) {
@@ -85,28 +100,71 @@ bool extract_layer_csv(std::string_view xml, std::string_view layer_name, usize 
             // fragil, y `npos + 1` en cualquier variante de este patron se desborda a 0.
             usize data_open = xml.find("<data", header_end);
             if (data_open == std::string_view::npos || data_open > layer_close) {
-                return false;
+                return LayerScan::Malformed;
             }
             usize data_gt = xml.find('>', data_open);
             if (data_gt == std::string_view::npos || data_gt > layer_close) {
-                return false;
+                return LayerScan::Malformed;
             }
+            std::string_view data_tag = xml.substr(data_open, data_gt - data_open);
+
+            // La compresion se mira ANTES que el encoding: un <data encoding="base64"
+            // compression="zlib"> tiene los dos problemas y la compresion es la causa mas
+            // informativa de las dos para quien exporto el mapa.
+            std::string_view compression = find_tag_attr(data_tag, "compression");
+            if (!compression.empty()) {
+                *out_detail = std::string(compression);
+                return LayerScan::Compressed;
+            }
+            std::string_view encoding = find_tag_attr(data_tag, "encoding");
+            if (encoding != "csv") {
+                // encoding ausente en TMX significa XML por elemento (<tile gid="..."/>),
+                // que este escaner tampoco soporta; se nombra como tal.
+                *out_detail = encoding.empty() ? std::string("xml (sin atributo encoding)")
+                                                : std::string(encoding);
+                return LayerScan::UnsupportedEncoding;
+            }
+
             usize data_close = xml.find("</data>", data_gt);
             if (data_close == std::string_view::npos || data_close > layer_close) {
-                return false;
+                return LayerScan::Malformed;
             }
             *out_values = parse_csv_u16(xml.substr(data_gt + 1, data_close - (data_gt + 1)));
-            return true;
+            return LayerScan::Ok;
         }
         search_from = layer_close + 1;
     }
+}
+
+// Mensaje de la capa `name` para un fallo que no sea Ok. Se arma aqui y no en cada llamante
+// para que las dos capas ('tiles' y 'collision') digan exactamente lo mismo.
+std::string layer_error_message(LayerScan scan, std::string_view name,
+                                 const std::string& detail) {
+    std::string prefix = "capa '" + std::string(name) + "': ";
+    switch (scan) {
+        case LayerScan::Ok:
+            return prefix + "sin error";
+        case LayerScan::NotFound:
+            return prefix + "no existe ninguna <layer> con ese nombre";
+        case LayerScan::Compressed:
+            return prefix + "esta comprimida (compression=\"" + detail +
+                   "\"). Este horneador solo lee CSV sin comprimir (ADR-0044): en Tiled, "
+                   "Mapa > Propiedades > Formato de capa de tiles = CSV.";
+        case LayerScan::UnsupportedEncoding:
+            return prefix + "usa encoding=\"" + detail +
+                   "\". Este horneador solo lee CSV (ADR-0044): en Tiled, Mapa > "
+                   "Propiedades > Formato de capa de tiles = CSV.";
+        case LayerScan::Malformed:
+            return prefix + "su <data> esta mal formado o cae fuera de la <layer>";
+    }
+    return prefix + "error desconocido";
 }
 
 }  // namespace
 
 bool tmx_parse(std::string_view xml, ParsedMap* out, std::string* out_error) {
     *out = ParsedMap{};
-    auto fail = [&](const char* message) {
+    auto fail = [&](const std::string& message) {
         if (out_error != nullptr) {
             *out_error = message;
         }
@@ -131,14 +189,44 @@ bool tmx_parse(std::string_view xml, ParsedMap* out, std::string* out_error) {
     }
     usize tile_count = static_cast<usize>(grid_w) * static_cast<usize>(grid_h);
 
-    std::vector<u16> tiles;
-    if (!extract_layer_csv(xml, "tiles", map_end, &tiles) || tiles.size() != tile_count) {
-        return fail("capa 'tiles' ausente o de tamano incorrecto");
+    // Un solo tileset (ADR-0044): el .vnm guarda el gid crudo, sin restar el firstgid de
+    // cada tileset, asi que con dos o mas los tiles del segundo saldrian desplazados. Antes
+    // no se comprobaba y el mapa salia mal en silencio.
+    usize tileset_count = 0;
+    for (usize p = xml.find("<tileset", map_end); p != std::string_view::npos;
+         p = xml.find("<tileset", p + 1)) {
+        tileset_count += 1;
     }
+    if (tileset_count > 1) {
+        return fail("el mapa usa " + std::to_string(tileset_count) +
+                    " tilesets; este horneador solo soporta uno (ADR-0044), porque el .vnm "
+                    "guarda el gid crudo y no resta el firstgid de cada tileset");
+    }
+
+    std::vector<u16> tiles;
+    std::string      detail;
+    LayerScan        scan = extract_layer_csv(xml, "tiles", map_end, &tiles, &detail);
+    if (scan != LayerScan::Ok) {
+        return fail(layer_error_message(scan, "tiles", detail));
+    }
+    // width/height del <map> contra las celdas que trae el CSV de verdad (M13). Antes solo
+    // se comprobaba que coincidieran, sin decir con que: un TMX editado a mano producia un
+    // .vnm con menos tiles de los que la rejilla declaraba.
+    if (tiles.size() != tile_count) {
+        return fail("capa 'tiles': el <map> declara " + std::to_string(grid_w) + "x" +
+                    std::to_string(grid_h) + " = " + std::to_string(tile_count) +
+                    " celdas, pero su CSV trae " + std::to_string(tiles.size()));
+    }
+
     std::vector<u16> collision;
-    if (!extract_layer_csv(xml, "collision", map_end, &collision) ||
-        collision.size() != tile_count) {
-        return fail("capa 'collision' ausente o de tamano incorrecto");
+    scan = extract_layer_csv(xml, "collision", map_end, &collision, &detail);
+    if (scan != LayerScan::Ok) {
+        return fail(layer_error_message(scan, "collision", detail));
+    }
+    if (collision.size() != tile_count) {
+        return fail("capa 'collision': el <map> declara " + std::to_string(grid_w) + "x" +
+                    std::to_string(grid_h) + " = " + std::to_string(tile_count) +
+                    " celdas, pero su CSV trae " + std::to_string(collision.size()));
     }
 
     out->grid_w    = static_cast<u32>(grid_w);
