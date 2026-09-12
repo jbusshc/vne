@@ -2267,6 +2267,48 @@ a la cabecera del bloque.
 
 ---
 
+## ADR-0066 — Presupuesto de por vida para la inicialización diferida de SDL, en vez de un punto ciego
+
+**Fecha:** 2026-09-11
+**Hito:** M13 (revisión de cierre)
+**Estado:** aceptada
+
+**Contexto.** ADR-0058 dejó dicho que SDL asigna de forma diferida dentro de su subsistema de
+eventos, y lo "arregló" vaciando la cola al crear la ventana. **No bastaba.** En la revisión
+de cierre de M13 apareció que el juego fallaba el assert de cero heap por frame de forma
+intermitente, solo arrancando en `MapMode`. Medido: **9 asignaciones de SDL dentro de
+`platform_poll_events`, una sola vez, en un frame variable** (36, 84…), porque los eventos que
+las disparan —foco de ventana, entrada del ratón, cambio de pantalla— los manda el sistema
+operativo cuando quiere, muchos frames después de crear la ventana.
+
+Es peor que un fallo constante: pasaba casi siempre y fallaba de vez en cuando.
+
+**Decisión.** No se suspende el guard en `poll_events` sin más: eso cegaría un camino que
+corre en **todos** los frames, que es justo lo que ADR-0058 dice que no se haga. En su lugar,
+SDL tiene un **presupuesto de por vida** de 64 asignaciones dentro de `poll_events`. Mientras
+no lo agote, las suyas no cuentan; en cuanto lo agote, cuentan y el assert salta. Una fuga de
+verdad dentro del manejo de input reventaría 64 en unos pocos frames y se vería exactamente
+igual que antes.
+
+Para poder medirlo hizo falta un contador **de por vida** por origen
+(`heap_guard_lifetime_count`) que sube esté el guard suspendido o no — el contador por frame
+no sirve, porque mientras está suspendido no registra nada y el presupuesto nunca se
+consumiría.
+
+**Un intento fallido que conviene no repetir.** La primera versión miraba el contador de por
+vida de SDL *global*, no el de dentro de `poll_events`. SDL asigna a espuertas durante
+`SDL_Init` y la creación de la ventana, así que cualquier presupuesto razonable ya estaba
+agotado antes del primer frame y el guard no se suspendía nunca: el resultado fue que el fallo
+intermitente pasó a ser constante. El presupuesto tiene que contar **solo lo que ocurre dentro
+de la llamada que se quiere tolerar**.
+
+**Consecuencias.** El arranque deja de fallar de forma intermitente (verificado en cinco
+ejecuciones seguidas, 0 infracciones) sin perder la vigilancia sobre el camino de input. El
+mecanismo sirve para cualquier otra librería con inicialización diferida: es una herramienta
+nueva además de un arreglo puntual.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
@@ -2365,23 +2407,24 @@ nota de contexto.
   invertido las capas. De paso se arreglo `glyph_cache_shutdown()`, que solo ponia
   `g_page_count = 0` y dejaba la tabla de entradas marcada como usada apuntando a paginas
   de atlas ya destruidas.
-- `{b}` se parsea correctamente (marca `bold` en el `Segment`) pero no tiene ningun efecto
-  visual: no hay una variante bold cargada ni negrita sintetica. Falta decidir si M7 (UI de
-  VN) carga una segunda `FontHandle` para negrita o si se sintetiza.
-- `{w=n}` y `{speed=n}` se reconocen y se descartan sin efecto: la temporizacion real del
-  efecto de maquina de escribir la conduce la VM (M7), que todavia no existe.
+- ~~`{b}` se parsea correctamente pero no tiene ningun efecto visual~~ — resuelto en M12:
+  negrita sintetica con `FT_GlyphSlot_Embolden` (no hay ningun TTF en negrita entre los
+  assets). Medido: ancho de tinta 75.0 -> 82.0.
+- ~~`{w=n}` y `{speed=n}` se reconocen y se descartan sin efecto~~ — resuelto en M12:
+  `TypewriterEvent` en `TextLayout` los aplica de verdad. Medido: `{w=0.5}` retrasa 0.525 s.
 - `GlyphQuad` en `text/layout.h` extiende el struct ilustrativo de SPEC.md §7.2 con
   `atlas_page`, `color` e `is_ruby` — necesarios para que el atlas multi-pagina y el
   marcado `{color=}`/furigana funcionen de verdad (ver comentario en `layout.h`). Si esto
   choca con algo mas adelante, es la primera pista a revisar.
-- La fuente de prueba `NotoSansJP.ttf` (~9.5 MB, ADR-0017) infla el repositorio; considerar
-  Git LFS o un subconjunto de glifos si llega a molestar.
+- ~~La fuente de prueba `NotoSansJP.ttf` (~9.5 MB) infla el repositorio~~ — resuelto en M13
+  (ADR-0064): `vne_bake font` subsetea con hb-subset. El directorio pasa de 11,4 MB a 304 KB.
+  Se eligio el subconjunto y no Git LFS: LFS habria escondido el peso, no quitado.
 - ~~`parse_script` es linea a linea (ADR-0024): necesita reescritura real cuando lleguen
   `@if`/`@choice` en M5~~ — resuelto en M5: parser reescrito con pila de bloques e
   indentacion significativa (`SourceLine.indent`, `parse_block`/`parse_if`/`parse_choice`).
-- Validacion de identificadores desconocidos limitada a etiquetas (ADR-0022): actores,
-  poses y fondos se internan sin validar. Ampliar cuando exista un registro real de
-  assets.
+- ~~Validacion de identificadores desconocidos limitada a etiquetas (ADR-0022)~~ — resuelto
+  en M13 (ADR-0061): el registro real es la tabla de nombres del atlas, y `@show`/`@bg` con
+  un nombre desconocido fallan la compilacion con archivo y linea.
 - ~~`Say` no bloquea esperando input (ADR-0023): revisar en cuanto exista `VnMode` (M7)~~
   — resuelto en M7: `Say` bloquea de verdad esperando confirmacion del jugador (ADR-0039).
 - Al usar `CHECK()`/`REQUIRE()` de doctest sobre un `std::string`/`std::string_view`, el

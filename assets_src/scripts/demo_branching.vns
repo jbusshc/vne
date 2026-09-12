@@ -5,6 +5,9 @@
 @set confianza = 0
 @set intentos = 0
 
+# M13: banderas desde el DSL, sin bajar a Lua. Relleno de prueba como el resto.
+@flag vio_intro on
+
 :: inicio
 
 narrador: Guion de prueba de ramificacion, capitulo unico.
@@ -14,6 +17,10 @@ narrador: Guion de prueba de ramificacion, capitulo unico.
     @jump final_bueno
 @else
     narrador: Rama baja: hace falta ganar confianza.
+@end
+
+@if flag vio_intro
+    narrador: La bandera de intro esta puesta (comprobacion de @flag, M13).
 @end
 
 @add confianza 1

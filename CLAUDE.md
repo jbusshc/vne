@@ -5,89 +5,74 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** M13 — Integridad de datos y herramientas offline (en progreso). Plan por
-etapas: (0) registro de assets con nombres lógicos — `atlas_00.bin` sube de v2 a v3 con
-tabla de nombres, que es justo lo que M11 dejó anotado como "lo necesita M15" y resulta que
-lo necesita antes M13; (1) validación en compilación de actor/pose/fondo, que cierra
-ADR-0022 abierto desde M3; (2) detección de colisiones de hash al hornear (variables,
-flags, pistas, claves de catálogo: ADR-0029/0034/0047 aceptaron el riesgo sin detección
-ninguna); (3) escáner TMX robusto — rechazar compresión y varios tilesets nombrando la
-causa, validar `width`/`height` contra las celdas reales; (4) `vne_bake font` con
-subconjunto de glifos para sacar los 9.5 MB de `NotoSansJP.ttf` del repositorio; (5)
-pendientes menores: migración de `.vnm`, catálogo de mapas por `map_id`, `@flag` en el DSL,
-error útil ante indentación irregular; (6) **el consumidor del registro**: que `@bg` y
-`@show`/`@hide`/`@move` dibujen de verdad, con placeholders generados.
+**Hito activo:** ninguno. M0–M13 están cerrados. El siguiente por defecto es **M14**
+(configuración y localización completas: `config.ini`, backlog relocalizable, `.vnsave` v4).
 
-**Hechas: 0, 1, 2, 3, 4 y 6** (la 6 se adelantó al final de la 1 para validar el registro con un
-consumidor real en vez de acumular etapas encima de una API sin llamante). Pendiente: 5.
+**Último hito completado:** M13 — Integridad de datos y herramientas offline.
+El tema del hito es que **el motor deje de fallar en silencio**: donde antes un nombre mal
+escrito, una colisión de hash o un TMX exportado con otra opción producían un resultado
+incorrecto sin decir nada, ahora hay un error que nombra la causa y, cuando se puede, cómo
+arreglarla.
 
-La etapa 6 no está en los criterios de M13, y se hace igualmente por dos motivos: sin ella
-el registro sería una API sin llamante, que es exactamente lo que SPEC.md §1 dice que no se
-hace (mismo argumento por el que M11 no puso nombres al atlas); y es el hueco más grande
-del proyecto (ver "Pendientes observados"). Detalle completo en docs/DECISIONS.md al cerrar.
+**Registro de assets (ADR-0061).** `atlas_00.bin` sube a v3 con tabla de nombres lógicos, y
+**esa tabla es el registro**: no hay un segundo archivo que pueda desincronizarse. Con él,
+`@show`/`@bg` se validan al compilar — **cierra ADR-0022, abierto desde M3**. La convención es
+`actor_<actor>_<pose>` y `bg_<nombre>`; el prefijo existe porque el atlas tiene un espacio de
+nombres plano y un fondo "marta" chocaría con un actor "marta".
 
-**Último hito completado:** M12 — Presentación y jugabilidad completas.
-`CmdKind` gana `Move` y `Transition`, los dos últimos valores de SPEC.md §8.1 que
-faltaban: `sizeof(Cmd)` sube de 16 a 20 bytes y el `.vnc` a v4. Un `.vnc` v3 obsoleto se
-**rechaza** con error claro, no se "migra" — el criterio original hablaba de migrar una
-partida, pero `.vnsave` nunca embebe datos de `Cmd` (solo `vm.pc`/`script_id`), así que no
-hay nada que migrar; corregido en SPEC.md. Sintaxis nueva `@move slot N to X Y in S` y
-`@transition <fade|wipe|dissolve> S`, que no estaba especificada en ningún sitio. El shader
-de transición (HLSL+GLSL a mano, ADR-0010) cubre las tres variantes con **una sola fórmula**
-(`alpha = saturate((threshold - mask) * sharpness)`), con máscaras generadas
-proceduralmente en código, no assets. `{w=n}` y `{speed=n}` pasan de reconocerse y
-descartarse a tener efecto real, vía un array paralelo de `TypewriterEvent` en `TextLayout`;
-`{b}` usa negrita sintética de FreeType (`FT_GlyphSlot_Embolden`: no hay ningún TTF en
-negrita entre los assets). El modo auto pasa de 1.2 s fijos a base + por glifo. Polifonía
-real de efectos y colisión AABB en `MapMode`.
+**Fondos y actores por fin se dibujan (ADR-0062).** Era el hueco más grande del proyecto:
+`@bg`, `@show`, `@hide` y `@move` mantenían estado que **nadie convertía en sprites**. Al
+conectarlo resultó que no se podía: los ids son índices de un interner local a cada
+compilación, no hashes, así que no había forma de volver del id al nombre. El `.vnc` sube a v5
+con tres tablas de nombres. `draw_calls` **no sube** al añadir fondo y actores (sigue en 4):
+salen del mismo atlas y entran en el mismo lote.
 
-**Ojo con dos cosas que este hito destapó y que contradicen lo que el propio proyecto daba
-por bueno:**
+**Colisiones de hash (ADR-0063), y una medición que importa.** ADR-0029/0034/0047 aceptaron el
+riesgo sin ninguna detección. Ahora se detecta al hornear en los tres espacios (variables,
+pistas, claves de catálogo) nombrando **los dos** nombres que chocan. Lo revelador: con
+`k_max_vars = 512`, **`puntos` y `rumor` colisionan con solo 25 nombres realistas**. No es un
+caso raro; un juego real lo va a sufrir.
 
-1. **`ma_sound_init_copy` NO servía para la polifonía**, pese a que el plan de M12 lo daba
-   por hecho. Exige `pResourceManagerDataSource`, que solo rellena `ma_sound_init_from_file`;
-   el camino empaquetado de M11 usa `ma_sound_init_from_data_source` y lo deja a `NULL`.
-   Medido: `MA_INVALID_OPERATION` en `.pak`, `MA_SUCCESS` en suelto. Habría funcionado en
-   desarrollo y estado muerta en el juego distribuido. Además asigna (2 por clon). La
-   solución (ADR-0056) crea las 8 voces en `audio_load`, no por reproducción.
-2. **La regla de cero heap por frame nunca se había verificado de verdad** (ADR-0058).
-   `heap_guard` solo veía `operator new`, y las siete librerías de terceros son C y llaman a
-   `malloc`. Al instalarles sus hooks aparecieron cuatro infracciones reales que llevaban
-   hitos ocurriendo. Ahora `heap_allocs_frame_max=0` significa lo que dice. **Si añades una
-   dependencia, instálale su hook** o volverá a ser invisible: la tabla está en ADR-0058 y en
-   el skill `vne-memory-model`.
+**TMX robusto.** El escáner ignoraba `encoding` y `compression`: un TMX comprimido pasaba por
+el parser CSV, sacaba números del base64 y acababa culpando **al tamaño de la capa**. Ahora
+nombra la compresión y dice cómo cambiarlo en Tiled. Además valida `width`/`height` contra las
+celdas reales dando los dos números, y rechaza varios tilesets explicando por qué.
 
-Criterios verificados con números: `draw_calls` 3→4 con las tres transiciones (+1 exacto,
-criterio "no más de 1"); `{w=0.5}` medido en **0.525 s** (criterio 0.5 ±0.05); modo skip en
-**120 µs** en Ship y **510 µs** en Debug+ASan por cada 1000 comandos (criterio <1 s); el
-mismo `@sfx` cinco veces da **5 voces simultáneas con 5 `voice_id` distintos y 0
-asignaciones**, verificado en los **dos** backends (suelto y empaquetado, con un `.pak`
-fabricado en el test); modo auto 0.70/2.10/5.30 s para 5/40/120 glifos; negrita con ancho de
-tinta 75.0→82.0; AABB deteniendo al jugador con su borde en x=65.47 frente a una pared que
-acaba en 64. 143/143 tests en Dev, 142/143 en Debug+ASan (solo el de rendimiento de M2, no
-representativo sin optimizar, ADR-0018) y 142/142 en Ship, sin reportes de ASan. Los cuatro
-guiones de demo completan vía `--autoplay-script` (185/20/11/11 comandos) y el juego arranca
-con `heap_allocs_frame_max=0`.
+**`vne_bake font` (ADR-0064).** El directorio de fuentes pasa de **11,4 MB a 304 KB** con
+`hb-subset`, que ya estaba dentro de HarfBuzz: cero dependencias nuevas. Se descartó lo que
+pedía la tabla de SPEC.md §11 (atlas de glifos horneado) porque chocaría con rasterizar CJK
+bajo demanda: obligaría a fijar de antemano cada glifo *y cada tamaño de punto*.
 
-Decisiones nuevas: ADR-0056 (polifonía por voces pre-creadas), ADR-0057 (contador de
-asignaciones de audio) y ADR-0058 (`heap_guard` ve a las librerías de terceros).
+**`@flag`, catálogo de mapas y mensajes (ADR-0065).** `@flag x on` / `@if flag x`, con el mismo
+`flag_id` que Lua para que los dos caminos no se contradigan. `map_id` sale de un catálogo y ya
+no de un `1` puesto a mano. Y una indentación de 2 espacios deja de reportarse como "falta
+`@end`" para decir lo que de verdad pasa, apuntando a la línea culpable.
 
-**El hueco que M12 no resolvía, cerrado en M13.** Hasta M13 `@bg`, `@show`, `@hide` y `@move`
-**no dibujaban nada**: mantenían `bg_id` y `actors[]` en `GameState` correctamente —se
-serializaba, se veía en el editor— pero ningún código lo convertía en sprites, y
-`VnMode::render()` pintaba solo transición, cuadro de diálogo y texto. Los hitos se pudieron
-cerrar así porque ningún criterio de SPEC.md §12 dice "se ve a un personaje en pantalla".
-M13 lo conecta (ADR-0061/0062) y de paso destapó dos bugs que llevaban hitos escondidos ahí:
-el interner de nombres empezaba en 0, lo que hacía al **primer actor de cada guion**
-indistinguible de un slot vacío, y `@show` nunca ponía posición, así que un actor recién
-mostrado se quedaba en (0,0). Los actores y fondos de los guiones de demo son **placeholders
-generados** (`vne_bake placeholders`), no arte: se sustituyen dejando caer un PNG con el
-mismo nombre en `assets_src/png/`.
+**Criterios verificados, los cuatro, ejecutándolos:** `@show mrata neutral` → `c1.vns:25: actor
+o pose desconocidos ... exit=1`; dos variables que colisionan → `colision de hash entre las
+variables 'v86' y 'v68' ... hueco 207, exit=1`; TMX con `compression="zlib"` → mensaje que
+nombra zlib y dice cómo cambiarlo en Tiled, `exit=1`; y el archivo mayor del repositorio pasa a
+ser de **264 KB** (un wav de prueba), sin ninguna fuente de 9,5 MB.
 
-Tampoco se probó nada con teclado real en la ventana interactiva
-(limitación de siempre en este entorno): transiciones, `{w=}`, auto, polifonía y AABB se
-verificaron con tests y con arranques instrumentados. Windows sigue siendo la única
-plataforma verificada (ADR-0013).
+184/184 tests en Dev, 183/184 en Debug+ASan (solo el de rendimiento de M2, no representativo
+sin optimizar, ADR-0018) y 180/180 en Ship, sin reportes de ASan. Los cuatro guiones de demo
+completan y el juego arranca con `heap_allocs_frame_max=0`.
+
+**Lo que NO se verificó, y conviene saberlo.** Sé que los sprites de fondo y actores se encolan
+con las coordenadas y el sprite correctos, y lo comprobé con logs instrumentados, pero **no he
+visto un personaje en pantalla con mis ojos**: en este entorno no hay forma de mirar la ventana.
+La posición por defecto de los actores (los ocho slots repartidos a lo ancho, el 0 al 6% del
+borde izquierdo) la elegí a ojo y puede quedar apretada. Tampoco se probó `@flag` ni nada más
+con teclado real. Windows sigue siendo la única plataforma verificada (ADR-0013).
+
+**Dos cosas que dejo en tu tejado**, anotadas en "Pendientes observados": `k_max_vars = 512` se
+queda corto de verdad (25 nombres para colisionar), y ampliarlo o dar a las variables una tabla
+de nombres como la de actores toca SPEC.md §8.2; y `actors[]` sigue sin sobrevivir a un guardado
+**entre guiones distintos**, porque los ids son locales a cada compilación — arreglarlo
+implicaría subir `.vnsave` otra vez, que es trabajo de M14.
+
+M12 — Presentación y jugabilidad completas (hito anterior). Detalle en docs/DECISIONS.md
+(ADR-0056 a ADR-0060) y en el historial de git.
 
 M11 — Sistema de assets y empaquetado (hito anterior).
 `platform/files.{h,cpp}` sobre SDL3 unifica el filesystem y deja `audio.cpp` sin ningún

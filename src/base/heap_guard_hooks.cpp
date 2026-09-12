@@ -7,18 +7,33 @@
 #include "base/heap_guard.h"
 #include "base/log.h"
 
-void* heap_guard_malloc(usize size, HeapSource source) {
+namespace {
+// Se incrementa SIEMPRE, este el guard suspendido o no (a diferencia del contador por
+// frame). thread_local por la misma razon que el otro: el hilo de IO tambien pasa por aqui.
+thread_local u64 g_lifetime[static_cast<u32>(HeapSource::Count)] = {};
+
+void note(HeapSource source) {
+    g_lifetime[static_cast<u32>(source)] += 1;
     heap_guard_count_alloc(source);
+}
+}  // namespace
+
+u64 heap_guard_lifetime_count(HeapSource source) {
+    return g_lifetime[static_cast<u32>(source)];
+}
+
+void* heap_guard_malloc(usize size, HeapSource source) {
+    note(source);
     return std::malloc(size);
 }
 
 void* heap_guard_calloc(usize count, usize size, HeapSource source) {
-    heap_guard_count_alloc(source);
+    note(source);
     return std::calloc(count, size);
 }
 
 void* heap_guard_realloc(void* p, usize size, HeapSource source) {
-    heap_guard_count_alloc(source);
+    note(source);
     return std::realloc(p, size);
 }
 

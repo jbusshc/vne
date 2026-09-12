@@ -33,3 +33,9 @@ void  heap_guard_free(void* p);
 // Instala los contadores en SDL3. Debe llamarse ANTES de SDL_Init: SDL prohibe cambiar
 // sus funciones de memoria una vez ha asignado algo.
 void heap_guard_install_sdl_hooks();
+
+// Asignaciones acumuladas de un origen desde que arranco el proceso. A diferencia del
+// contador por frame, **cuenta tambien lo que ocurre con el guard suspendido**: sirve para
+// poner un presupuesto de por vida a la inicializacion diferida de una libreria (ver
+// platform/input.cpp) en vez de cegar un camino por frame para siempre.
+u64 heap_guard_lifetime_count(HeapSource source);

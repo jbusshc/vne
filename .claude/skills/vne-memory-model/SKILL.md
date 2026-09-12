@@ -149,10 +149,13 @@ alrededor de la llamada, **nunca más ancho que eso** (por ejemplo: `hb_shape` s
 | Cargar un asset nuevo bajo demanda | El decodificador de terceros asigna al traer datos que aún no estaban en caché: miniaudio al abrir un sonido, qoi al decodificar una textura, FreeType al rasterizar un glifo o al dar métricas en `hb_shape`. | ADR-0035, ampliada en ADR-0058 |
 | Lanzar `vne_bake` desde el editor | `system()` asigna; solo en builds `Dev`. | M8 |
 | `hot_reload_update` | Recorrer los directorios vigilados cuesta 673 asignaciones de SDL cada 500 ms; solo en builds `Debug`/`Dev`. | ADR-0058 |
+| `platform_poll_events` | SDL inicializa su subsistema de eventos de forma diferida (9 asignaciones, una vez, en un frame impredecible). **No es una suspensión sin más: es un presupuesto de por vida de 64**, y agotado el presupuesto el guard vuelve a vigilar. | ADR-0066 |
 | El editor abierto | ImGui asigna al dimensionar sus buffers (54 en su primer frame, luego ~0); solo en builds `Dev`. | ADR-0060 |
 
-Fíjate en que las dos últimas son herramienta de desarrollo: **no existen en Ship**. Las dos
-primeras sí corren en el juego distribuido, y por eso están acotadas al decodificador concreto.
+Fíjate en cuáles **no existen en Ship** porque son herramienta de desarrollo: el subproceso del
+editor, `hot_reload_update` y el editor abierto. Las que sí corren en el juego distribuido
+(`LuaCall`, cargar un asset, `platform_poll_events`) están acotadas al máximo: al decodificador
+concreto, o a un presupuesto que se agota.
 
 La primera la decidió el usuario tras pararse a preguntar, porque era un conflicto real entre
 dos reglas del proyecto; la ampliación de la segunda también. **No amplíes esta lista por tu
@@ -162,6 +165,12 @@ asignación propia sería exactamente el abuso que la regla existe para impedir.
 Y ojo con el orden causal: estas excepciones no aparecieron todas de golpe en M12. Varias
 llevaban hitos ocurriendo; lo que cambió es que ADR-0058 hizo el contador capaz de verlas.
 **Que algo no salga en el contador no prueba que no asigne — prueba que nadie ha mirado.**
+
+Cuando una librería asigna de forma diferida en un camino que corre en todos los frames,
+**no la exceptúes entera**: dale un presupuesto de por vida con `heap_guard_lifetime_count`
+(ADR-0066). Agotado el presupuesto, el guard vuelve a vigilar, así que una fuga real sigue
+saltando. Y cuenta solo lo que ocurre **dentro de la llamada que quieres tolerar**: mirar el
+contador global de la librería no funciona, porque su inicialización normal ya lo agota.
 
 `suspend`/`resume` **se anidan** (llevan profundidad, no un interruptor, ADR-0059) y tienen
 que venir emparejados: un `resume` de más dispara un assert. Antes de M12 eran un `bool` y el
