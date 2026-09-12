@@ -25,6 +25,24 @@ void migrate_v1_to_v2(const u8* v1_bytes, GameState* out) {
     *out = GameState{};
     std::memcpy(out, v1_bytes, k_gamestate_v1_size);
 }
+
+// v2 -> v3 (M13). El LAYOUT no cambia ni un byte: lo que cambia es el SIGNIFICADO de
+// actor_id, pose_id y bg_id. Hasta M13 eran indices de un interner que empezaba en 0; ahora
+// empiezan en 1, porque el 0 esta reservado para "slot vacio" (SPEC.md #8.2) y con base 0 el
+// primer actor de cada guion era indistinguible de un hueco (ver ADR-0062).
+//
+// No se pueden mapear: el interner es local a una compilacion concreta del guion y no viaja
+// en la partida. Y dejarlos tal cual seria PEOR que perderlos — el viejo id 1 resolveria
+// ahora al nombre del actor 0, dibujando el personaje equivocado sin ningun aviso. Asi que
+// se limpian: los slots quedan vacios y el fondo sin poner, y el siguiente @show/@bg del
+// guion los repone. Se pierde lo que hubiera en pantalla en el momento de guardar; el resto
+// de la partida (pc, variables, flags, musica, mapa, posicion del jugador) sobrevive intacto.
+void migrate_v2_to_v3(GameState* state) {
+    for (u32 i = 0; i < k_max_actor_slots; ++i) {
+        state->actors[i] = ActorSlot{};
+    }
+    state->bg_id = 0;
+}
 }  // namespace
 
 SaveResult save_game(const char* path, const GameState& state, const Backlog& backlog,
@@ -82,10 +100,10 @@ LoadResult load_game(const char* path, GameState* out_state, Backlog* out_backlo
         log_error("load_game: '%s' no es un .vnsave valido (magic incorrecto)", path);
         return LoadResult::BadFormat;
     }
-    if (version != k_savegame_version && version != 1u) {
-        // Solo se encadena la migracion v1->v2 (SPEC.md #8.3): version 1 es la unica que
-        // existio antes de que este commit anadiera v2. Cuando exista una v3 real, aqui
-        // se encadena migrate_v2_to_v3 igual que esta.
+    if (version != k_savegame_version && version != 1u && version != 2u) {
+        // Las migraciones se ENCADENAN (SPEC.md #8.3): v1 -> v2 -> v3. Cualquier version
+        // por debajo de la mas vieja soportada se rechaza con un mensaje claro en vez de
+        // cargarse a medias.
         std::fclose(file);
         log_error("load_game: '%s' es version %u, se esperaba %u (sin migracion desde ahi)",
                   path, version, k_savegame_version);
@@ -135,6 +153,16 @@ LoadResult load_game(const char* path, GameState* out_state, Backlog* out_backlo
         }
     }
 
+    // Cadena de migraciones: un v1 ya paso por migrate_v1_to_v2 arriba, asi que a partir de
+    // aqui todo lo que no sea v3 es un v2 que hay que subir (SPEC.md #8.3: "las migraciones
+    // se encadenan v2 -> v3 -> v4").
+    if (version != k_savegame_version) {
+        migrate_v2_to_v3(&state);
+        log_info("load_game: '%s' migrado a v%u (actores y fondo limpiados: sus ids eran "
+                 "de un interner que ya no existe, ver ADR-0062)",
+                 path, k_savegame_version);
+    }
+
     u32 thumbnail_size = 0;
     if (std::fread(&thumbnail_size, sizeof(u32), 1, file) != 1) {
         std::fclose(file);
@@ -181,7 +209,7 @@ LoadResult load_save_thumbnail(const char* path, u8* out_qoi, u32 cap, u32* out_
     ok &= std::fread(&state_size, sizeof(u32), 1, file) == 1;
     ok &= std::fread(&checksum, sizeof(u32), 1, file) == 1;
     (void)checksum;
-    if (!ok || magic != k_vnsave_magic || (version != k_savegame_version && version != 1u)) {
+    if (!ok || magic != k_vnsave_magic || (version != k_savegame_version && version != 1u && version != 2u)) {
         std::fclose(file);
         return LoadResult::BadFormat;
     }

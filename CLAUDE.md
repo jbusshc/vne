@@ -16,7 +16,11 @@ causa, validar `width`/`height` contra las celdas reales; (4) `vne_bake font` co
 subconjunto de glifos para sacar los 9.5 MB de `NotoSansJP.ttf` del repositorio; (5)
 pendientes menores: migración de `.vnm`, catálogo de mapas por `map_id`, `@flag` en el DSL,
 error útil ante indentación irregular; (6) **el consumidor del registro**: que `@bg` y
-`@show`/`@hide`/`@move` dibujen de verdad, con arte libre descargado como placeholder.
+`@show`/`@hide`/`@move` dibujen de verdad, con placeholders generados.
+
+**Hechas: 0, 1 y 6** (la 6 se adelantó al final de la 1 para validar el registro con un
+consumidor real en vez de acumular etapas encima de una API sin llamante). Pendientes: 2, 3,
+4 y 5.
 
 La etapa 6 no está en los criterios de M13, y se hace igualmente por dos motivos: sin ella
 el registro sería una API sin llamante, que es exactamente lo que SPEC.md §1 dice que no se
@@ -69,16 +73,17 @@ con `heap_allocs_frame_max=0`.
 Decisiones nuevas: ADR-0056 (polifonía por voces pre-creadas), ADR-0057 (contador de
 asignaciones de audio) y ADR-0058 (`heap_guard` ve a las librerías de terceros).
 
-**Lo que M12 NO resuelve, y hay que tener muy presente:** **nada dibuja fondos ni actores.**
-No es solo que `@move` no se vea: `@bg`, `@show` y `@hide` tampoco pintan nada desde que
-existen. Mantienen `bg_id` y `actors[]` en `GameState` correctamente —se serializa, sobrevive
-a un guardado, se ve en el editor— pero ningún código lo convierte en sprites.
-`VnMode::render()` dibuja la transición, el cuadro de diálogo y el texto, y se acabó. Los
-hitos se pudieron cerrar así porque ningún criterio de SPEC.md §12 dice "se ve a un personaje
-en pantalla"; todos miden otra cosa. Está bloqueado por el arte (que no se puede inventar,
-regla 6) y por la falta de un registro de assets que traduzca `actor_id`/`pose_id`/`bg_id` a
-una región del atlas (ADR-0022) — **y ese registro es justo lo que construye M13**, así que
-es el momento de abordarlo. Detalle en "Pendientes observados" de docs/DECISIONS.md.
+**El hueco que M12 no resolvía, cerrado en M13.** Hasta M13 `@bg`, `@show`, `@hide` y `@move`
+**no dibujaban nada**: mantenían `bg_id` y `actors[]` en `GameState` correctamente —se
+serializaba, se veía en el editor— pero ningún código lo convertía en sprites, y
+`VnMode::render()` pintaba solo transición, cuadro de diálogo y texto. Los hitos se pudieron
+cerrar así porque ningún criterio de SPEC.md §12 dice "se ve a un personaje en pantalla".
+M13 lo conecta (ADR-0061/0062) y de paso destapó dos bugs que llevaban hitos escondidos ahí:
+el interner de nombres empezaba en 0, lo que hacía al **primer actor de cada guion**
+indistinguible de un slot vacío, y `@show` nunca ponía posición, así que un actor recién
+mostrado se quedaba en (0,0). Los actores y fondos de los guiones de demo son **placeholders
+generados** (`vne_bake placeholders`), no arte: se sustituyen dejando caer un PNG con el
+mismo nombre en `assets_src/png/`.
 
 Tampoco se probó nada con teclado real en la ventana interactiva
 (limitación de siempre en este entorno): transiciones, `{w=}`, auto, polifonía y AABB se

@@ -72,9 +72,19 @@ propio: engorda la fuente que ya haya cargada.
 `slot` va de 0 a 7. `fade` es en segundos y es opcional (por defecto 0, instantáneo).
 `@show` exige actor y pose; `slot` y `fade` son pares clave-valor y su orden da igual.
 
-Los nombres de actor, pose y fondo se internan a IDs numéricos al compilar, pero **no se
-validan contra ningún registro de assets** (ADR-0022): un nombre mal escrito no da error,
-simplemente se convierte en un ID distinto y en pantalla no aparece nada.
+Los nombres de actor, pose y fondo **se validan al compilar** desde M13 (cierra ADR-0022,
+que desde M3 los dejaba pasar sin comprobar). `@show mrata neutral` falla con archivo y
+línea, igual que una etiqueta desconocida:
+
+```
+demo.vns:25: actor o pose desconocidos: 'mrata' 'neutral'
+              (no hay ningun sprite 'actor_mrata_neutral' en el atlas)
+```
+
+El registro contra el que se validan es la tabla de nombres del atlas horneado: un actor con
+su pose es el sprite `actor_<actor>_<pose>` y un fondo es `bg_<nombre>`, tomando el nombre
+del archivo PNG en `assets_src/png/` sin directorio ni extensión. Para añadir un actor nuevo
+basta con dejar caer ahí el PNG con ese nombre.
 
 ### Mover un actor y transiciones de pantalla
 
@@ -92,11 +102,21 @@ el parser los rechazaba con "comando desconocido".
 (el comando bloquea ese tiempo; la posición se fija al instante, igual que hace `@bg`). La
 convención de X e Y es normalizada 0..1, siguiendo el ejemplo de `docs/SPEC.md` §9.1.
 
-**Aviso honesto:** ese valor todavía no lo dibuja nadie. No existe renderizado de sprites de
-actor en el motor —`@show`/`@hide`/`@move` mantienen el estado, pero en pantalla no aparece
-ningún personaje—, así que la posición se guarda, sobrevive a un guardado y se puede
-inspeccionar, pero no se ve moverse nada. Lo que hace falta es el arte y el pipeline de
-sprites de actor, no el comando.
+Desde M13 el actor se dibuja de verdad: `x` e `y` marcan su punto de APOYO — el sprite se
+centra horizontalmente ahí y se apoya con su base en esa altura, para que cambiar a una pose
+de distinto alto no haga saltar al personaje. Un `@show` que ocupa un slot vacío da una
+posición por defecto derivada del slot (los ocho repartidos a lo ancho, `y = 0.75`), y un
+`@show` que solo cambia de pose NO la deshace.
+
+El movimiento todavía no se interpola: `@move` fija el destino al instante y el comando
+simplemente bloquea sus `in` segundos. Interpolar es trabajo del renderer, que tendría que
+partir de donde el sprite esté dibujado; `GameState` no guarda posición de origen a propósito
+(ADR de M12).
+
+**Sobre el arte:** los actores y fondos que traen los guiones de demo son **placeholders**
+generados por `vne_bake placeholders` — rectángulos de color con borde y aspa, el aspecto
+clásico de "falta el asset". No son contenido de juego. Para poner arte de verdad basta con
+dejar caer un PNG con el mismo nombre en `assets_src/png/`.
 
 `@transition` sí tiene efecto visible: cubre la pantalla con una máscara animada. Las tres
 variantes comparten shader y ruta de código (`alpha = saturate((threshold - mask) *

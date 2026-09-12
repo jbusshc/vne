@@ -68,7 +68,10 @@ Marcado inline dentro del texto: `{b}`, `{color=#rrggbb}`, `{ruby=lectura}`, `{w
   `@flag`.
 
 **Un identificador desconocido es error de compilación**, con archivo y línea. Nunca un
-fallo silencioso en runtime.
+fallo silencioso en runtime. Desde M13 eso vale de verdad también para actor, pose y fondo
+(ADR-0022 cerrado, ADR-0061): se validan contra la tabla de nombres del atlas, con la
+convención `actor_<actor>_<pose>` y `bg_<nombre>`. Hasta entonces la frase solo era cierta
+para etiquetas, y este archivo la afirmaba igualmente.
 
 ## Comandos: tagged union
 
@@ -142,16 +145,33 @@ vez de un parche que acelera el `dt`. Impleméntala a la vez que las otras dos, 
 
 ```
 magic 'VNCS' (4)
-version (4)             v3 hoy (v2 anadio ChoiceOption[], v3 anadio key_hash)
+version (4)             v5 hoy (v2 ChoiceOption[], v3 key_hash, v4 Cmd a 20 bytes,
+                        v5 tablas de nombres de actor/pose/fondo)
 cmd_count (4)
 string_pool_size (4)
 label_count (4)
 option_count (4)        ADR-0030
+actor_name_count (4)    ADR-0062
+pose_name_count (4)
+bg_name_count (4)
 Cmd[cmd_count]
 string_pool             bytes UTF-8 terminados en \0, indexados por offset
 Label[label_count]      { u32 name_hash; u32 pc; }
 ChoiceOption[option_count]
+u32[actor_name_count]   offsets en string_pool, indexados por actor_id - 1
+u32[pose_name_count]    idem, por pose_id - 1
+u32[bg_name_count]      idem, por bg_id - 1
 ```
+
+**Los ids de actor, pose, fondo y hablante empiezan en 1, no en 0** (ADR-0062). El 0 esta
+reservado para "vacio": `ActorSlot.actor_id == 0` significa slot libre (SPEC.md #8.2), y con
+base 0 el primer actor de cada guion era indistinguible de un hueco. Fue un bug real que
+sobrevivio hasta M13 porque nada dibujaba actores.
+
+Las tres tablas de nombres existen porque el id es un indice de un interner **local a esa
+compilacion**, no un hash: sin ellas el runtime no puede volver del id al nombre, y por tanto
+no puede saber que sprite del atlas le toca. Consecuencia que conviene tener presente: un
+`.vnsave` no puede restaurar `actors[]` si se carga con un guion distinto del que lo guardo.
 
 Las opciones de un `@choice` viven en su propia tabla, no en la unión de `Cmd`, porque su
 cardinalidad es variable; `Cmd::choice` guarda `first_option` y `option_count` como índices

@@ -114,8 +114,10 @@ TEST_CASE("load_game: migra un .vnsave v1 (M4-M8, sin map_id/player_x/player_y) 
     Backlog   migrated_backlog{};
     REQUIRE(load_game(path, &migrated, &migrated_backlog) == LoadResult::Ok);
 
-    CHECK(migrated.bg_id == 7);
-    CHECK(migrated.vars[3] == 99);
+    // La cadena sigue hasta v3 (M13), que limpia bg_id a proposito: su id venia de un
+    // interner que ya no existe y conservarlo dibujaria el fondo equivocado (ADR-0062).
+    CHECK(migrated.bg_id == 0);
+    CHECK(migrated.vars[3] == 99);  // lo que NO depende del interner sobrevive intacto
     CHECK(migrated.map_id == 0);  // valor por defecto: "sin mapa activo"
     CHECK(migrated.player_x == doctest::Approx(0.0f));
     CHECK(migrated.player_y == doctest::Approx(0.0f));
@@ -167,6 +169,63 @@ TEST_CASE("load_game: version desconocida se rechaza en vez de cargar a medias")
     GameState loaded{};
     Backlog   loaded_backlog{};
     CHECK(load_game(path, &loaded, &loaded_backlog) == LoadResult::UnsupportedVersion);
+
+    std::remove(path);
+}
+
+TEST_CASE("load_game: un .vnsave v2 se migra a v3 limpiando actores y fondo") {
+    // v2 -> v3 (M13, ADR-0062). El layout no cambia ni un byte: lo que cambia es el
+    // SIGNIFICADO de actor_id/pose_id/bg_id, que pasaron de empezar en 0 a empezar en 1.
+    //
+    // Conservarlos seria peor que perderlos: el viejo id 1 resolveria ahora al nombre del
+    // actor 0 y dibujaria el personaje equivocado sin ningun aviso. Este test fija que se
+    // limpian, y que lo que NO depende del interner sobrevive.
+    GameState state{};
+    state.actors[0].actor_id = 1;
+    state.actors[0].pose_id  = 2;
+    state.actors[0].alpha    = 1.0f;
+    state.actors[3].actor_id = 5;
+    state.bg_id              = 4;
+    state.vars[10]           = 1234;
+    state.vm.pc              = 77;
+    state.bgm_track_id       = 900;
+    state.player_x           = 640.0f;
+
+    u32 checksum = crc32(&state, sizeof(GameState));
+
+    const char* path = "test_save_v2_migration.vnsave";
+    std::FILE*  f    = std::fopen(path, "wb");
+    REQUIRE(f != nullptr);
+    u32 magic       = 0x56534E56u;  // 'VNSV', ver save.cpp
+    u32 old_version = 2;
+    u32 state_size  = static_cast<u32>(sizeof(GameState));
+    std::fwrite(&magic, sizeof(u32), 1, f);
+    std::fwrite(&old_version, sizeof(u32), 1, f);
+    std::fwrite(&state_size, sizeof(u32), 1, f);
+    std::fwrite(&checksum, sizeof(u32), 1, f);
+    std::fwrite(&state, sizeof(GameState), 1, f);
+    u32 thumbnail_size = 0;
+    std::fwrite(&thumbnail_size, sizeof(u32), 1, f);
+    u32 backlog_count = 0;
+    std::fwrite(&backlog_count, sizeof(u32), 1, f);
+    std::fclose(f);
+
+    GameState migrated{};
+    Backlog   migrated_backlog{};
+    REQUIRE(load_game(path, &migrated, &migrated_backlog) == LoadResult::Ok);
+
+    // Lo que dependia del interner se limpia.
+    for (u32 i = 0; i < k_max_actor_slots; ++i) {
+        CHECK(migrated.actors[i].actor_id == 0);
+        CHECK(migrated.actors[i].pose_id == 0);
+    }
+    CHECK(migrated.bg_id == 0);
+
+    // Todo lo demas sobrevive: perder la partida entera por esto seria desproporcionado.
+    CHECK(migrated.vars[10] == 1234);
+    CHECK(migrated.vm.pc == 77);
+    CHECK(migrated.bgm_track_id == 900);
+    CHECK(migrated.player_x == doctest::Approx(640.0f));
 
     std::remove(path);
 }
