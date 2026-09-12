@@ -2309,28 +2309,104 @@ nueva además de un arreglo puntual.
 
 ---
 
+## ADR-0067 — Una tabla de símbolos del proyecto: el nombre deja de perderse al fabricar el id
+
+**Fecha:** 2026-09-12
+**Hito:** M14
+**Estado:** aceptada
+
+**Contexto.** Al cerrar M13 quedaban dos pendientes que parecían independientes: `k_max_vars =
+512` se quedaba corto (medido: `puntos` y `rumor` colisionan con solo **25 nombres
+realistas**), y `actors[]` no sobrevivía a un guardado entre guiones distintos. Al mirarlos
+juntos resultó que son **el mismo problema**, y que había **seis** sitios con él:
+
+| Sitio | Cómo fabricaba el id | Qué fallaba |
+|---|---|---|
+| variables, flags | `fnv1a(nombre) % capacidad` | dos nombres en el mismo hueco |
+| pistas de música, mapas | `fnv1a(nombre) % 65536` | igual, con menos probabilidad |
+| actores, poses, fondos, hablantes | interner local a **cada compilación** | el id 3 significaba cosas distintas en dos guiones |
+
+Los dos sabores tienen la misma raíz: **al fabricar el id se tira el nombre**. De ahí salen
+las colisiones (dos nombres, un id), la inestabilidad entre guiones (un id, dos significados)
+y la imposibilidad de dibujar un actor (un id, ningún nombre) que M13 tuvo que parchear
+metiendo tablas de nombres dentro de cada `.vnc`.
+
+**Decisión.** Una **tabla de símbolos del proyecto**, construida al hornear por
+`vne_bake symbols` a partir de **todos** los guiones y compartida por todos. El id es el
+índice en esa tabla, asignado en orden de aparición.
+
+Lo que se sigue de ahí, y por lo que es una solución y no una mitigación:
+
+- **Las colisiones no se detectan: no pueden ocurrir.** El detector de M13 (ADR-0063) se
+  retira para variables y flags. El problema se elimina en vez de vigilarse.
+- **`k_max_vars = 512` pasa a significar lo que aparenta.** Como espacio de hash valía unos
+  27 nombres; como cuenta, vale 512. Pasarse es un error al hornear con mensaje, no una
+  corrupción probabilística. **No hizo falta tocar SPEC.md §8.2.**
+- **Los ids son los mismos en todos los guiones**, así que `GameState` sobrevive a un
+  guardado aunque se cargue con otro guion.
+- **El nombre se recupera**, así que las tres tablas por guion que M13 metió en el `.vnc` v5
+  sobran: el formato **baja** a v6 con menos secciones, no más.
+- **Lua y el DSL no pueden divergir.** Antes eran dos copias de `fnv1a % capacidad` que tenían
+  que coincidir por disciplina; ahora los dos preguntan a la misma tabla. Y de regalo, un
+  nombre que no existe se puede **detectar**: `vn.get_var("typo")` avisa en vez de caer en un
+  hueco cualquiera y comportarse como si valiera cero.
+
+El id **0 está reservado en todas las clases** y no se asigna a ningún nombre. SPEC.md §8.2 lo
+usa para "slot vacío" y "sin fondo"; reservarlo en todas por igual evita tener que recordar en
+cuál sí y en cuál no, que en M13 costó un bug real (el primer actor de cada guion era
+indistinguible de un hueco vacío).
+
+**Por qué es su propio comando.** `vne_bake script` ve un guion cada vez y no puede dar ids
+estables entre todos, así que la tabla se construye en un paso aparte que recibe todos los
+guiones — mismo patrón que `catalog-extract`, que ya hacía eso por la misma razón. En CMake,
+cada `.vnc` depende del `.vnsym`.
+
+**Lua también declara nombres.** Un `vn.set_var("oro", 10)` tiene que entrar en la tabla igual
+que un `@set oro = 10`, o esa variable no existiría. Se recoge con un escaneo de subcadenas
+sobre el cuerpo de los `@lua`, aceptando comillas simples y dobles (Lua permite las dos; buscar
+solo las dobles habría dejado sin recoger la mitad de los nombres **en silencio**). Un nombre
+calculado en runtime no se puede ver, y eso se detecta donde toca: `var_id_of` avisa.
+
+**Migración de `.vnsave` a v4, y esta sí es una migración de verdad.** Los ids de variable y
+bandera cambian, así que un v3 tiene sus valores en huecos que ya no significan lo mismo. Pero
+la tabla tiene todos los nombres y la fórmula vieja es conocida, así que para cada nombre se
+recalcula dónde estaba y se copia a donde va. Solo se pierden los valores de nombres que ya no
+usa ningún guion — justo lo que debería perderse. (Contrasta con v2 → v3, donde los ids no eran
+reconstruibles y hubo que limpiar.)
+
+**Alternativas descartadas.** Ampliar `k_max_vars`: es el parche: no arregla la
+inestabilidad entre guiones, no permite recuperar el nombre, y solo empuja la colisión más
+lejos. Mantener las tablas por guion de M13 y hacerlas del proyecto: eso **es** esta decisión,
+solo que llamándola de otra forma.
+
+**Consecuencias.** Un `.vnsym` desincronizado (horneado de un conjunto de guiones distinto del
+que se compila) es un error nuevo posible; se reporta como lo que es, un problema de pipeline.
+Y añadir un guion al proyecto obliga a regenerar la tabla, cosa que CMake ya hace solo.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
 desviarte.
 
-- **`k_max_vars = 512` se queda corto y ahora hay un número que lo respalda.** Medido en M13
-  (ADR-0063): con nombres realistas de novela visual, `puntos` y `rumor` colisionan con solo
-  **25 variables distintas**; la paradoja del cumpleaños pone el 50% hacia los 27. Un juego
-  real lo va a sufrir. Desde M13 al menos falla el horneado con un mensaje claro en vez de
-  comportarse de forma extraña, pero el autor tiene que renombrar variables perfectamente
-  razonables sin ninguna razón visible desde su punto de vista. Las salidas serían ampliar
-  `k_max_vars` (toca `GameState`, sube la versión de `.vnsave`) o darle a las variables una
-  tabla de nombres en el `.vnc` como la que M13 le dio a actores y fondos, que eliminaría las
-  colisiones de raíz. Las dos tocan SPEC.md §8.2, que es una decisión tomada: **lo decide el
-  usuario**, no el agente.
+- ~~**`k_max_vars = 512` se queda corto**~~ — disuelto en M14 (ADR-0067), y **sin tocar
+  SPEC.md §8.2**. No se amplió el array: se quitó el hash. Con la tabla de símbolos del
+  proyecto, 512 deja de ser un espacio de hash (que por la paradoja del cumpleaños valía unos
+  27 nombres, medido: `puntos` y `rumor` colisionaban con 25) y pasa a ser lo que aparenta,
+  una cuenta de 512 variables distintas. La segunda salida que se había anotado —"darle a las
+  variables una tabla de nombres como la que M13 le dio a actores y fondos"— era exactamente
+  esta, generalizada a las seis clases de símbolo en vez de a una.
 
 - ~~**`heap_guard` no ve las asignaciones de las librerías de terceros, que son C.**~~ —
   resuelto en M12 (ADR-0058): cada librería se inicializa con su propio hook de asignación.
   Destapó y dejó arreglados cuatro sitios que violaban la regla desde hacía hitos. Queda el
   residuo de que **una dependencia nueva sigue siendo invisible hasta que se le instale su
   hook**: al añadir una, hay que acordarse de la tabla de ADR-0058.
-- ~~**Nada dibuja fondos ni actores.**~~ — resuelto en M13 (ADR-0061 y ADR-0062): el atlas
+- ~~**Nada dibuja fondos ni actores.**~~ — resuelto en M13; el resto que quedaba (`actors[]`
+  entre guiones distintos) lo cerró M14 con la tabla de simbolos (ADR-0067): los ids son ahora
+  del proyecto, asi que significan lo mismo en todos los guiones. Texto original:
+  - ~~**Nada dibuja fondos ni actores.**~~ — resuelto en M13 (ADR-0061 y ADR-0062): el atlas
   gana tabla de nombres, el `.vnc` v5 permite volver del id al nombre, y `VnMode::render`
   dibuja fondo y actores. Queda vivo un resto: `actors[]` sigue sin sobrevivir a un guardado
   **entre guiones distintos**, porque los ids son de un interner local a cada compilacion.

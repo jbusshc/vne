@@ -148,22 +148,17 @@ vez de un parche que acelera el `dt`. Impleméntala a la vez que las otras dos, 
 
 ```
 magic 'VNCS' (4)
-version (4)             v5 hoy (v2 ChoiceOption[], v3 key_hash, v4 Cmd a 20 bytes,
-                        v5 tablas de nombres de actor/pose/fondo)
+version (4)             v6 hoy (v2 ChoiceOption[], v3 key_hash, v4 Cmd a 20 bytes,
+                        v5 tablas de nombres, v6 las quita: los nombres viven
+                        en la tabla de simbolos del proyecto, ADR-0067)
 cmd_count (4)
 string_pool_size (4)
 label_count (4)
 option_count (4)        ADR-0030
-actor_name_count (4)    ADR-0062
-pose_name_count (4)
-bg_name_count (4)
 Cmd[cmd_count]
 string_pool             bytes UTF-8 terminados en \0, indexados por offset
 Label[label_count]      { u32 name_hash; u32 pc; }
 ChoiceOption[option_count]
-u32[actor_name_count]   offsets en string_pool, indexados por actor_id - 1
-u32[pose_name_count]    idem, por pose_id - 1
-u32[bg_name_count]      idem, por bg_id - 1
 ```
 
 **Los ids de actor, pose, fondo y hablante empiezan en 1, no en 0** (ADR-0062). El 0 esta
@@ -171,10 +166,17 @@ reservado para "vacio": `ActorSlot.actor_id == 0` significa slot libre (SPEC.md 
 base 0 el primer actor de cada guion era indistinguible de un hueco. Fue un bug real que
 sobrevivio hasta M13 porque nada dibujaba actores.
 
-Las tres tablas de nombres existen porque el id es un indice de un interner **local a esa
-compilacion**, no un hash: sin ellas el runtime no puede volver del id al nombre, y por tanto
-no puede saber que sprite del atlas le toca. Consecuencia que conviene tener presente: un
-`.vnsave` no puede restaurar `actors[]` si se carga con un guion distinto del que lo guardo.
+Los ids salen de la **tabla de simbolos del proyecto** (`project.vnsym`, ADR-0067), que
+construye `vne_bake symbols` leyendo TODOS los guiones a la vez. El id es el indice en esa
+tabla, asi que:
+
+- dos nombres distintos no pueden compartir id (las colisiones no se detectan: no existen);
+- el id significa lo mismo en todos los guiones, asi que un `.vnsave` SI puede restaurar
+  `actors[]` aunque se cargue con otro guion;
+- el nombre se recupera en runtime (`symbols_name`), que es lo que permite dibujar un actor.
+
+Si cambias como se fabrica un id, es ahi y en un solo sitio. Y si añades un guion al
+proyecto, hay que regenerar la tabla — CMake ya lo encadena.
 
 Las opciones de un `@choice` viven en su propia tabla, no en la unión de `Cmd`, porque su
 cardinalidad es variable; `Cmd::choice` guarda `first_option` y `option_count` como índices

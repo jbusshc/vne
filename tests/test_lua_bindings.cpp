@@ -3,6 +3,7 @@
 #include "base/hash.h"
 #include "base/rng.h"
 #include "script/lua_bindings.h"
+#include "vm/symbols_load.h"
 #include "vm/state.h"
 #include "vm/vm.h"
 
@@ -12,10 +13,10 @@
 TEST_CASE("lua: vn.set_var/get_var leen y escriben GameState.vars por hash de nombre") {
     GameState state{};
     lua_run("vn.set_var('confianza', 7)", &state, nullptr);
-    CHECK(state.vars[fnv1a_u32("confianza") % k_max_vars] == 7);
+    CHECK(state.vars[symbols_id(SymKind::Var, "confianza")] == 7);
 
     lua_run("vn.set_var('confianza', vn.get_var('confianza') + 1)", &state, nullptr);
-    CHECK(state.vars[fnv1a_u32("confianza") % k_max_vars] == 8);
+    CHECK(state.vars[symbols_id(SymKind::Var, "confianza")] == 8);
 }
 
 TEST_CASE("lua: vn.set_flag/get_flag leen y escriben bits de GameState.flags") {

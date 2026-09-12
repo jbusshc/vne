@@ -5,8 +5,33 @@ Este archivo es el resumen operativo; la especificación manda sobre él en caso
 
 ## Estado actual
 
-**Hito activo:** ninguno. M0–M13 están cerrados. El siguiente por defecto es **M14**
-(configuración y localización completas: `config.ini`, backlog relocalizable, `.vnsave` v4).
+**Hito activo:** M14 — Configuración y localización completas (en progreso). Hecho: la
+**tabla de símbolos del proyecto** (ADR-0067), que disuelve los dos pendientes que M13 dejó
+en tu tejado sin tocar SPEC.md §8.2. Pendiente: `config.ini`, backlog relocalizable.
+
+**Lo que hizo la tabla de símbolos, porque cambia cómo se piensa el resto.** Había **seis**
+mecanismos para convertir un nombre en un id, y todos tiraban el nombre al hacerlo: cuatro
+por `fnv1a % capacidad` (variables, flags, pistas, mapas) y dos por un interner local a cada
+compilación (actores, poses, fondos, hablantes). De ahí salían las colisiones, la
+inestabilidad entre guiones y la imposibilidad de dibujar un actor. Ahora hay **una sola
+tabla**, construida por `vne_bake symbols` de todos los guiones a la vez, y el id es el
+índice en ella. Consecuencias que conviene tener presentes:
+
+- Las colisiones de variable **no se detectan: no pueden ocurrir**. El detector de ADR-0063
+  se retiró para variables y banderas (sigue vivo para pistas y mapas, que hashean nombres de
+  archivo).
+- `k_max_vars = 512` pasa a ser una **cuenta real** de 512 variables, no un espacio de hash
+  que valía unos 27.
+- Los ids significan lo mismo en todos los guiones, así que `GameState` sobrevive a un
+  guardado aunque se cargue con otro guion.
+- El `.vnc` **baja** a v6: las tres tablas de nombres por guion de v5 sobran.
+- Lua y el DSL preguntan a la misma tabla, así que no pueden divergir; y un nombre que no
+  existe ahora se **avisa** en vez de caer en un hueco cualquiera.
+- `.vnsave` v4, con una migración de verdad: los nombres se recolocan a su id nuevo, no se
+  pierden.
+
+**Si añades un guion, la tabla se regenera sola** (CMake lo encadena). Si tocas cómo se
+fabrica un id, es aquí y en un solo sitio.
 
 **Último hito completado:** M13 — Integridad de datos y herramientas offline.
 El tema del hito es que **el motor deje de fallar en silencio**: donde antes un nombre mal

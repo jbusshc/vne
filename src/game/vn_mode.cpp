@@ -7,6 +7,7 @@
 #include "gfx/gfx.h"
 #include "text/catalog.h"
 #include "vm/script_load.h"
+#include "vm/symbols_load.h"
 
 namespace {
 
@@ -200,7 +201,7 @@ void draw_scene(const VnMode& vn) {
 
     // Fondo, escalado a la resolucion virtual completa. Los placeholders son de 256x144,
     // asi que se ven deliberadamente toscos al estirarlos (ver vne_bake placeholders).
-    const char* bg_name = script_bg_name(vn.script, state.bg_id);
+    const char* bg_name = symbols_name(SymKind::Bg, state.bg_id);
     if (bg_name[0] != '\0') {
         char  name[96];
         usize len = 0;
@@ -237,9 +238,9 @@ void draw_scene(const VnMode& vn) {
         usize len = 0;
         name[0]   = '\0';
         append_cstr(name, sizeof(name), &len, "actor_");
-        append_cstr(name, sizeof(name), &len, script_actor_name(vn.script, a.actor_id));
+        append_cstr(name, sizeof(name), &len, symbols_name(SymKind::Actor, a.actor_id));
         append_cstr(name, sizeof(name), &len, "_");
-        append_cstr(name, sizeof(name), &len, script_pose_name(vn.script, a.pose_id));
+        append_cstr(name, sizeof(name), &len, symbols_name(SymKind::Pose, a.pose_id));
 
         AtlasSprite rect{};
         if (!atlas_find(name, &rect)) {

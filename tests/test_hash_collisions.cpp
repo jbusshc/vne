@@ -6,6 +6,7 @@
 #include "base/hash.h"
 #include "script/compiler.h"
 #include "script/hash_collisions.h"
+#include "script/symbols.h"
 #include "script/parser.h"
 #include "vm/state.h"
 
@@ -38,12 +39,20 @@ TEST_CASE("HashCollisionCheck: ids distintos no interfieren") {
     CHECK(check.add("c", 3, &previous));
 }
 
+// --- Las colisiones de variables y banderas YA NO EXISTEN (M14, ADR-0067) --------------
+//
+// M13 las detectaba al hornear porque `fnv1a % 512` podia mandar dos nombres al mismo hueco
+// (medido: `puntos` y `rumor` con solo 25 nombres). M14 las elimina de raiz: el id es el
+// indice en la tabla de simbolos del proyecto, asignado en orden, asi que dos nombres
+// distintos no pueden compartirlo. Estos tests fijan esa propiedad.
+//
+// HashCollisionCheck sigue vivo para las pistas de musica y los mapas, que siguen usando
+// hash porque sus ids vienen del nombre de archivo y no de un guion.
+
 namespace {
 
-// Busca dos nombres de variable distintos que colisionen de verdad en GameState.vars
-// (fnv1a % 512). No se inventa un par a mano: se buscan, para que el test siga siendo
-// valido si algun dia cambia la funcion de hash o la capacidad del array.
-bool find_colliding_var_names(std::string* out_a, std::string* out_b) {
+// Dos nombres que colisionaban de verdad bajo el esquema viejo (fnv1a % k_max_vars).
+bool find_old_colliding_pair(std::string* out_a, std::string* out_b) {
     std::string by_id[k_max_vars];
     for (u32 i = 0; i < 200000; ++i) {
         std::string name = "v" + std::to_string(i);
@@ -60,81 +69,70 @@ bool find_colliding_var_names(std::string* out_a, std::string* out_b) {
 
 }  // namespace
 
-TEST_CASE("compilador: dos variables que colisionan en el mismo var_id dan error (M13)") {
-    // Criterio de SPEC.md #12, M13: "Dos nombres de variable que colisionan en el mismo
-    // var_id producen un error al hornear".
+TEST_CASE("simbolos: dos nombres que colisionaban en el esquema viejo tienen ids distintos") {
     std::string a, b;
-    REQUIRE(find_colliding_var_names(&a, &b));
+    REQUIRE(find_old_colliding_pair(&a, &b));
+    // Colisionaban de verdad con el hash: esa era la premisa del problema.
     REQUIRE(fnv1a_u32(a.c_str()) % k_max_vars == fnv1a_u32(b.c_str()) % k_max_vars);
-    MESSAGE("par que colisiona: '" << a << "' y '" << b << "' -> hueco "
-                                   << (fnv1a_u32(a.c_str()) % k_max_vars));
+    MESSAGE("par que colisionaba con el hash viejo: '" << a << "' y '" << b << "'");
 
-    std::string source = "@set " + a + " = 1\n@set " + b + " = 2\n@end\n";
-    ParseResult parsed = parse_script(source, "colision.vns");
+    std::string source   = "@set " + a + " = 1\n@set " + b + " = 2\n@end\n";
+    ParseResult parsed   = parse_script(source, "simbolos.vns");
     REQUIRE(parsed.ok());
+    SymbolTable symbols  = symbols_for_single_script(parsed.instructions);
 
-    CompileResult compiled = compile_instructions(parsed.instructions, "colision.vns");
-    REQUIRE_FALSE(compiled.ok());
-    REQUIRE(compiled.errors.size() == 1);
-    CHECK(compiled.errors[0].file == "colision.vns");
-    CHECK(compiled.errors[0].line == 2);  // la segunda, que es la que choca
-    // El mensaje nombra las DOS variables: sin eso no se puede arreglar.
-    CHECK(compiled.errors[0].message.find(a) != std::string::npos);
-    CHECK(compiled.errors[0].message.find(b) != std::string::npos);
-}
+    // Con la tabla, ids distintos y consecutivos. Y compila sin un solo error: ya no hay
+    // nada que detectar porque no hay nada que pueda ir mal.
+    u16 id_a = symbols.find(SymbolKind::Var, a);
+    u16 id_b = symbols.find(SymbolKind::Var, b);
+    CHECK(id_a != 0);
+    CHECK(id_b != 0);
+    CHECK(id_a != id_b);
 
-TEST_CASE("compilador: usar la misma variable muchas veces no da falso positivo") {
-    // El caso normal: una variable leida y escrita repetidamente. Si esto fallara, la
-    // deteccion seria inservible.
-    const char* source =
-        "@set confianza = 0\n"
-        "@add confianza 1\n"
-        "@if confianza >= 1\n"
-        "    \"algo\"\n"
-        "@end\n"
-        "@add confianza -1\n"
-        "@end\n";
-    ParseResult parsed = parse_script(source, "normal.vns");
-    REQUIRE(parsed.ok());
-
-    CompileResult compiled = compile_instructions(parsed.instructions, "normal.vns");
+    CompileResult compiled = compile_instructions(parsed.instructions, "simbolos.vns", symbols);
     for (const CompileError& e : compiled.errors) {
         MESSAGE("error inesperado: " << e.message);
     }
     CHECK(compiled.ok());
 }
 
-TEST_CASE("hash: cuantos nombres de variable realistas caben antes de la primera colision") {
-    // No es un criterio de M13: es una MEDICION, porque el resultado cambia cuanto importa
-    // esta deteccion. Con 512 huecos la paradoja del cumpleanos dice que la probabilidad de
-    // colision pasa del 50% hacia los 27 nombres distintos — o sea, un juego real con tres
-    // docenas de variables es bastante probable que choque.
-    const char* words[] = {
-        "confianza", "valor",  "miedo",  "oro",     "hp",      "mana",   "dia",    "hora",
-        "piso",      "llave",  "puerta", "carta",   "secreto", "rumor",  "amistad", "rencor",
-        "pista",     "farol",  "tren",   "lluvia",  "nombre",  "edad",   "turno",  "racha",
-        "puntos",    "vidas",  "nivel",  "fase",    "combo",   "suerte", "sed",    "hambre",
-        "frio",      "calor",  "ruido",  "luz",     "sombra",  "eco",    "humo",   "ceniza",
-    };
-    constexpr u32 k_word_count = sizeof(words) / sizeof(words[0]);
-
-    HashCollisionCheck check;
-    std::string        previous;
-    u32                names_until_collision = 0;
-    for (u32 i = 0; i < k_word_count; ++i) {
-        u32 id = fnv1a_u32(words[i]) % k_max_vars;
-        if (!check.add(words[i], id, &previous)) {
-            names_until_collision = i + 1;
-            MESSAGE("colision con " << names_until_collision << " nombres realistas: '"
-                                     << std::string(words[i]) << "' y '" << previous
-                                     << "' en el hueco " << id);
-            break;
-        }
-    }
-    if (names_until_collision == 0) {
-        MESSAGE("sin colision en " << k_word_count << " nombres realistas");
-    }
-    // Sin CHECK sobre el numero: depende de la funcion de hash y no es un contrato. Lo que
-    // importa es que quede medido en la salida de los tests.
-    CHECK(k_word_count > 0);
+TEST_CASE("simbolos: el id 0 esta reservado y nunca se asigna a un nombre") {
+    // SPEC.md #8.2 usa actor_id == 0 para "slot vacio" y bg_id == 0 para "sin fondo".
+    // Reservarlo en TODAS las clases por igual evita tener que recordar en cual si y en
+    // cual no: en M13 esa asimetria costo un bug real (el primer actor de cada guion era
+    // indistinguible de un hueco vacio).
+    SymbolTable table;
+    bool        overflow = false;
+    CHECK(table.intern(SymbolKind::Var, "primera", &overflow) == 1);
+    CHECK(table.intern(SymbolKind::Actor, "marta", &overflow) == 1);
+    CHECK(table.find(SymbolKind::Var, "no_existe") == k_symbol_id_none);
+    CHECK_FALSE(overflow);
 }
+
+TEST_CASE("simbolos: el mismo nombre siempre da el mismo id; nombres distintos, ids distintos") {
+    SymbolTable table;
+    bool        overflow = false;
+    u16         a1       = table.intern(SymbolKind::Var, "confianza", &overflow);
+    u16         b        = table.intern(SymbolKind::Var, "miedo", &overflow);
+    u16         a2       = table.intern(SymbolKind::Var, "confianza", &overflow);
+    CHECK(a1 == a2);
+    CHECK(a1 != b);
+    CHECK(table.count(SymbolKind::Var) == 2);
+}
+
+TEST_CASE("simbolos: pasarse del tope de una clase se avisa, no se corrompe en silencio") {
+    // 512 variables dejan de ser un espacio de hash (util al 5%) para ser una cuenta real:
+    // caben 512 y la 513 es un error con mensaje, no una corrupcion probabilistica.
+    SymbolTable table;
+    bool        overflow = false;
+    for (u32 i = 0; i < k_max_vars; ++i) {
+        table.intern(SymbolKind::Var, "v" + std::to_string(i), &overflow);
+        REQUIRE_FALSE(overflow);
+    }
+    CHECK(table.count(SymbolKind::Var) == k_max_vars);
+
+    u16 id = table.intern(SymbolKind::Var, "la_que_sobra", &overflow);
+    CHECK(overflow);
+    CHECK(id == k_symbol_id_none);
+}
+

@@ -18,7 +18,8 @@
 TEST_CASE("compiler: resuelve Jump a pc y anade End implicito si falta") {
     ParseResult parsed = parse_script(":: a\n@wait 1.0\n@jump a\n", "t.vns");
     REQUIRE(parsed.ok());
-    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns");
+    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns",
+                                                symbols_for_single_script(parsed.instructions));
     REQUIRE(compiled.ok());
 
     REQUIRE(compiled.data.cmds.size() == 4);  // Label, Wait, Jump, End implicito
@@ -31,7 +32,8 @@ TEST_CASE("compiler: resuelve Jump a pc y anade End implicito si falta") {
 
 TEST_CASE("compiler: no duplica End si el guion ya termina en @end") {
     ParseResult   parsed   = parse_script("@end\n", "t.vns");
-    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns");
+    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns",
+                                                symbols_for_single_script(parsed.instructions));
     REQUIRE(compiled.data.cmds.size() == 1);
     CHECK(compiled.data.cmds[0].kind == CmdKind::End);
 }
@@ -39,7 +41,8 @@ TEST_CASE("compiler: no duplica End si el guion ya termina en @end") {
 TEST_CASE("compiler: interna nombres de actor repetidos al mismo id") {
     ParseResult parsed = parse_script(
         "@show marta neutral slot 0 fade 0.0\n@show marta feliz slot 1 fade 0.0\n@end\n", "t.vns");
-    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns");
+    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns",
+                                                symbols_for_single_script(parsed.instructions));
     REQUIRE(compiled.ok());
     CHECK(compiled.data.cmds[0].show.actor_id == compiled.data.cmds[1].show.actor_id);
     CHECK(compiled.data.cmds[0].show.pose_id != compiled.data.cmds[1].show.pose_id);
@@ -49,7 +52,8 @@ TEST_CASE("compiler: Sfx guarda la ruta completa en el string_pool; Bgm usa hash
     ParseResult parsed = parse_script(
         "@sfx puerta_cierra.wav\n@bgm tema_a fade 0.5\n@stopbgm fade 1.0\n@end\n", "t.vns");
     REQUIRE(parsed.ok());
-    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns");
+    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns",
+                                                symbols_for_single_script(parsed.instructions));
     REQUIRE(compiled.ok());
 
     REQUIRE(compiled.data.cmds.size() == 4);
@@ -76,7 +80,8 @@ TEST_CASE("compiler: Say y Choice generan key_hash y entradas de catalogo (M10)"
         "@end\n",
         "t.vns");
     REQUIRE(parsed.ok());
-    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns");
+    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns",
+                                                symbols_for_single_script(parsed.instructions));
     REQUIRE(compiled.ok());
 
     REQUIRE(compiled.data.cmds[0].kind == CmdKind::Say);
@@ -93,7 +98,8 @@ TEST_CASE("compiler: Say y Choice generan key_hash y entradas de catalogo (M10)"
 
 TEST_CASE("compiler + write_vnc: el formato binario coincide con SPEC.md #9.3") {
     ParseResult   parsed   = parse_script("personaje: Hola mundo.\n@end\n", "t.vns");
-    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns");
+    CompileResult compiled = compile_instructions(parsed.instructions, "t.vns",
+                                                symbols_for_single_script(parsed.instructions));
     REQUIRE(compiled.ok());
 
     const char* path = "test_roundtrip.vnc";
@@ -104,7 +110,7 @@ TEST_CASE("compiler + write_vnc: el formato binario coincide con SPEC.md #9.3") 
     u32 header[6];
     REQUIRE(std::fread(header, sizeof(header), 1, f) == 1);
     CHECK(header[0] == 0x53434E56u);  // 'VNCS'
-    CHECK(header[1] == 5u);  // M13: tablas de nombres de actor/pose/fondo
+    CHECK(header[1] == 6u);  // M14: fuera las tablas de nombres por guion (ADR-0067)
     CHECK(header[2] == static_cast<u32>(compiled.data.cmds.size()));
     CHECK(header[3] == static_cast<u32>(compiled.data.string_pool.size()));
     CHECK(header[4] == 0u);  // sin etiquetas en este guion

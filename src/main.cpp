@@ -34,6 +34,7 @@
 #include "vm/rollback.h"
 #include "vm/save.h"
 #include "vm/script_load.h"
+#include "vm/symbols_load.h"
 #include "vm/vm.h"
 
 // M1: renderizado 2D. Ademas del bucle base de M0, dibuja un stress test de 5000 sprites
@@ -248,6 +249,9 @@ int main(int argc, char** argv) {
     //
     // M13: map_id sale del catalogo, no de un 1 puesto a mano. Antes guardar y cargar
     // funcionaba solo porque siempre se cargaba el mismo mapa pasara lo que pasara.
+    // Tabla de simbolos del proyecto (M14, ADR-0067): de ella salen los nombres de actor,
+    // pose y fondo que necesita el dibujado, y los ids de variable y bandera que usa Lua.
+    symbols_load(&g_arena_perm);
     map_catalog_init();
     demo_state.map_id   = map_catalog_id_of("demo_map");
     demo_state.player_x = 4.0f * 64.0f + 32.0f;

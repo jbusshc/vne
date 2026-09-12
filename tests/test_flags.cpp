@@ -16,13 +16,19 @@
 namespace {
 
 // Compila un guion y lo ejecuta entero con vm_skip_current, como hace --autoplay-script.
+SymbolTable g_last_symbols;
+
 bool run_script(const char* source, GameState* out_state, std::string* out_error) {
     ParseResult parsed = parse_script(source, "flags.vns");
     if (!parsed.ok()) {
         *out_error = parsed.errors[0].message;
         return false;
     }
-    CompileResult compiled = compile_instructions(parsed.instructions, "flags.vns");
+    // Los ids ya no se pueden calcular con una formula desde el test (M14, ADR-0067): salen
+    // de la tabla. Se guarda para poder preguntarle luego por el id de un nombre, que es
+    // exactamente lo que hace el compilador.
+    g_last_symbols         = symbols_for_single_script(parsed.instructions);
+    CompileResult compiled = compile_instructions(parsed.instructions, "flags.vns", g_last_symbols);
     if (!compiled.ok()) {
         *out_error = compiled.errors[0].message;
         return false;
@@ -49,8 +55,13 @@ bool run_script(const char* source, GameState* out_state, std::string* out_error
 }
 
 bool flag_is_on(const GameState& s, const char* name) {
-    u16 id = static_cast<u16>(fnv1a_u32(name) % k_max_flags);
-    return (s.flags[id / 8] & (1u << (id % 8))) != 0;
+    u16 id = g_last_symbols.find(SymbolKind::Flag, name);
+    return id != 0 && (s.flags[id / 8] & (1u << (id % 8))) != 0;
+}
+
+i32 var_value(const GameState& s, const char* name) {
+    u16 id = g_last_symbols.find(SymbolKind::Var, name);
+    return id != 0 ? s.vars[id] : 0;
 }
 
 }  // namespace
@@ -93,8 +104,7 @@ TEST_CASE("@if flag: la rama se toma solo si la bandera esta encendida") {
         "@end\n",
         &state, &error));
     INFO("error: " << error);
-    u16 id = static_cast<u16>(fnv1a_u32("resultado") % k_max_vars);
-    CHECK(state.vars[id] == 7);
+    CHECK(var_value(state, "resultado") == 7);
 }
 
 TEST_CASE("@if flag: con la bandera apagada se toma el @else") {
@@ -108,8 +118,7 @@ TEST_CASE("@if flag: con la bandera apagada se toma el @else") {
         "@end\n"
         "@end\n",
         &state, &error));
-    u16 id = static_cast<u16>(fnv1a_u32("resultado") % k_max_vars);
-    CHECK(state.vars[id] == 9);
+    CHECK(var_value(state, "resultado") == 9);
 }
 
 TEST_CASE("@if not flag: invierte la condicion") {
@@ -124,20 +133,21 @@ TEST_CASE("@if not flag: invierte la condicion") {
         "@end\n",
         &state, &error));
     INFO("error: " << error);
-    u16 id = static_cast<u16>(fnv1a_u32("resultado") % k_max_vars);
-    CHECK(state.vars[id] == 7);
+    CHECK(var_value(state, "resultado") == 7);
 }
 
-TEST_CASE("@flag y Lua comparten el mismo bit (mismo flag_id)") {
-    // Si los dos caminos usaran hashes distintos, @flag y vn.set_flag verian banderas
-    // distintas con el mismo nombre y se contradirian sin que nada lo avisara.
+TEST_CASE("@flag y Lua comparten el mismo bit, ahora por construccion (ADR-0067)") {
+    // Antes de M14 esto dependia de que dos copias de `fnv1a % k_max_flags` —una en el
+    // compilador y otra en lua_bindings.cpp— siguieran coincidiendo: si alguien cambiaba
+    // una sin la otra, @flag y vn.set_flag veian banderas distintas con el mismo nombre y
+    // nada lo avisaba. Ahora los dos preguntan a LA MISMA tabla, asi que no pueden divergir.
     GameState   state{};
     std::string error;
     REQUIRE(run_script("@flag compartida on\n@end\n", &state, &error));
 
-    // El mismo calculo que hace script/lua_bindings.cpp.
-    u16 lua_id = static_cast<u16>(fnv1a_u32("compartida") % k_max_flags);
-    CHECK((state.flags[lua_id / 8] & (1u << (lua_id % 8))) != 0);
+    u16 id = g_last_symbols.find(SymbolKind::Flag, "compartida");
+    REQUIRE(id != 0);
+    CHECK((state.flags[id / 8] & (1u << (id % 8))) != 0);
 }
 
 TEST_CASE("@choice: una opcion condicionada por bandera se rechaza en voz alta") {

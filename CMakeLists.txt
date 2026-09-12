@@ -294,6 +294,7 @@ add_library(vne_base STATIC
   src/text/catalog.cpp
   src/vm/vm.cpp
   src/vm/script_load.cpp
+  src/vm/symbols_load.cpp
   src/vm/backlog.cpp
   src/vm/rollback.cpp
   src/vm/save.cpp
@@ -375,6 +376,7 @@ add_library(vne_script_tools STATIC
   src/script/compiler.cpp
   src/script/asset_validate.cpp
   src/script/hash_collisions.cpp
+  src/script/symbols.cpp
   src/script/map_bake.cpp
 )
 target_include_directories(vne_script_tools PUBLIC src)
@@ -463,6 +465,28 @@ add_custom_target(vne_copy_fonts DEPENDS
   ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSans-subset.ttf)
 add_dependencies(vne_game vne_copy_fonts)
 
+# Tabla de simbolos del proyecto (M14, ADR-0067). Va ANTES que cualquier guion y con TODOS
+# los guiones como entrada: los ids tienen que ser los mismos en todos, que es justo lo que
+# `vne_bake script` no puede dar porque ve un guion cada vez.
+set(VNE_ALL_SCRIPTS
+  ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo.vns
+  ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_branching.vns
+  ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_audio.vns
+  ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_transitions.vns
+)
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
+  COMMAND vne_bake symbols
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym
+          ${VNE_ALL_SCRIPTS}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  DEPENDS vne_bake ${VNE_ALL_SCRIPTS}
+  COMMENT "vne_bake: tabla de simbolos del proyecto"
+)
+add_custom_target(vne_bake_symbols
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym)
+
 # Guion de prueba de M3 (ADR pendiente, ver docs/DECISIONS.md): nombres placeholder
 # obvios, no contenido de juego real (SPEC.md #6). Se compila a .vnc en el directorio de
 # build, igual que el atlas y las fuentes.
@@ -474,6 +498,7 @@ add_custom_command(
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo.vnc
   DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym
   COMMENT "vne_bake: compilando demo.vns a demo.vnc"
 )
 add_custom_target(vne_bake_script DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo.vnc)
@@ -489,6 +514,7 @@ add_custom_command(
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_branching.vnc
   DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_branching.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym
   COMMENT "vne_bake: compilando demo_branching.vns a demo_branching.vnc"
 )
 add_custom_target(vne_bake_script_branching
@@ -504,6 +530,7 @@ add_custom_command(
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_audio.vnc
   DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_audio.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym
   COMMENT "vne_bake: compilando demo_audio.vns a demo_audio.vnc"
 )
 add_custom_target(vne_bake_script_audio
@@ -519,6 +546,7 @@ add_custom_command(
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_transitions.vnc
   DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_transitions.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
+          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym
   COMMENT "vne_bake: compilando demo_transitions.vns a demo_transitions.vnc"
 )
 add_custom_target(vne_bake_script_transitions

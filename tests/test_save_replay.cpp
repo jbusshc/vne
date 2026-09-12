@@ -27,7 +27,8 @@ CompiledScript load_demo_script(CompileResult* out_compiled) {
 
     ParseResult parsed = parse_script(source, "demo.vns");
     REQUIRE(parsed.ok());
-    *out_compiled = compile_instructions(parsed.instructions, "demo.vns");
+    *out_compiled = compile_instructions(parsed.instructions, "demo.vns",
+                                                symbols_for_single_script(parsed.instructions));
     REQUIRE(out_compiled->ok());
 
     return CompiledScript{out_compiled->data.cmds.data(),

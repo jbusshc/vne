@@ -7,40 +7,42 @@
 #include "gfx/atlas.h"
 #include "vm/script_load.h"
 #include "vm/state.h"
+#include "vm/symbols_load.h"
 #include "vm/vm.h"
 
-// Cadena completa que hace falta para que un @bg o un @show se vean en pantalla (M13):
+// Cadena completa que hace falta para que un @bg o un @show se vean en pantalla:
 //
-//   bg_id / actor_id+pose_id  ->  nombre (tablas del .vnc v5)  ->  sprite (atlas)
+//   bg_id / actor_id+pose_id  ->  nombre (tabla de simbolos)  ->  sprite (atlas)
 //
-// Hasta M13 el primer eslabon no existia: el id era un indice de un interner local al
-// guion y no habia forma de volver al nombre, asi que nada podia dibujarse. Este test
-// recorre la cadena entera sobre el demo.vnc horneado por el propio build; lo unico que no
-// cubre es la llamada final a gfx_draw_sprite, que necesita GPU.
+// En M13 el eslabon del medio eran tres tablas dentro de CADA .vnc, porque el id era un
+// indice de un interner local a esa compilacion. En M14 es la tabla de simbolos del
+// proyecto (ADR-0067): una sola para todos los guiones, lo que ademas hace que el id
+// signifique lo mismo en todos y que GameState pueda sobrevivir a un guardado entre guiones
+// distintos.
+//
+// Lo unico que este test no cubre es la llamada final a gfx_draw_sprite, que necesita GPU.
 
-TEST_CASE("escena: los ids del .vnc resuelven a nombres y esos nombres estan en el atlas") {
+TEST_CASE("escena: los ids del .vnc resuelven por la tabla de simbolos y estan en el atlas") {
     CompiledScript script{};
     REQUIRE(script_load("demo.vnc", &g_arena_scene, &script) == ScriptLoadResult::Ok);
     REQUIRE(atlas_load(&g_arena_perm));
+    REQUIRE(symbols_load(&g_arena_perm));
 
-    // Las tres tablas tienen contenido: demo.vns usa actores, poses y fondos.
-    REQUIRE(script.actor_name_count > 0);
-    REQUIRE(script.pose_name_count > 0);
-    REQUIRE(script.bg_name_count > 0);
+    REQUIRE(symbols_count(SymKind::Actor) > 0);
+    REQUIRE(symbols_count(SymKind::Bg) > 0);
 
     u32 shows_checked = 0;
     u32 bgs_checked   = 0;
     for (u32 i = 0; i < script.cmd_count; ++i) {
         const Cmd& cmd = script.cmds[i];
         if (cmd.kind == CmdKind::Show) {
-            // El id 0 significa "slot vacio" (SPEC.md #8.2). Que el interner empezara en 0
-            // hacia al PRIMER actor de cada guion indistinguible de un hueco vacio: era un
-            // bug real, invisible mientras nadie dibujaba. Los ids validos empiezan en 1.
+            // El id 0 significa "slot vacio" (SPEC.md #8.2) y esta reservado en todas las
+            // clases, asi que ningun nombre real puede recibirlo.
             CHECK(cmd.show.actor_id != 0);
             CHECK(cmd.show.pose_id != 0);
 
-            std::string actor = script_actor_name(script, cmd.show.actor_id);
-            std::string pose  = script_pose_name(script, cmd.show.pose_id);
+            std::string actor = symbols_name(SymKind::Actor, cmd.show.actor_id);
+            std::string pose  = symbols_name(SymKind::Pose, cmd.show.pose_id);
             CHECK_FALSE(actor.empty());
             CHECK_FALSE(pose.empty());
 
@@ -51,7 +53,7 @@ TEST_CASE("escena: los ids del .vnc resuelven a nombres y esos nombres estan en 
             shows_checked += 1;
         } else if (cmd.kind == CmdKind::Bg) {
             CHECK(cmd.bg.bg_id != 0);
-            std::string bg = script_bg_name(script, cmd.bg.bg_id);
+            std::string bg = symbols_name(SymKind::Bg, cmd.bg.bg_id);
             CHECK_FALSE(bg.empty());
 
             AtlasSprite s{};
@@ -62,20 +64,58 @@ TEST_CASE("escena: los ids del .vnc resuelven a nombres y esos nombres estan en 
         }
     }
 
-    // Si demo.vns dejara de tener @show/@bg, el test pasaria sin comprobar nada: se exige
-    // que haya recorrido algo de verdad.
+    // Si demo.vns dejara de tener @show/@bg, el test pasaria sin comprobar nada.
     CHECK(shows_checked > 0);
     CHECK(bgs_checked > 0);
     MESSAGE("comprobados " << shows_checked << " @show y " << bgs_checked << " @bg");
 }
 
-TEST_CASE("escena: un id fuera de la tabla devuelve cadena vacia, no basura") {
-    CompiledScript script{};
-    REQUIRE(script_load("demo.vnc", &g_arena_scene, &script) == ScriptLoadResult::Ok);
+TEST_CASE("escena: los ids son los MISMOS en dos guiones distintos (ADR-0067)") {
+    // Esta es la propiedad que M13 no tenia y que motivo la tabla del proyecto: con ids
+    // locales a cada compilacion, el actor 1 de demo.vnc y el actor 1 de
+    // demo_transitions.vnc podian ser personajes distintos, y por eso `actors[]` no podia
+    // sobrevivir a un guardado si se cargaba con otro guion.
+    REQUIRE(symbols_load(&g_arena_perm));
 
-    CHECK(std::string(script_actor_name(script, 0)) == "");        // 0 = vacio
-    CHECK(std::string(script_bg_name(script, 0)) == "");
-    CHECK(std::string(script_actor_name(script, 60000)) == "");     // fuera de rango
-    CHECK(std::string(script_pose_name(script, 60000)) == "");
-    CHECK(std::string(script_bg_name(script, 60000)) == "");
+    CompiledScript a{}, b{};
+    REQUIRE(script_load("demo.vnc", &g_arena_scene, &a) == ScriptLoadResult::Ok);
+    REQUIRE(script_load("demo_transitions.vnc", &g_arena_scene, &b) == ScriptLoadResult::Ok);
+
+    // Se busca un actor que aparezca en los dos y se comprueba que trae el mismo id.
+    u32 shared = 0;
+    for (u32 i = 0; i < a.cmd_count; ++i) {
+        if (a.cmds[i].kind != CmdKind::Show) {
+            continue;
+        }
+        const char* name_a = symbols_name(SymKind::Actor, a.cmds[i].show.actor_id);
+        for (u32 j = 0; j < b.cmd_count; ++j) {
+            if (b.cmds[j].kind != CmdKind::Show) {
+                continue;
+            }
+            const char* name_b = symbols_name(SymKind::Actor, b.cmds[j].show.actor_id);
+            if (std::string(name_a) == std::string(name_b)) {
+                CHECK(a.cmds[i].show.actor_id == b.cmds[j].show.actor_id);
+                shared += 1;
+            }
+        }
+    }
+    MESSAGE("actores compartidos entre los dos guiones: " << shared);
+}
+
+TEST_CASE("escena: un id fuera de la tabla devuelve cadena vacia, no basura") {
+    REQUIRE(symbols_load(&g_arena_perm));
+    CHECK(std::string(symbols_name(SymKind::Actor, 0)) == "");       // 0 = ninguno
+    CHECK(std::string(symbols_name(SymKind::Bg, 0)) == "");
+    CHECK(std::string(symbols_name(SymKind::Actor, 60000)) == "");    // fuera de rango
+    CHECK(std::string(symbols_name(SymKind::Pose, 60000)) == "");
+}
+
+TEST_CASE("simbolos: nombre -> id -> nombre da la vuelta completa") {
+    REQUIRE(symbols_load(&g_arena_perm));
+    u16 id = symbols_id(SymKind::Actor, "marta");
+    if (id != 0) {
+        CHECK(std::string(symbols_name(SymKind::Actor, id)) == "marta");
+    }
+    CHECK(symbols_id(SymKind::Actor, "no_existe_este_actor") == 0);
+    CHECK(symbols_id(SymKind::Actor, nullptr) == 0);
 }

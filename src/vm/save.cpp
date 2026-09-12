@@ -1,5 +1,8 @@
 #include "vm/save.h"
 
+#include "base/hash.h"
+#include "vm/symbols_load.h"
+
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -42,6 +45,41 @@ void migrate_v2_to_v3(GameState* state) {
         state->actors[i] = ActorSlot{};
     }
     state->bg_id = 0;
+}
+
+// v3 -> v4 (M14, ADR-0067). Los ids de variable y bandera pasan de `fnv1a(nombre) %
+// capacidad` a ser el indice en la tabla de simbolos del proyecto, asi que un v3 tiene sus
+// valores en huecos que ya no significan lo mismo.
+//
+// Y aqui SI se puede migrar de verdad, a diferencia de v2 -> v3: la tabla de simbolos tiene
+// todos los nombres, y el hueco viejo de cada uno se puede recalcular con la formula
+// antigua. Para cada nombre se copia el valor de donde estaba a donde va ahora. Lo unico
+// que se pierde son los valores de nombres que ya no usa ningun guion, que es justo lo que
+// deberia perderse.
+//
+// Si dos nombres colisionaban en el esquema viejo, los dos leen del mismo hueco y acaban
+// con el mismo valor. No es recuperable ni tiene por que serlo: en el v3 ese valor ya era
+// el de una variable pisando a la otra.
+void migrate_v3_to_v4(GameState* state) {
+    i32 old_vars[k_max_vars];
+    u8  old_flags[k_max_flags / 8];
+    std::memcpy(old_vars, state->vars, sizeof(old_vars));
+    std::memcpy(old_flags, state->flags, sizeof(old_flags));
+    std::memset(state->vars, 0, sizeof(state->vars));
+    std::memset(state->flags, 0, sizeof(state->flags));
+
+    for (u32 id = 1; id <= symbols_count(SymKind::Var); ++id) {
+        const char* name     = symbols_name(SymKind::Var, static_cast<u16>(id));
+        u32         old_slot = fnv1a_u32(name) % k_max_vars;
+        state->vars[id]      = old_vars[old_slot];
+    }
+    for (u32 id = 1; id <= symbols_count(SymKind::Flag); ++id) {
+        const char* name     = symbols_name(SymKind::Flag, static_cast<u16>(id));
+        u32         old_slot = fnv1a_u32(name) % k_max_flags;
+        if ((old_flags[old_slot / 8] & (1u << (old_slot % 8))) != 0) {
+            state->flags[id / 8] = static_cast<u8>(state->flags[id / 8] | (1u << (id % 8)));
+        }
+    }
 }
 }  // namespace
 
@@ -100,10 +138,10 @@ LoadResult load_game(const char* path, GameState* out_state, Backlog* out_backlo
         log_error("load_game: '%s' no es un .vnsave valido (magic incorrecto)", path);
         return LoadResult::BadFormat;
     }
-    if (version != k_savegame_version && version != 1u && version != 2u) {
-        // Las migraciones se ENCADENAN (SPEC.md #8.3): v1 -> v2 -> v3. Cualquier version
-        // por debajo de la mas vieja soportada se rechaza con un mensaje claro en vez de
-        // cargarse a medias.
+    if (version != k_savegame_version && version != 1u && version != 2u && version != 3u) {
+        // Las migraciones se ENCADENAN (SPEC.md #8.3): v1 -> v2 -> v3 -> v4. Cualquier
+        // version por debajo de la mas vieja soportada se rechaza con un mensaje claro en
+        // vez de cargarse a medias.
         std::fclose(file);
         log_error("load_game: '%s' es version %u, se esperaba %u (sin migracion desde ahi)",
                   path, version, k_savegame_version);
@@ -156,11 +194,18 @@ LoadResult load_game(const char* path, GameState* out_state, Backlog* out_backlo
     // Cadena de migraciones: un v1 ya paso por migrate_v1_to_v2 arriba, asi que a partir de
     // aqui todo lo que no sea v3 es un v2 que hay que subir (SPEC.md #8.3: "las migraciones
     // se encadenan v2 -> v3 -> v4").
-    if (version != k_savegame_version) {
+    // Cadena de migraciones (SPEC.md #8.3): v1 -> v2 -> v3 -> v4, cada salto encadenado.
+    if (version < 3u) {
         migrate_v2_to_v3(&state);
-        log_info("load_game: '%s' migrado a v%u (actores y fondo limpiados: sus ids eran "
-                 "de un interner que ya no existe, ver ADR-0062)",
-                 path, k_savegame_version);
+        log_info("load_game: '%s' migrado a v3 (actores y fondo limpiados: sus ids eran de "
+                 "un interner que ya no existe, ver ADR-0062)",
+                 path);
+    }
+    if (version < 4u) {
+        migrate_v3_to_v4(&state);
+        log_info("load_game: '%s' migrado a v4 (variables y banderas recolocadas a sus ids "
+                 "de la tabla de simbolos, ver ADR-0067)",
+                 path);
     }
 
     u32 thumbnail_size = 0;
@@ -209,7 +254,7 @@ LoadResult load_save_thumbnail(const char* path, u8* out_qoi, u32 cap, u32* out_
     ok &= std::fread(&state_size, sizeof(u32), 1, file) == 1;
     ok &= std::fread(&checksum, sizeof(u32), 1, file) == 1;
     (void)checksum;
-    if (!ok || magic != k_vnsave_magic || (version != k_savegame_version && version != 1u && version != 2u)) {
+    if (!ok || magic != k_vnsave_magic || (version != k_savegame_version && version != 1u && version != 2u && version != 3u)) {
         std::fclose(file);
         return LoadResult::BadFormat;
     }

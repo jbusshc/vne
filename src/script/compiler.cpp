@@ -5,58 +5,9 @@
 #include <unordered_map>
 
 #include "base/hash.h"
-#include "script/hash_collisions.h"
 #include "vm/state.h"
 
 namespace {
-
-// Los ids empiezan en 1, no en 0. **Esto era un bug real hasta M13**: ActorSlot documenta
-// `actor_id = 0` como "slot vacio" (SPEC.md #8.2), pero el interner daba 0 al PRIMER actor
-// de cada guion, asi que ese actor era indistinguible de un hueco vacio. Nunca se
-// manifesto porque nada dibujaba actores; al conectar el dibujado (M13) el primer actor de
-// cada guion simplemente no habria aparecido, y el sintoma —"este personaje no sale"— no
-// habria apuntado ni de lejos a la causa.
-//
-// Reservar el 0 cuesta un id de 65536 y elimina la ambiguedad de raiz. Vale para los cuatro
-// interners: bg_id 0 es "sin fondo" por el mismo razonamiento, y para hablante y pose es
-// gratis mantener la coherencia.
-class NameInterner {
-public:
-    u16 intern(const std::string& name) {
-        auto it = ids_.find(name);
-        if (it != ids_.end()) {
-            return it->second;
-        }
-        u16 id     = static_cast<u16>(ids_.size() + 1);
-        ids_[name] = id;
-        names_.push_back(name);
-        return id;
-    }
-
-    // Nombres en orden de id (el id 1 es names()[0]). Los necesita el .vnc v5 para que el
-    // runtime pueda volver del id al nombre y de ahi al sprite del atlas.
-    const std::vector<std::string>& names() const { return names_; }
-
-private:
-    std::unordered_map<std::string, u16> ids_;
-    std::vector<std::string>              names_;
-};
-
-// Nombres de variable (SPEC.md #9.4: "vn.get_var(name)") se resuelven por hash modulo la
-// capacidad fija del array, no con una tabla de interning: asi el mismo nombre usado
-// desde el DSL (@set/@add/@if) y desde Lua (vn.get_var/vn.set_var, que no pasa por este
-// compilador) siempre cae en el mismo indice sin necesitar una seccion nueva en el .vnc
-// solo para eso. El riesgo de colision entre dos nombres distintos es real pero pequeno
-// para el tamano de guion de este proyecto; ver ADR de M5 en docs/DECISIONS.md.
-u16 var_id_of(const std::string& name) {
-    return static_cast<u16>(fnv1a_u32(name) % k_max_vars);
-}
-
-// Mismo criterio para las banderas, y el MISMO que usa script/lua_bindings.cpp: @flag y
-// vn.set_flag tienen que ver la misma bandera o se contradirian (M13).
-u16 flag_id_of(const std::string& name) {
-    return static_cast<u16>(fnv1a_u32(name) % k_max_flags);
-}
 
 u32 push_string(CompiledScriptData* data, const std::string& s) {
     u32 offset = static_cast<u32>(data->string_pool.size());
@@ -90,7 +41,8 @@ CmpOp negate_cmp_op(CmpOp op) {
 }  // namespace
 
 CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
-                                    const std::string&              file_name) {
+                                    const std::string&              file_name,
+                                    const SymbolTable&              symbols) {
     CompileResult result;
 
     // Pase 1: pc de cada instruccion es su indice en el array final (1:1, Label incluido
@@ -110,38 +62,28 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
         return it != label_pcs.end() ? it->second : 0;
     };
 
-    // Deteccion de colisiones de hash (M13). ADR-0029 acepto que dos nombres de variable
-    // distintos puedan caer en el mismo hueco de `vars` sin detectarlo; el sintoma seria una
-    // variable pisando a otra, imposible de rastrear desde el guion. Detectarlo cuesta un
-    // diccionario en una herramienta offline.
-    HashCollisionCheck  var_names;
-    HashCollisionCheck  flag_names;
-    auto check_var = [&](const std::string& name, u16 id, u32 line) {
-        std::string previous;
-        if (!var_names.add(name, id, &previous)) {
+    // Los ids salen de la tabla de simbolos del proyecto (M14). Ya NO se detectan colisiones
+    // aqui —el detector de M13 (ADR-0063) se retira— porque con ids secuenciales de una tabla
+    // **no puede haber colision**: el problema se elimina en vez de vigilarse.
+    //
+    // Un nombre que no este en la tabla solo puede pasar si el .vnsym se hornea de un
+    // conjunto de guiones distinto del que se compila, asi que se reporta como lo que es:
+    // un problema del pipeline, no del guion.
+    auto symbol_id = [&](SymbolKind kind, const std::string& name, u32 line) -> u16 {
+        if (name.empty()) {
+            return k_symbol_id_none;
+        }
+        u16 id = symbols.find(kind, name);
+        if (id == k_symbol_id_none) {
             result.errors.push_back(CompileError{
                 file_name, line,
-                "colision de hash entre las variables '" + name + "' y '" + previous +
-                    "': las dos caen en el hueco " + std::to_string(id) +
-                    " de GameState.vars y se pisarian. Renombra una de las dos."});
+                std::string("el nombre de ") + symbol_kind_name(kind) + " '" + name +
+                    "' no esta en la tabla de simbolos; vuelve a ejecutar 'vne_bake symbols' "
+                    "incluyendo este guion"});
         }
+        return id;
     };
 
-    auto check_flag = [&](const std::string& name, u16 id, u32 line) {
-        std::string previous;
-        if (!flag_names.add(name, id, &previous)) {
-            result.errors.push_back(CompileError{
-                file_name, line,
-                "colision de hash entre las banderas '" + name + "' y '" + previous +
-                    "': las dos caen en el bit " + std::to_string(id) +
-                    " de GameState.flags y se pisarian. Renombra una de las dos."});
-        }
-    };
-
-    NameInterner        actors;
-    NameInterner        poses;
-    NameInterner        bgs;
-    NameInterner        speakers;
     CompiledScriptData& data = result.data;
     data.cmds.reserve(instructions.size() + 1);
 
@@ -155,8 +97,9 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                 break;
             case InstrKind::Say: {
                 cmd.kind = CmdKind::Say;
-                cmd.say.speaker_id = instr.speaker.empty() ? static_cast<u16>(0xFFFFu)
-                                                             : speakers.intern(instr.speaker);
+                cmd.say.speaker_id = instr.speaker.empty()
+                                          ? static_cast<u16>(0xFFFFu)
+                                          : symbol_id(SymbolKind::Speaker, instr.speaker, instr.line);
                 cmd.say.text_id = push_string(&data, instr.text);
                 cmd.say.key_hash = fnv1a_u32(instr.text);
                 data.catalog_entries.push_back(
@@ -165,8 +108,8 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
             }
             case InstrKind::Show:
                 cmd.kind           = CmdKind::Show;
-                cmd.show.actor_id = actors.intern(instr.actor);
-                cmd.show.pose_id  = poses.intern(instr.pose);
+                cmd.show.actor_id = symbol_id(SymbolKind::Actor, instr.actor, instr.line);
+                cmd.show.pose_id  = symbol_id(SymbolKind::Pose, instr.pose, instr.line);
                 cmd.show.slot     = instr.slot;
                 cmd.show.fade     = instr.fade;
                 break;
@@ -177,7 +120,7 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                 break;
             case InstrKind::Bg:
                 cmd.kind     = CmdKind::Bg;
-                cmd.bg.bg_id = bgs.intern(instr.bg);
+                cmd.bg.bg_id = symbol_id(SymbolKind::Bg, instr.bg, instr.line);
                 cmd.bg.fade  = instr.fade;
                 break;
             case InstrKind::Wait:
@@ -193,20 +136,17 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                 break;
             case InstrKind::SetVar:
                 cmd.kind             = CmdKind::SetVar;
-                cmd.set_var.var_id   = var_id_of(instr.var);
-                check_var(instr.var, cmd.set_var.var_id, instr.line);
+                cmd.set_var.var_id   = symbol_id(SymbolKind::Var, instr.var, instr.line);
                 cmd.set_var.value    = instr.value;
                 break;
             case InstrKind::SetFlag:
                 cmd.kind             = CmdKind::SetFlag;
-                cmd.set_flag.flag_id = flag_id_of(instr.var);
+                cmd.set_flag.flag_id = symbol_id(SymbolKind::Flag, instr.var, instr.line);
                 cmd.set_flag.value   = instr.value != 0 ? 1u : 0u;
-                check_flag(instr.var, cmd.set_flag.flag_id, instr.line);
                 break;
             case InstrKind::AddVar:
                 cmd.kind             = CmdKind::AddVar;
-                cmd.add_var.var_id   = var_id_of(instr.var);
-                check_var(instr.var, cmd.add_var.var_id, instr.line);
+                cmd.add_var.var_id   = symbol_id(SymbolKind::Var, instr.var, instr.line);
                 cmd.add_var.value    = instr.value;
                 break;
             case InstrKind::JumpIf: {
@@ -216,16 +156,14 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                 // operador en una, volteando el valor esperado en la otra.
                 if (instr.condition.is_flag) {
                     cmd.kind                       = CmdKind::JumpIfFlag;
-                    cmd.jump_if_flag.flag_id       = flag_id_of(instr.condition.var);
-                    check_flag(instr.condition.var, cmd.jump_if_flag.flag_id, instr.line);
+                    cmd.jump_if_flag.flag_id = symbol_id(SymbolKind::Flag, instr.condition.var, instr.line);
                     bool expected                  = instr.condition.flag_expected;
                     cmd.jump_if_flag.expected      = (instr.invert_condition ? !expected : expected) ? 1u : 0u;
                     cmd.jump_if_flag.target_pc     = resolve_label(instr.name);
                     break;
                 }
                 cmd.kind                  = CmdKind::JumpIf;
-                cmd.jump_if.var_id        = var_id_of(instr.condition.var);
-                check_var(instr.condition.var, cmd.jump_if.var_id, instr.line);
+                cmd.jump_if.var_id        = symbol_id(SymbolKind::Var, instr.condition.var, instr.line);
                 cmd.jump_if.op            = instr.invert_condition
                                                  ? negate_cmp_op(instr.condition.op)
                                                  : instr.condition.op;
@@ -243,7 +181,7 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                     co.target_pc    = resolve_label(opt.target);
                     co.has_condition = opt.has_condition ? 1 : 0;
                     if (opt.has_condition) {
-                        co.cond_var_id = var_id_of(opt.condition.var);
+                        co.cond_var_id = symbol_id(SymbolKind::Var, opt.condition.var, instr.line);
                         co.cond_op     = opt.condition.op;
                         co.cond_rhs    = opt.condition.rhs;
                     }
@@ -308,22 +246,6 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
         data.cmds.push_back(cmd);
     }
 
-    // Tablas de nombres del .vnc v5 (M13): el id de actor/pose/fondo es un indice
-    // secuencial de un interner LOCAL a este guion, no un hash, asi que sin esto el runtime
-    // no tiene forma de volver del id al nombre y de ahi al sprite del atlas. Sin estas tres
-    // tablas no se puede dibujar ni un actor ni un fondo.
-    //
-    // Los ids empiezan en 1 (ver NameInterner), asi que la tabla se indexa con id-1.
-    auto push_names = [&](const std::vector<std::string>& names, std::vector<u32>* out) {
-        out->reserve(names.size());
-        for (const std::string& name : names) {
-            out->push_back(push_string(&data, name));
-        }
-    };
-    push_names(actors.names(), &data.actor_name_offsets);
-    push_names(poses.names(), &data.pose_name_offsets);
-    push_names(bgs.names(), &data.bg_name_offsets);
-
     if (data.cmds.empty() || data.cmds.back().kind != CmdKind::End) {
         Cmd end_cmd{};
         end_cmd.kind = CmdKind::End;
@@ -340,14 +262,14 @@ bool write_vnc(const std::string& path, const CompiledScriptData& data) {
     }
 
     const u32 magic              = 0x53434E56u;  // 'VNCS' (V,N,C,S en memoria little-endian)
-    const u32 version            = 5;  // M13: tablas de nombres de actor/pose/fondo
+    // v6 (M14): las tablas de nombres por guion de v5 DESAPARECEN. Los nombres viven ahora en
+    // la tabla de simbolos del proyecto (.vnsym), que es una sola para todos los guiones, asi
+    // que tenerlos ademas aqui era duplicarlos y arriesgarse a que se desincronizaran.
+    const u32 version            = 6;
     const u32 cmd_count          = static_cast<u32>(data.cmds.size());
     const u32 string_pool_size   = static_cast<u32>(data.string_pool.size());
     const u32 label_count        = static_cast<u32>(data.labels.size());
     const u32 choice_option_count = static_cast<u32>(data.choice_options.size());
-    const u32 actor_name_count   = static_cast<u32>(data.actor_name_offsets.size());
-    const u32 pose_name_count    = static_cast<u32>(data.pose_name_offsets.size());
-    const u32 bg_name_count      = static_cast<u32>(data.bg_name_offsets.size());
 
     bool ok = true;
     ok &= std::fwrite(&magic, sizeof(magic), 1, file) == 1;
@@ -356,9 +278,6 @@ bool write_vnc(const std::string& path, const CompiledScriptData& data) {
     ok &= std::fwrite(&string_pool_size, sizeof(string_pool_size), 1, file) == 1;
     ok &= std::fwrite(&label_count, sizeof(label_count), 1, file) == 1;
     ok &= std::fwrite(&choice_option_count, sizeof(choice_option_count), 1, file) == 1;
-    ok &= std::fwrite(&actor_name_count, sizeof(actor_name_count), 1, file) == 1;
-    ok &= std::fwrite(&pose_name_count, sizeof(pose_name_count), 1, file) == 1;
-    ok &= std::fwrite(&bg_name_count, sizeof(bg_name_count), 1, file) == 1;
     if (cmd_count > 0) {
         ok &= std::fwrite(data.cmds.data(), sizeof(Cmd), cmd_count, file) == cmd_count;
     }
@@ -372,20 +291,6 @@ bool write_vnc(const std::string& path, const CompiledScriptData& data) {
     if (choice_option_count > 0) {
         ok &= std::fwrite(data.choice_options.data(), sizeof(ChoiceOption), choice_option_count,
                            file) == choice_option_count;
-    }
-    // Las tres tablas van al final, en este orden, cada una como u32[count] de offsets
-    // dentro de string_pool (M13, .vnc v5).
-    if (actor_name_count > 0) {
-        ok &= std::fwrite(data.actor_name_offsets.data(), sizeof(u32), actor_name_count, file) ==
-              actor_name_count;
-    }
-    if (pose_name_count > 0) {
-        ok &= std::fwrite(data.pose_name_offsets.data(), sizeof(u32), pose_name_count, file) ==
-              pose_name_count;
-    }
-    if (bg_name_count > 0) {
-        ok &= std::fwrite(data.bg_name_offsets.data(), sizeof(u32), bg_name_count, file) ==
-              bg_name_count;
     }
 
     std::fclose(file);

@@ -9,7 +9,7 @@ namespace {
 // Deben coincidir exactamente con src/script/compiler.cpp (write_vnc). Duplicados a
 // proposito: script/ es una herramienta offline que vm/ (runtime) no debe enlazar.
 constexpr u32 k_vnc_magic   = 0x53434E56u;  // 'VNCS'
-constexpr u32 k_vnc_version = 5u;           // M13: tablas de nombres de actor/pose/fondo
+constexpr u32 k_vnc_version = 6u;           // M14: fuera las tablas de nombres por guion
 }  // namespace
 
 ScriptLoadResult script_load(const char* logical_name, Arena* arena, CompiledScript* out) {
@@ -27,13 +27,13 @@ ScriptLoadResult script_load(const char* logical_name, Arena* arena, CompiledScr
         return ScriptLoadResult::NotFound;
     }
 
-    constexpr usize k_header_size = 9 * sizeof(u32);
+    constexpr usize k_header_size = 6 * sizeof(u32);
     if (size < k_header_size) {
         log_error("script_load: '%s' es demasiado pequeno para ser un .vnc", logical_name);
         return ScriptLoadResult::BadFormat;
     }
 
-    u32 header[9];
+    u32 header[6];
     std::memcpy(header, bytes, sizeof(header));
     u32 magic               = header[0];
     u32 version             = header[1];
@@ -41,9 +41,6 @@ ScriptLoadResult script_load(const char* logical_name, Arena* arena, CompiledScr
     u32 string_pool_size    = header[3];
     u32 label_count         = header[4];
     u32 choice_option_count = header[5];
-    u32 actor_name_count    = header[6];
-    u32 pose_name_count     = header[7];
-    u32 bg_name_count       = header[8];
 
     if (magic != k_vnc_magic) {
         log_error("script_load: '%s' no es un .vnc valido (magic incorrecto)", logical_name);
@@ -59,9 +56,7 @@ ScriptLoadResult script_load(const char* logical_name, Arena* arena, CompiledScr
     usize expected_size = offset + static_cast<usize>(cmd_count) * sizeof(Cmd) +
                           static_cast<usize>(string_pool_size) +
                           static_cast<usize>(label_count) * sizeof(ScriptLabel) +
-                          static_cast<usize>(choice_option_count) * sizeof(ChoiceOption) +
-                          static_cast<usize>(actor_name_count + pose_name_count + bg_name_count) *
-                              sizeof(u32);
+                          static_cast<usize>(choice_option_count) * sizeof(ChoiceOption);
     if (expected_size > size) {
         log_error("script_load: '%s' esta truncado", logical_name);
         return ScriptLoadResult::BadFormat;
@@ -84,22 +79,6 @@ ScriptLoadResult script_load(const char* logical_name, Arena* arena, CompiledScr
 
     out->choice_options       = reinterpret_cast<const ChoiceOption*>(bytes + offset);
     out->choice_option_count = choice_option_count;
-    offset += static_cast<usize>(choice_option_count) * sizeof(ChoiceOption);
-
-    // Tablas de nombres (.vnc v5, M13): tres arrays de offsets dentro de string_pool,
-    // indexados por id-1 porque el id 0 esta reservado para "vacio" (ver NameInterner en
-    // script/compiler.cpp). Son lo que permite volver de un actor_id/pose_id/bg_id al
-    // nombre y de ahi al sprite del atlas.
-    out->actor_names      = reinterpret_cast<const u32*>(bytes + offset);
-    out->actor_name_count = actor_name_count;
-    offset += static_cast<usize>(actor_name_count) * sizeof(u32);
-
-    out->pose_names      = reinterpret_cast<const u32*>(bytes + offset);
-    out->pose_name_count = pose_name_count;
-    offset += static_cast<usize>(pose_name_count) * sizeof(u32);
-
-    out->bg_names      = reinterpret_cast<const u32*>(bytes + offset);
-    out->bg_name_count = bg_name_count;
 
     return ScriptLoadResult::Ok;
 }

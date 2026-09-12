@@ -11,6 +11,7 @@
 #include "game/map_format.h"
 #include "script/asset_validate.h"
 #include "script/hash_collisions.h"
+#include "script/symbols.h"
 
 #include <hb.h>
 #include <hb-subset.h>
@@ -229,7 +230,18 @@ int bake_script(const char* in_path, const char* out_path) {
         return 1;
     }
 
-    CompileResult compiled = compile_instructions(parsed.instructions, in_path);
+    // La tabla de simbolos del proyecto (M14, ADR-0067): de ahi salen los ids. Si falta, se
+    // cae de vuelta a una tabla construida de este guion solo, para que compilar en un arbol
+    // recien clonado siga funcionando — pero se avisa, porque los ids que salgan de ahi solo
+    // valen para este guion y no para el proyecto.
+    SymbolTable symbols;
+    if (!read_vnsym("assets_baked/project.vnsym", &symbols)) {
+        log_warn("vne_bake: no se pudo leer 'assets_baked/project.vnsym'; los ids se sacan "
+                 "de este guion solo y NO seran compatibles con el resto del proyecto");
+        symbols = symbols_for_single_script(parsed.instructions);
+    }
+
+    CompileResult compiled = compile_instructions(parsed.instructions, in_path, symbols);
     if (!compiled.ok()) {
         for (const CompileError& err : compiled.errors) {
             log_error("%s:%u: %s", err.file.c_str(), err.line, err.message.c_str());
@@ -402,6 +414,49 @@ int bake_font(const char* in_path, const char* out_path, int extra_count, char**
     return 0;
 }
 
+// vne_bake symbols <salida.vnsym> <guion1.vns> [guion2.vns ...] (M14).
+//
+// Su propio comando y no parte de `vne_bake script` a proposito: los ids tienen que ser
+// estables ENTRE TODOS los guiones del proyecto, y `vne_bake script` ve uno cada vez. Mismo
+// patron que `catalog-extract`, que ya recorre todos los guiones por la misma razon.
+int bake_symbols(const char* out_path, int script_count, char** script_paths) {
+    SymbolTable table;
+
+    // Orden determinista: los guiones se procesan en el orden en que llegan, y dentro de
+    // cada uno en orden de aparicion. Dos horneados del mismo arbol dan los mismos ids, que
+    // es lo que permite que una partida guardada siga siendo valida.
+    for (int i = 0; i < script_count; ++i) {
+        std::string source;
+        if (!read_whole_file(script_paths[i], &source)) {
+            log_error("vne_bake symbols: no se pudo leer '%s'", script_paths[i]);
+            return 1;
+        }
+        ParseResult parsed = parse_script(source, script_paths[i]);
+        if (!parsed.ok()) {
+            for (const ParseError& err : parsed.errors) {
+                log_error("%s:%u: %s", err.file.c_str(), err.line, err.message.c_str());
+            }
+            return 1;
+        }
+        std::string error;
+        if (!symbols_collect_from_script(parsed.instructions, script_paths[i], &table, &error)) {
+            log_error("vne_bake symbols: %s", error.c_str());
+            return 1;
+        }
+    }
+
+    if (!write_vnsym(out_path, table)) {
+        log_error("vne_bake symbols: no se pudo escribir '%s'", out_path);
+        return 1;
+    }
+    log_info("vne_bake symbols: %s (%u variables, %u banderas, %u actores, %u poses, "
+              "%u fondos, %u hablantes)",
+              out_path, table.count(SymbolKind::Var), table.count(SymbolKind::Flag),
+              table.count(SymbolKind::Actor), table.count(SymbolKind::Pose),
+              table.count(SymbolKind::Bg), table.count(SymbolKind::Speaker));
+    return 0;
+}
+
 // --- Localizacion (M10, SPEC.md #9.2/#10): extraccion del catalogo y horneado a .vnl
 // (ADR-0046: decision del usuario, catalogo horneado, no suelto en texto plano).
 // Formato de autoria intermedio (catalog-extract escribe, catalog-compile lee): dos
@@ -441,7 +496,9 @@ int bake_catalog_extract(const char* out_path, int script_count, char** script_p
             std::fclose(out);
             return 1;
         }
-        CompileResult compiled = compile_instructions(parsed.instructions, script_paths[i]);
+        CompileResult compiled = compile_instructions(
+            parsed.instructions, script_paths[i],
+            symbols_for_single_script(parsed.instructions));
         if (!compiled.ok()) {
             for (const CompileError& err : compiled.errors) {
                 log_error("%s:%u: %s", err.file.c_str(), err.line, err.message.c_str());
@@ -1062,6 +1119,9 @@ struct OggCatalogRecord {
 // Sin argumentos (o "atlas"): empaqueta assets_src/png/*.png si hay alguno (ADR-0025), o
 // genera el placeholder procedural de respaldo si no.
 int main(int argc, char** argv) {
+    if (argc >= 4 && std::strcmp(argv[1], "symbols") == 0) {
+        return bake_symbols(argv[2], argc - 3, argv + 3);
+    }
     if (argc >= 5 && std::strcmp(argv[1], "font") == 0) {
         return bake_font(argv[2], argv[3], argc - 4, argv + 4);
     }

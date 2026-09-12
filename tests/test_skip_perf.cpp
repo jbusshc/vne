@@ -28,7 +28,8 @@ TEST_CASE("skip: 1000 comandos via vm_skip_current en menos de 1 segundo (median
 
     ParseResult parsed = parse_script(source, "demo.vns");
     REQUIRE(parsed.ok());
-    CompileResult compiled = compile_instructions(parsed.instructions, "demo.vns");
+    CompileResult compiled = compile_instructions(parsed.instructions, "demo.vns",
+                                                symbols_for_single_script(parsed.instructions));
     REQUIRE(compiled.ok());
     CompiledScript script{compiled.data.cmds.data(),
                            static_cast<u32>(compiled.data.cmds.size()),

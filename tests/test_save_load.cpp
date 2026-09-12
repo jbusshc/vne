@@ -4,7 +4,9 @@
 #include <cstdio>
 #include <cstring>
 
+#include "base/hash.h"
 #include "base/crc32.h"
+#include "vm/symbols_load.h"
 #include "vm/save.h"
 
 TEST_CASE("save_game/load_game: round-trip preserva el estado y el backlog exactos") {
@@ -87,8 +89,15 @@ TEST_CASE("load_game: migra un .vnsave v1 (M4-M8, sin map_id/player_x/player_y) 
     // ningun archivo v1 real que se pueda generar ya con este binario, asi que se
     // fabrica el formato exacto que un binario v1 habria escrito.
     GameState state{};
-    state.bg_id   = 7;
-    state.vars[3] = 99;
+    state.bg_id = 7;
+    // En el hueco que le habria tocado a "confianza" con el hash viejo: la cadena de
+    // migraciones llega hasta v4 (M14), que recoloca los valores POR NOMBRE, asi que un
+    // valor en un indice arbitrario que no corresponde a ninguna variable del proyecto se
+    // descarta — y eso es lo correcto, porque era de una variable que nadie usa.
+    REQUIRE(symbols_load(&g_arena_perm));
+    u16 confianza_id = symbols_id(SymKind::Var, "confianza");
+    REQUIRE(confianza_id != 0);
+    state.vars[fnv1a_u32("confianza") % k_max_vars] = 99;
 
     usize v1_size = offsetof(GameState, map_id);
     u32   checksum = crc32(&state, v1_size);
@@ -117,7 +126,7 @@ TEST_CASE("load_game: migra un .vnsave v1 (M4-M8, sin map_id/player_x/player_y) 
     // La cadena sigue hasta v3 (M13), que limpia bg_id a proposito: su id venia de un
     // interner que ya no existe y conservarlo dibujaria el fondo equivocado (ADR-0062).
     CHECK(migrated.bg_id == 0);
-    CHECK(migrated.vars[3] == 99);  // lo que NO depende del interner sobrevive intacto
+    CHECK(migrated.vars[confianza_id] == 99);  // recolocado a su id nuevo, no perdido
     CHECK(migrated.map_id == 0);  // valor por defecto: "sin mapa activo"
     CHECK(migrated.player_x == doctest::Approx(0.0f));
     CHECK(migrated.player_y == doctest::Approx(0.0f));
@@ -186,7 +195,10 @@ TEST_CASE("load_game: un .vnsave v2 se migra a v3 limpiando actores y fondo") {
     state.actors[0].alpha    = 1.0f;
     state.actors[3].actor_id = 5;
     state.bg_id              = 4;
-    state.vars[10]           = 1234;
+    REQUIRE(symbols_load(&g_arena_perm));
+    u16 confianza_id = symbols_id(SymKind::Var, "confianza");
+    REQUIRE(confianza_id != 0);
+    state.vars[fnv1a_u32("confianza") % k_max_vars] = 1234;
     state.vm.pc              = 77;
     state.bgm_track_id       = 900;
     state.player_x           = 640.0f;
@@ -222,10 +234,60 @@ TEST_CASE("load_game: un .vnsave v2 se migra a v3 limpiando actores y fondo") {
     CHECK(migrated.bg_id == 0);
 
     // Todo lo demas sobrevive: perder la partida entera por esto seria desproporcionado.
-    CHECK(migrated.vars[10] == 1234);
+    CHECK(migrated.vars[confianza_id] == 1234);
     CHECK(migrated.vm.pc == 77);
     CHECK(migrated.bgm_track_id == 900);
     CHECK(migrated.player_x == doctest::Approx(640.0f));
+
+    std::remove(path);
+}
+
+TEST_CASE("load_game: un .vnsave v3 se migra a v4 recolocando variables y banderas") {
+    // v3 -> v4 (M14, ADR-0067). A diferencia de v2 -> v3, aqui SI se puede migrar de verdad:
+    // los ids viejos eran `fnv1a(nombre) % capacidad`, la tabla de simbolos tiene todos los
+    // nombres, asi que para cada uno se puede recalcular donde estaba y copiarlo a donde va.
+    REQUIRE(symbols_load(&g_arena_perm));
+    u16 id = symbols_id(SymKind::Var, "confianza");
+    REQUIRE(id != 0);  // la usa demo_branching.vns
+
+    GameState state{};
+    // Se escribe donde lo habria dejado un binario v3: en el hueco del hash viejo.
+    u32 old_slot         = fnv1a_u32("confianza") % k_max_vars;
+    state.vars[old_slot] = 1234;
+    state.vm.pc          = 55;
+
+    u32 checksum = crc32(&state, sizeof(GameState));
+
+    const char* path = "test_save_v3_migration.vnsave";
+    std::FILE*  f    = std::fopen(path, "wb");
+    REQUIRE(f != nullptr);
+    u32 magic       = 0x56534E56u;  // 'VNSV'
+    u32 old_version = 3;
+    u32 state_size  = static_cast<u32>(sizeof(GameState));
+    std::fwrite(&magic, sizeof(u32), 1, f);
+    std::fwrite(&old_version, sizeof(u32), 1, f);
+    std::fwrite(&state_size, sizeof(u32), 1, f);
+    std::fwrite(&checksum, sizeof(u32), 1, f);
+    std::fwrite(&state, sizeof(GameState), 1, f);
+    u32 zero = 0;
+    std::fwrite(&zero, sizeof(u32), 1, f);  // miniatura
+    std::fwrite(&zero, sizeof(u32), 1, f);  // backlog
+    std::fclose(f);
+
+    GameState migrated{};
+    Backlog   migrated_backlog{};
+    REQUIRE(load_game(path, &migrated, &migrated_backlog) == LoadResult::Ok);
+
+    // El valor sigue ahi, pero en el hueco que le toca ahora. Esto es lo que v2 -> v3 NO
+    // podia hacer con los actores: alli los ids no eran reconstruibles, aqui si.
+    CHECK(migrated.vars[id] == 1234);
+    CHECK(migrated.vm.pc == 55);
+
+    // Y si el id nuevo es distinto del viejo, el hueco viejo queda limpio: la migracion
+    // mueve, no duplica.
+    if (id != old_slot) {
+        CHECK(migrated.vars[old_slot] == 0);
+    }
 
     std::remove(path);
 }

@@ -14,6 +14,7 @@
 #include "script/lua_bindings.h"
 #include "vm/backlog.h"
 #include "vm/rollback.h"
+#include "vm/symbols_load.h"
 
 // Runner manual en vez de DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN: los tests de texto (M2)
 // necesitan un FontHandle real, y glyph_cache sube el atlas de glifos a una textura de
@@ -36,6 +37,9 @@ int main(int argc, char** argv) {
     // igual que main.cpp (M11). Antes de audio_init(): scan_music_catalog() pasara a
     // resolver por aqui tambien.
     pak_mount(".");
+    // Tabla de simbolos del proyecto (M14, ADR-0067), igual que main.cpp: sin ella, Lua no
+    // puede resolver un nombre de variable a un id y todos los vn.get_var darian 0.
+    symbols_load(&g_arena_perm);
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
     lua_init();

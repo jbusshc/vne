@@ -142,10 +142,11 @@ comparaciones entre variables. Operadores: `==`, `!=`, `<`, `<=`, `>`, `>=`.
 Los valores son enteros con signo, y solo enteros: no hay literales de coma flotante ni de
 cadena en `@set`/`@add`.
 
-Las variables viven en `GameState.vars` (512 huecos), así que sobreviven a un guardado. El
-nombre se resuelve a un hueco por `fnv1a % 512`, sin tabla de nombres (ADR-0029): dos
-nombres distintos podrían colisionar en el mismo hueco. No hay forma de detectarlo al
-compilar, así que conviene mantener el conjunto de variables pequeño y revisado.
+Las variables viven en `GameState.vars` (512 huecos), así que sobreviven a un guardado. Desde
+M14 el nombre se resuelve por la **tabla de símbolos del proyecto** (ADR-0067), no por un
+hash: **dos nombres distintos no pueden compartir hueco**, y los 512 son 512 de verdad, no
+unos 27 efectivos como pasaba con el hash. Pasarse de 512 es un error al hornear que dice qué
+nombre sobró.
 
 ## Banderas
 
@@ -167,9 +168,15 @@ compilar, así que conviene mantener el conjunto de variables pequeño y revisad
 Las banderas son bits de `GameState.flags` (2048 huecos) y sobreviven a un guardado. Existen
 desde M13; antes había que bajar a `@lua` solo para leer un booleano.
 
-**`@flag` y Lua comparten la misma bandera**: el id es `fnv1a % 2048` en los dos caminos, así
-que `@flag x on` y `vn.get_flag("x")` hablan del mismo bit. Las colisiones entre dos nombres
-de bandera se detectan al hornear, igual que con las variables.
+**`@flag` y Lua comparten la misma bandera**, y desde M14 **por construcción**: los dos
+preguntan a la tabla de símbolos del proyecto (ADR-0067) en vez de repetir cada uno la misma
+fórmula de hash. Dos banderas distintas no pueden compartir bit.
+
+Lua puede usar variables y banderas que ningún `@set`/`@flag` declare: `vne_bake symbols`
+lee también los cuerpos `@lua` y recoge los nombres literales de `vn.get_var`, `vn.set_var`,
+`vn.get_flag` y `vn.set_flag`, con comillas simples o dobles. Lo que **no** puede es
+calcular el nombre en runtime (`vn.set_var(prefijo .. i, 0)`): eso no se ve al hornear y da
+un aviso al ejecutarse.
 
 Una opción de `@choice` **no** puede condicionarse por bandera (`"texto" if flag x -> ...`):
 la tabla de opciones del `.vnc` tiene un layout fijo sin sitio para eso, y el compilador lo

@@ -9,6 +9,7 @@
 #include "script/compiler.h"
 #include "script/parser.h"
 #include "test_config.h"
+#include "vm/symbols_load.h"
 #include "vm/save.h"
 #include "vm/vm.h"
 
@@ -168,7 +169,8 @@ TEST_CASE("vm: el guion de prueba de 200+ lineas se ejecuta completo (SPEC.md #1
 
     ParseResult parsed = parse_script(source, "demo.vns");
     REQUIRE(parsed.ok());
-    CompileResult compiled = compile_instructions(parsed.instructions, "demo.vns");
+    CompileResult compiled = compile_instructions(parsed.instructions, "demo.vns",
+                                                symbols_for_single_script(parsed.instructions));
     REQUIRE(compiled.ok());
 
     CompiledScript script{compiled.data.cmds.data(),
@@ -206,7 +208,8 @@ TEST_CASE("vm: Bgm actualiza bgm_track_id/bgm_position; StopBgm los resetea (SPE
 
     ParseResult parsed = parse_script(source, "demo_audio.vns");
     REQUIRE(parsed.ok());
-    CompileResult compiled = compile_instructions(parsed.instructions, "demo_audio.vns");
+    CompileResult compiled = compile_instructions(parsed.instructions, "demo_audio.vns",
+                                                symbols_for_single_script(parsed.instructions));
     REQUIRE(compiled.ok());
     CompiledScript script{compiled.data.cmds.data(),
                            static_cast<u32>(compiled.data.cmds.size()),
@@ -392,7 +395,8 @@ TEST_CASE("vm: el guion de ramificacion de M5 (3 ramas, 2 finales) se recorre co
 
     ParseResult parsed = parse_script(source, "demo_branching.vns");
     REQUIRE(parsed.ok());
-    CompileResult compiled = compile_instructions(parsed.instructions, "demo_branching.vns");
+    CompileResult compiled = compile_instructions(parsed.instructions, "demo_branching.vns",
+                                                symbols_for_single_script(parsed.instructions));
     REQUIRE(compiled.ok());
 
     CompiledScript script{compiled.data.cmds.data(),
@@ -423,7 +427,7 @@ TEST_CASE("vm: el guion de ramificacion de M5 (3 ramas, 2 finales) se recorre co
             }
         }
         REQUIRE(finished);
-        CHECK(state.vars[fnv1a_u32("confianza") % k_max_vars] >= 3);
+        CHECK(state.vars[symbols_id(SymKind::Var, "confianza")] >= 3);
     }
 
     // Rama 3: "Ir directo al final" -> rama_directa -> @call/@return -> final_bueno.
@@ -447,7 +451,7 @@ TEST_CASE("vm: el guion de ramificacion de M5 (3 ramas, 2 finales) se recorre co
         // subrutina_registro deja intentos_lua vivo via @lua antes de la @choice, y
         // ademas intentos = 99 tras el @call: confirma que Call/Return y LuaCall
         // corrieron de verdad.
-        CHECK(state.vars[fnv1a_u32("intentos") % k_max_vars] == 99);
+        CHECK(state.vars[symbols_id(SymKind::Var, "intentos")] == 99);
     }
 
     // Rama 2 ("Rendirse") esta condicionada a intentos > 5: en un guion recien empezado

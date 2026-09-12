@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "script/parser.h"
+#include "script/symbols.h"
 #include "vm/cmd.h"
 
 // Compilador: resuelve etiquetas a pc, interna nombres de actor/pose/fondo a IDs
@@ -31,15 +32,6 @@ struct CompiledScriptData {
     // formato .vnc de SPEC.md #9.3 (que solo documenta Cmd[]/string_pool/Label[]): ver
     // ADR de M5 en docs/DECISIONS.md.
     std::vector<ChoiceOption>  choice_options;
-    // Nombres de actor, pose y fondo, en orden de id (el id 1 es el elemento 0; el id 0
-    // esta reservado para "vacio", ver NameInterner). Cada u32 es un offset dentro de
-    // string_pool. Añadido en M13 (.vnc v5) porque el id por si solo no sirve para nada en
-    // runtime: es un indice secuencial de un interner local a este guion, no un hash, asi
-    // que sin esta tabla no hay forma de volver del id al nombre y de ahi al sprite del
-    // atlas. Sin ella no se puede dibujar ni un actor ni un fondo.
-    std::vector<u32>           actor_name_offsets;
-    std::vector<u32>           pose_name_offsets;
-    std::vector<u32>           bg_name_offsets;
     // Todo texto de dialogo (Say y opciones de Choice), para la extraccion de catalogo
     // de M10. No se escribe en el .vnc: tools/bake/main.cpp lo vuelca aparte.
     std::vector<CatalogEntry>  catalog_entries;
@@ -59,8 +51,14 @@ struct CompileResult {
 
 // Asume que `instructions` ya paso la validacion de parse_script (identificadores
 // desconocidos ya reportados ahi). Aqui solo puede fallar por errores internos.
+// `symbols` es la tabla de simbolos del proyecto (M14): de ahi salen los ids de variable,
+// bandera, actor, pose, fondo y hablante. Es obligatoria y no opcional a proposito — un modo
+// implicito "sin tabla" haria que los tests compilaran con unos ids y el juego con otros, que
+// es exactamente la clase de divergencia que la tabla existe para eliminar. Para compilar un
+// guion suelto (tests), `symbols_for_single_script` da una tabla valida en una linea.
 CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
-                                    const std::string&              file_name);
+                                    const std::string&              file_name,
+                                    const SymbolTable&              symbols);
 
 // Formato .vnc (SPEC.md #9.3, extendido en M5 con la tabla de ChoiceOption). Devuelve
 // false si no se pudo escribir el archivo.

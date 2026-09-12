@@ -14,22 +14,39 @@
 #include "base/hash.h"
 #include "base/heap_guard.h"
 #include "base/log.h"
+#include "vm/symbols_load.h"
 #include "base/rng.h"
 
 namespace {
 
 sol::state g_lua;
 
-// El codigo que se ejecuta en cada lua_run() solo tiene el nombre en texto (viene del
-// pool de strings del guion), asi que las funciones vn.* resuelven variable/flag al
-// mismo indice que el compilador (fnv1a % capacidad, ver docs/DECISIONS.md): no hay
-// tabla de nombres en el .vnc, ni falta.
+// El codigo que se ejecuta en cada lua_run() solo tiene el nombre en texto (viene del pool
+// de strings del guion). Desde M14 resuelve contra la MISMA tabla de simbolos del proyecto
+// que usa el compilador (ADR-0067), en vez de repetir su formula de hash: antes eran dos
+// copias de `fnv1a % capacidad` que tenian que coincidir por disciplina, y si alguien
+// cambiaba una sin la otra, Lua y el DSL veian variables distintas con el mismo nombre sin
+// que nada avisara.
+//
+// Efecto secundario que es una mejora por si mismo: un nombre que no existe ahora se puede
+// DETECTAR (la tabla devuelve 0) y avisar, en vez de caer en un hueco cualquiera y
+// comportarse como si la variable existiera y valiera cero.
 u16 var_id_of(const std::string& name) {
-    return static_cast<u16>(fnv1a_u32(name) % k_max_vars);
+    u16 id = symbols_id(SymKind::Var, name.c_str());
+    if (id == 0) {
+        log_error("lua: la variable '%s' no existe en el proyecto (ningun guion la usa)",
+                  name.c_str());
+    }
+    return id;
 }
 
 u16 flag_id_of(const std::string& name) {
-    return static_cast<u16>(fnv1a_u32(name) % k_max_flags);
+    u16 id = symbols_id(SymKind::Flag, name.c_str());
+    if (id == 0) {
+        log_error("lua: la bandera '%s' no existe en el proyecto (ningun guion la usa)",
+                  name.c_str());
+    }
+    return id;
 }
 
 bool flag_get(const GameState& state, u16 flag_id) {
