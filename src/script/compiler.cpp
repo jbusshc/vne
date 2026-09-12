@@ -4,8 +4,8 @@
 #include <string>
 #include <unordered_map>
 
-#include "base/hash.h"
-#include "vm/state.h"
+#include "core/hash.h"
+#include "formats/state.h"
 
 namespace {
 
@@ -78,7 +78,7 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
             result.errors.push_back(CompileError{
                 file_name, line,
                 std::string("el nombre de ") + symbol_kind_name(kind) + " '" + name +
-                    "' no esta en la tabla de simbolos; vuelve a ejecutar 'vne_bake symbols' "
+                    "' no esta en la tabla de simbolos; vuelve a ejecutar 'sz_bake symbols' "
                     "incluyendo este guion"});
         }
         return id;
@@ -172,6 +172,16 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                 break;
             }
             case InstrKind::Choice: {
+                if (instr.choice_options.size() > k_max_choice_options) {
+                    result.errors.push_back(CompileError{
+                        file_name, instr.line,
+                        "un @choice admite como mucho " + std::to_string(k_max_choice_options) +
+                            " opciones, y este tiene " +
+                            std::to_string(instr.choice_options.size()) +
+                            " (la UI reserva sitio para un numero fijo de opciones, ver "
+                            "k_max_choice_options en formats/cmd.h)"});
+                    break;
+                }
                 cmd.kind                  = CmdKind::Choice;
                 cmd.choice.first_option   = static_cast<u32>(data.choice_options.size());
                 cmd.choice.option_count   = static_cast<u8>(instr.choice_options.size());
@@ -217,7 +227,7 @@ CompileResult compile_instructions(const std::vector<ParsedInstr>& instructions,
                 // el nombre logico completo directo en el string_pool, asi que no hay
                 // forma de adivinar el formato del archivo. "ogg/" y no "assets_src/ogg/"
                 // desde M11: audio_load lo resuelve contra el backend de assets activo
-                // (directorio suelto o .pak, ver assets/pak.h), no una ruta de archivo.
+                // (directorio suelto o .pak, ver vfs/pak.h), no una ruta de archivo.
                 cmd.kind        = CmdKind::Sfx;
                 cmd.sfx.text_id = push_string(&data, "ogg/" + instr.sound);
                 break;

@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <string>
 
-#include "base/arena.h"
-#include "base/log.h"
+#include "core/arena.h"
+#include "core/log.h"
 #include "platform/clock.h"
 #include "test_fonts.h"
 #include "text/layout.h"

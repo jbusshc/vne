@@ -4,8 +4,8 @@
 
 #include <cstring>
 
-#include "base/heap_guard.h"
-#include "base/heap_guard_hooks.h"
+#include "core/heap_guard.h"
+#include "core/heap_guard_hooks.h"
 
 namespace {
 u32 mouse_button_index(u8 sdl_button) {

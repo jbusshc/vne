@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "base/crc32.h"
+#include "core/crc32.h"
 
 TEST_CASE("crc32: vector de prueba estandar '123456789'") {
     const char* data = "123456789";

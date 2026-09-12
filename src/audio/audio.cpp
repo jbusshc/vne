@@ -16,12 +16,12 @@
 #include <cstdio>
 #include <cstring>
 
-#include "assets/pak.h"
-#include "base/hash.h"
-#include "base/heap_guard.h"
-#include "base/heap_guard_hooks.h"
-#include "base/log.h"
-#include "base/pool.h"
+#include "vfs/pak.h"
+#include "core/hash.h"
+#include "core/heap_guard.h"
+#include "core/heap_guard_hooks.h"
+#include "core/log.h"
+#include "core/pool.h"
 #include "platform/files.h"
 
 namespace {
@@ -212,7 +212,7 @@ void dir_list_callback_music(void* /*userdata*/, const char* name_no_ext,
     // por eso dir_list_by_extension recibe filtro nullptr (todo el directorio) y aqui se
     // usa el nombre tal cual llega, igual que hacia el codigo Win32/dirent original.
     // M11: nombre logico ("ogg/..."), no ruta de archivo literal -- audio_load lo resuelve
-    // a traves del backend activo (ver assets/pak.h), igual que el catalogo empaquetado
+    // a traves del backend activo (ver vfs/pak.h), igual que el catalogo empaquetado
     // de mas arriba.
     std::snprintf(entry.path, sizeof(entry.path), "ogg/%s", full_name);
     g_catalog_count += 1;
@@ -232,7 +232,7 @@ void scan_music_catalog() {
 
     // M11: en backend empaquetado no hay directorio que escanear (solo existe game.pak),
     // asi que el catalogo se lee ya horneado desde "ogg_catalog.bin" (lo escribe
-    // vne_bake pack). En backend suelto se sigue escaneando assets_src/ogg/ en runtime,
+    // sz_bake pack). En backend suelto se sigue escaneando assets_src/ogg/ en runtime,
     // sin cambios de comportamiento respecto a antes de M11.
     if (pak_is_packed()) {
         const u8* bytes = nullptr;
@@ -433,7 +433,7 @@ AudioLoadResult audio_load(const char* logical_name, bool streaming, SoundHandle
         return AudioLoadResult::OutOfSlots;
     }
 
-    // M11: dos caminos segun el backend activo (ver assets/pak.h), porque miniaudio no
+    // M11: dos caminos segun el backend activo (ver vfs/pak.h), porque miniaudio no
     // tiene una unica API que sirva para los dos. M12 los resuelve una sola vez aqui y
     // deja que sound_instance_init() elija, porque un efecto crea N instancias y no una.
     char        loose_buf[512];

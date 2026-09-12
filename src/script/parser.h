@@ -3,8 +3,8 @@
 #include <string_view>
 #include <vector>
 
-#include "base/types.h"
-#include "vm/cmd.h"
+#include "core/types.h"
+#include "formats/cmd.h"
 
 // Parser del DSL (SPEC.md #9, skill vne-script-dsl). M5 anade bloques con indentacion
 // significativa (@if/@else/@end, @choice/@end) sobre el subconjunto lineal de M3

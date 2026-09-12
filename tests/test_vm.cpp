@@ -5,7 +5,7 @@
 #include <string>
 
 #include "audio/audio.h"
-#include "base/hash.h"
+#include "core/hash.h"
 #include "script/compiler.h"
 #include "script/parser.h"
 #include "test_config.h"
@@ -148,7 +148,7 @@ TEST_CASE("vm: skip_to_end completa Hide al instante y libera el slot") {
 }
 
 TEST_CASE("vm: el guion de prueba de 200+ lineas se ejecuta completo (SPEC.md #12)") {
-    std::string path = std::string(VNE_SOURCE_DIR) + "/assets_src/scripts/demo.vns";
+    std::string path = std::string(SZ_SOURCE_DIR) + "/assets_src/scripts/demo.vns";
     std::FILE*  f    = std::fopen(path.c_str(), "rb");
     REQUIRE(f != nullptr);
     std::fseek(f, 0, SEEK_END);
@@ -195,7 +195,7 @@ TEST_CASE("vm: el guion de prueba de 200+ lineas se ejecuta completo (SPEC.md #1
 }
 
 TEST_CASE("vm: Bgm actualiza bgm_track_id/bgm_position; StopBgm los resetea (SPEC.md #12)") {
-    std::string path = std::string(VNE_SOURCE_DIR) + "/assets_src/scripts/demo_audio.vns";
+    std::string path = std::string(SZ_SOURCE_DIR) + "/assets_src/scripts/demo_audio.vns";
     std::FILE*  f    = std::fopen(path.c_str(), "rb");
     REQUIRE(f != nullptr);
     std::fseek(f, 0, SEEK_END);
@@ -382,7 +382,7 @@ TEST_CASE("vm: vm_skip_current en un Choice elige la primera opcion visible") {
 
 TEST_CASE("vm: el guion de ramificacion de M5 (3 ramas, 2 finales) se recorre completo "
           "(SPEC.md #12)") {
-    std::string path = std::string(VNE_SOURCE_DIR) + "/assets_src/scripts/demo_branching.vns";
+    std::string path = std::string(SZ_SOURCE_DIR) + "/assets_src/scripts/demo_branching.vns";
     std::FILE*  f    = std::fopen(path.c_str(), "rb");
     REQUIRE(f != nullptr);
     std::fseek(f, 0, SEEK_END);

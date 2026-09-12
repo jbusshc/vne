@@ -6,11 +6,11 @@
 // FreeType, que no entra con el ft2build.h/FT_FREETYPE_H de font_internal.h.
 #include <freetype/ftsynth.h>
 
-#include "base/arena.h"
-#include "base/assert.h"
-#include "base/heap_guard.h"
-#include "base/log.h"
-#include "gfx/texture.h"
+#include "core/arena.h"
+#include "core/assert.h"
+#include "core/heap_guard.h"
+#include "core/log.h"
+#include "render/texture.h"
 #include "text/font_internal.h"
 
 namespace {
@@ -215,10 +215,10 @@ const GlyphInfo* glyph_cache_get(FontHandle font, u32 glyph_index) {
     }
 
     AtlasPage& page = g_pages[page_index];
-    VN_ASSERT(px >= 0 && py >= 0, "glyph_cache: coordenadas de empaquetado negativas");
-    VN_ASSERT(px + static_cast<i32>(bitmap.width) <= k_page_size,
+    SZ_ASSERT(px >= 0 && py >= 0, "glyph_cache: coordenadas de empaquetado negativas");
+    SZ_ASSERT(px + static_cast<i32>(bitmap.width) <= k_page_size,
               "glyph_cache: glifo se sale de la pagina en X");
-    VN_ASSERT(py + static_cast<i32>(bitmap.rows) <= k_page_size,
+    SZ_ASSERT(py + static_cast<i32>(bitmap.rows) <= k_page_size,
               "glyph_cache: glifo se sale de la pagina en Y");
     for (u32 row = 0; row < bitmap.rows; ++row) {
         const u8* src_row =

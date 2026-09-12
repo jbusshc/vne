@@ -2482,10 +2482,464 @@ del test eso no habría salido, porque el test no habría pensado en comprobarlo
 
 ---
 
+## ADR-0070 — El ratón llega a los modos en coordenadas virtuales, y un `.vnrec` graba lo que vio la lógica
+
+**Fecha:** 2026-09-12
+**Hito:** M15
+**Estado:** aceptada
+
+**Contexto.** `InputState` rastrea el ratón en **píxeles de ventana** desde M8, porque el
+único consumidor era el editor y ImGui trabaja en ese espacio. La UI de novela visual, en
+cambio, se autora en la resolución virtual 1920x1080 con letterbox (SPEC.md §7.1), y el skill
+`vne-rendering` es explícito: *"ninguna lógica de juego conoce el tamaño real de la ventana;
+las únicas funciones que lo usan son `gfx_present` y la conversión de coordenadas del ratón"*.
+Esa conversión no existía.
+
+**Decisión.** `gfx_window_to_virtual()` es la segunda —y última— función que conoce el tamaño
+de la ventana. `main.cpp` la llama **una vez por frame** sobre una **copia** del `InputState`,
+y es esa copia la que reciben los `Mode`. El editor sigue recibiendo el original.
+
+Dos valores y no uno, en lugar de convertir en el sitio: si cada modo convirtiera, cada modo
+necesitaría el tamaño de la ventana, que es exactamente lo que la regla prohíbe. Y meter los
+dos pares de coordenadas en el mismo struct habría dejado a cada llamante eligiendo cuál usar,
+que es una decisión que no debería poder equivocarse.
+
+**Un punto sobre la barra negra del letterbox cae fuera de `[0,1920]x[0,1080]`, a propósito.**
+Ningún rectángulo de UI lo contiene, así que no hace falta un booleano "está dentro" aparte ni
+un caso especial en cada prueba de colisión. Hay test con letterbox (1280x800) y con pillarbox
+(2560x1080).
+
+**Lo que se graba en un `.vnrec` es la copia convertida.** Esta es la parte que importa más de
+lo que parece: una grabación existe para **reproducirse**, y si guardara píxeles de ventana,
+la misma sesión daría resultados distintos en una ventana de otro tamaño y sería
+**irreproducible dentro de la suite de tests**, donde no hay ventana ninguna. Grabando lo que
+vio la lógica de juego, una sesión es independiente de la resolución por construcción.
+
+**`.vnrec` sube a v2 sin cambiar un byte de layout.** Cambió el *significado* de `mouse_x` y
+`mouse_y`, y para un formato en disco eso cuenta igual que cambiar el tamaño de un campo: un
+`.vnrec` v1 se reproduciría con el ratón en el sitio equivocado. Se rechaza con mensaje claro
+en vez de aceptarse a medias, mismo criterio que el `.vnc` (ADR-0065): una grabación de input
+es un artefacto de desarrollo que se regenera, no dato de jugador que haya que migrar.
+
+**Consecuencias.** Cualquier UI nueva mide en unidades virtuales y no tiene que pensar en la
+ventana. Cuando `MapMode` tenga cámara, su conversión de "clic → punto del mapa" tendrá que
+restar el desplazamiento de la cámara; hoy el mapa se dibuja 1:1 desde el origen y las
+coordenadas virtuales **son** coordenadas de mapa.
+
+---
+
+## ADR-0071 — Las opciones de `@choice` por fin se dibujan, con tope de 8 comprobado al compilar
+
+**Fecha:** 2026-09-12
+**Hito:** M15
+**Estado:** aceptada
+
+**Contexto.** `vm_select_choice` existe desde M5 y **nadie lo llamaba desde el juego**: solo
+los tests. `VnMode::render()` no dibujaba las opciones y `VnMode::update()` no las podía
+elegir, así que al llegar a un `@choice` el juego se quedaba parado para siempre —`vm_update`
+devuelve `false` indefinidamente a propósito, esperando el evento externo que nunca llegaba—.
+Un guion con ramas era **injugable en el juego real**, y `demo_branching.vns` existe desde M5.
+
+Es exactamente el mismo hueco que M13 encontró con los actores y los fondos: estado
+correctamente mantenido y serializado, sin ningún código que lo convirtiera en píxeles. Y por
+la misma razón no lo detectó ningún criterio: los de SPEC.md §12 medían las tres ramas con
+`vm_select_choice` llamado a mano.
+
+**Decisión.** `VnMode` dibuja las opciones (bloque centrado, caché de layouts con las mismas
+reglas que el diálogo: se reconstruye al cambiar el `pc` o el idioma, nunca por frame) y las
+resuelve con teclado (flechas + intro), números (1..8) y ratón (hover + clic).
+
+**Una opción cuya condición no se cumple se dibuja apagada, no se esconde.** Que exista pero
+no esté disponible es información de juego (SPEC.md §9.1), y ocultarla haría que el menú
+cambiara de tamaño según el estado de las variables. Para eso hace falta preguntar por la
+disponibilidad sin ejecutar la selección: `vm_choice_option_available()`. Sin ella la UI
+ofrecería opciones que al pincharlas no hacen nada y el jugador no tendría forma de saber por
+qué. La navegación con flechas también las salta.
+
+**`k_max_choice_options = 8`, y se comprueba en el compilador.** `option_count` es un `u8`, así
+que el formato admitía 255 y la UI —que no dibujaba nada— no tenía por qué saberlo. Con UI real
+hace falta un número fijo para reservar los layouts sin asignar dentro del frame (SPEC.md §4).
+El sitio donde comprobarlo es el **compilador**, donde el error sale con archivo y línea, no la
+UI, donde lo único posible sería truncar en silencio y dejar al jugador sin ver una opción que
+el guion ofrece. Hay test con 9 (falla) y con 8 (compila).
+
+**`VnUiRequest`: un modo no apila modos.** La botonera necesita abrir el historial o el menú, y
+eso lo decide quien es dueño de la pila. Mismo patrón que `MapMode::pending_trigger_script`
+(M9) y que los `wants_close` de M7, no un mecanismo nuevo.
+
+---
+
+## ADR-0072 — `texture_update_dynamic` respeta la regla de una subida por imagen y por frame
+
+**Fecha:** 2026-09-12
+**Hito:** M15
+**Estado:** aceptada
+
+**Contexto.** `sokol_gfx` admite **una** llamada a `sg_update_image` por imagen y por frame.
+Pasarse no da un error recuperable: dispara su propio assert y **aborta el proceso**. El
+proyecto conoce esa regla desde M2 —`glyph_cache_flush_dirty_pages` la respeta posponiendo la
+subida al frame siguiente— pero `texture_update_dynamic` no la conocía, y es el camino por el
+que se suben las miniaturas de guardado.
+
+Lo encontró la primera sesión grabada que abre el panel de guardado dos veces: el test abortaba
+entre los frames 120 y 130. **El juego real habría abortado igual**; simplemente nunca se había
+pulsado F5 dos veces dentro de un mismo frame.
+
+**Decisión.** Cada `TextureSlot` recuerda el `g_gfx_frame_index` de su última subida (nuevo
+contador incrementado en `gfx_begin_frame`). Una segunda subida en el mismo frame se **ignora
+con un `log_warn`**, no se posterga.
+
+**Alternativa descartada: posponer, como hace el caché de glifos.** Habría hecho falta una cola
+de subidas pendientes con su buffer de píxeles propio —los píxeles que el llamante pasa son
+suyos y pueden desaparecer al volver—, es decir, memoria y estado nuevos para un caso que en la
+práctica significa "el jugador ha hecho dos veces la misma cosa en 16 ms". La segunda subida es
+**la misma imagen**: descartarla no pierde información. El caché de glifos sí tiene que
+posponer, porque ahí cada subida trae glifos nuevos que se perderían.
+
+**Consecuencias.** Un abort real menos en el juego distribuido. Y el aviso deja constancia en
+el log: si apareciera en un caso legítimo (una textura dinámica que de verdad necesite dos
+contenidos distintos en un frame), se vería en vez de manifestarse como un fotograma raro.
+
+---
+
+## ADR-0073 — `script_load` suspende el guard: cargar el guion de un trigger ocurre dentro del frame
+
+**Fecha:** 2026-09-12
+**Hito:** M15
+**Estado:** aceptada
+
+**Contexto.** Pisar un trigger en `MapMode` apila una `VnMode` con el guion de ese trigger, y
+para eso llama a `script_load` **dentro del bucle de frame**. Eso pasa desde M9. Leer el
+archivo va por SDL, que asigna: **13 veces, medido**. Nadie lo había visto porque ninguna
+prueba automatizada había pisado un trigger dentro del bucle de frame — la sesión grabada de
+teclado de M15 abría menús sobre `MapMode` sin llegar a caminar.
+
+Es el tercer hallazgo de la misma familia en este hito, después de `qoi_encode` al guardar y
+la decodificación de miniaturas al abrir el panel. El patrón ya está claro: **la regla de cero
+heap solo se había verificado en frames donde el jugador no hace nada.**
+
+**Decisión.** `heap_guard_suspend()`/`resume()` alrededor del `pak_resolve_into_arena` de
+`script_load`, **dentro** de la función y no en el llamante. Es la misma familia que ADR-0035
+(código de terceros que asigna al leer un asset, en una operación puntual pedida por el
+jugador) y el mismo sitio que la excepción equivalente de `catalog_load`: `script_load` tiene
+cuatro llamantes y dos corren en el frame, así que ponerla en cada uno sería repetirla y
+olvidarla en el siguiente que aparezca.
+
+**Alternativa descartada: cargar el guion fuera del frame, por el hilo de IO.** Es lo correcto
+si algún día un guion pesa lo suficiente para que el tirón se note; hoy un `.vnc` son unas
+decenas de kilobytes y el cambio de escena es el momento del juego donde un tirón es normal y
+esperable. Hacerlo asíncrono obligaría además a que `MapMode` supiera esperar, con un estado
+intermedio "trigger pisado, escena todavía no lista" que no existe. Queda anotado en
+"Pendientes observados".
+
+---
+
+## ADR-0074 — Arte de UI real por nine-slice sobre el atlas compartido, y lo que sigue siendo un color plano
+
+**Fecha:** 2026-09-12
+**Hito:** M15
+**Estado:** aceptada
+
+**Contexto.** Toda la UI del juego se dibujaba con `gfx_white_texture()` tintada: el cuadro de
+diálogo, los paneles, las filas de los menús. M15 pide arte real. El arte ya estaba en el
+repositorio: el **Kenney UI Pack (CC0)** entró en `assets_src/png/` en la verificación
+posterior a M3 para probar el empaquetador del atlas con sprites de verdad, y trae botones,
+carriles de slider, casillas e iconos. No hizo falta descargar nada nuevo ni añadir ninguna
+dependencia.
+
+**Decisión.** `game/ui.{h,cpp}` concentra el hit-testing **y** el dibujado de la UI, y
+`ui_draw_nine_slice` estira un sprite del atlas en nueve trozos: las cuatro esquinas a tamaño
+original, los cuatro lados estirados en un eje y el centro en los dos.
+
+**Por qué nine-slice y no estirar el sprite entero.** `button_rectangle_depth_flat` es de
+192x64 y el cuadro de diálogo mide 1800x220: estirarlo sin más deformaría las esquinas
+redondeadas 9x en horizontal y 3x en vertical. Con nine-slice el mismo sprite sirve para un
+botón de 150x52 y para el cuadro de diálogo, con las esquinas intactas.
+
+**No cuesta draw calls.** Los nueve trozos salen de la **misma** textura que los fondos y los
+actores, así que el radix sort de `gfx_flush` los deja contiguos y caben en el mismo lote.
+Medido reproduciendo la sesión de ratón: `draw_calls` se queda en 5-6, igual que con los
+rectángulos sólidos, con decenas de sprites de UI más por frame.
+
+**Lo que sigue siendo un rectángulo sólido, a propósito:** los velos a pantalla completa de los
+overlays y el relleno proporcional de un slider. Un velo **es** un color plano con alpha, y un
+relleno que indica un valor **es** una barra de color; darles arte no los mejoraría, y
+`ui_draw_rect` sigue ahí para eso.
+
+**Si el sprite no está en el atlas, cae al rectángulo sólido y no avisa** (SPEC.md §4: nunca
+fatal). Eso significa que "arte de UI real" podría ser falso sin que nada lo dijera, así que
+hay un test que comprueba que los tres sprites que la UI pide están de verdad en
+`atlas_00.bin`, con sus tamaños.
+
+**Consecuencias.** Cambiar el aspecto de todos los botones del juego es una línea en `ui.cpp`.
+El texto de la interfaz (etiquetas de botón, nombres de bus) sigue **sin localizar**: es texto
+de interfaz, no de juego, y no pasa por el catálogo — anotado en "Pendientes observados".
+
+---
+
+## ADR-0075 — El motor pasa a ser 2D multipropósito y se llama SystemZ
+
+**Fecha:** 2026-09-12
+**Hito:** R0 (rediseño)
+**Estado:** aceptada
+
+**Contexto.** El proyecto cerró M0–M15 como motor de novela visual. El usuario redefinió el
+objetivo: un motor 2D **multipropósito** capaz de sostener novelas visuales, RPGs top-down,
+RPGs tácticos, plataformas y minijuegos, con el requisito duro de que **un mismo juego mezcle
+paradigmas** (exploración → diálogo → escena VN → combate táctico → minijuego) e incluso que
+partes distintas de una misma escena usen conceptos distintos. Los géneros son ejemplos, no
+categorías de la arquitectura: nada de "tipo de proyecto", flags por género ni `if genre`.
+
+El diagnóstico completo está en `docs/REDESIGN.md`. Lo esencial: la mitad inferior del motor
+(memoria, handles, plataforma, batching, texto, audio, `.pak`, herramientas offline) se conserva
+casi entera, y la mitad superior (`vm/`, `game/`, `main.cpp`) está construida sobre tres
+supuestos que el objetivo nuevo invalida: un único estado de layout fijo, un único intérprete
+que **es** el núcleo, y el juego escrito dentro del binario.
+
+**Decisión.** Se acepta el rediseño de `docs/REDESIGN.md` y el motor pasa a llamarse
+**SystemZ**. Reglas de nombre, para que no haya que volver a decidirlo:
+
+- **Producto:** `SystemZ`, sin espacios. La `Z` es la última letra: el último motor
+  independiente antes de tener que recurrir a uno más potente.
+- **Macros:** prefijo `SZ_` (`SZ_ASSERT`, `SZ_DEBUG`, `SZ_EDITOR`, `SZ_SHIPPING`,
+  `SZ_PRINTF_FMT`). Son lo único que de verdad contamina el espacio global, y son solo 54 usos.
+- **Funciones:** **sin prefijo de motor.** Se mantiene la convención que ya existe y funciona:
+  prefijo por módulo (`arena_*`, `render_*`, `world_*`, `text_*`). `sz_render_draw_sprite`
+  sería ruido; `render_draw_sprite` ya dice de dónde viene.
+- **Objetivos de CMake:** `sz_core`, `sz_platform`, `sz_render`, …, `sz_runtime`, `sz_editor`,
+  `sz_bake`.
+- **El directorio del repositorio NO se renombra.** Cambiarlo rompería rutas, atajos y
+  configuración del entorno del usuario por cero beneficio técnico; es una decisión suya y de
+  su sistema de archivos, no del diseño.
+- **Extensiones de contenido:** se renombran **en la fase que cambia su formato**, no en P0. Un
+  archivo no debe llevar el nombre de un concepto que todavía no existe, y renombrar dos veces
+  es trabajo tirado. `.vnsave` → `.szsave` en P1 (cuando pasa a bloques); el resto, cuando le
+  toque.
+- **Se mantiene `vne` en la historia.** Los ADR-0001 a ADR-0074 no se reescriben. Son el
+  registro de cómo se llegó hasta aquí.
+
+**Alternativas descartadas.** Inventar otro nombre: el razonamiento de la `Z` es bueno y
+sustituirlo por algo aparentemente más ingenioso habría sido peor. Un prefijo `sz_` en todas las
+funciones: duplica el prefijo de módulo sin añadir información, y este motor no distribuye una
+API en C para terceros. Renombrar el repositorio: coste sobre el entorno del usuario, beneficio
+cero.
+
+**Consecuencias.** `SPEC.md` §5–§11 queda sustituido por `REDESIGN.md` §3–§4 al completarse la
+migración. `SPEC.md` §1–§4 (objetivo, plataformas, stack cerrado, convenciones) sobrevive con el
+objetivo reescrito. La numeración de hitos pasa de `Mn` a `Pn` para que no se confundan las dos
+hojas de ruta.
+
+---
+
+## ADR-0076 — v1 usable para novela visual; el resto de paradigmas se demuestra, no se termina
+
+**Fecha:** 2026-09-12
+**Hito:** R0 (rediseño)
+**Estado:** aceptada
+
+**Contexto.** La lista de lo que falta implementar en `REDESIGN.md` §5.4 es más trabajo que los
+quince hitos ya cerrados. Se propuso al usuario reducir el alcance de la v1 y eligió una
+reducción **más** conservadora que la propuesta: primero dejar el motor **usable para novela
+visual** (v1), después añadir RPG top-down para tenerlo "funcional" (v2), y solo entonces
+extender a los demás paradigmas.
+
+**Decisión.** Tres entregas, y la palabra clave de la primera es **usable**:
+
+- **v1 — usable para VN.** Alguien puede autorar y publicar una novela visual completa **sin
+  escribir C++**: manifiesto de proyecto, escenas y guiones como dato, pipeline de horneado,
+  y editor suficiente para el trabajo diario. Esto reordena el plan: "el proyecto es dato"
+  (antes P7) y "editor" (antes P10) dejan de ser fases tardías y pasan a ser **requisitos de
+  la v1**, porque son justo lo que separa "el motor hace VNs" de "el motor es usable para
+  hacer VNs".
+- **v2 — funcional.** Se añade RPG top-down: `TileSpace`, tilemaps, movimiento y triggers,
+  cámara que sigue al jugador. Es el segundo paradigma real y la primera prueba de que añadir
+  uno no toca el núcleo.
+- **Después.** Táctico, plataformas y minijuegos. Son la **demostración** de que la
+  arquitectura los admite, no contenido a terminar.
+
+**La arquitectura se diseña para los cinco desde el primer día, aunque solo se implemente uno.**
+Es la única parte que no se puede posponer: un núcleo diseñado para VN y ampliado después es
+exactamente el punto de partida del que este rediseño intenta salir.
+
+**Sonda arquitectónica temprana (lo que esta decisión obliga a añadir).** Implementar solo VN
+hasta la v1 y solo top-down hasta la v2 retrasa el descubrimiento de fugas de núcleo hasta muy
+tarde. Mitigación: en cuanto el núcleo esté completo (tras la fase de animación y UI) se
+escribe una **feature de minijuego mínima** —un `WorldSpace`, un reloj de paso fijo, dos
+entidades y un contador— bajo la restricción explícita de **no modificar ni una línea del
+núcleo**. Es barata, es además un entregable de la lista del usuario, y falsa el diseño meses
+antes de que lo haría la v2.
+
+**Consecuencias.** El orden de fases de `REDESIGN.md` §5.3 se reescribe (ver ahí). "Espacios"
+se reduce en v1 a `ScreenSpace`; `TileSpace` llega con v2. La cámara se implementa igual en v1
+aunque una VN no haga scroll, porque es el mismo trabajo que saca el vocabulario de género del
+renderizador y no tiene sentido hacerlo dos veces.
+
+---
+
+## ADR-0077 — La regla de cero heap se precisa: frame estacionario más fase de carga presupuestada
+
+**Fecha:** 2026-09-12
+**Hito:** R0 (rediseño)
+**Estado:** aceptada, precisa ADR-0032 / ADR-0035 / ADR-0058 / ADR-0066 / ADR-0073
+
+**Contexto.** "Cero asignaciones de heap en el bucle de frame" es una de las seis reglas no
+negociables del proyecto y ha sido enormemente útil: es medible, y medirla de verdad
+(ADR-0058) destapó cuatro infracciones que llevaban hitos ocurriendo. Pero la regla es
+**absoluta** y en quince hitos ha necesitado **ocho excepciones documentadas**, tres de ellas
+descubiertas en el último hito. Eso es una tendencia, no una casualidad: cada vez que el
+jugador hace algo que carga contenido, aparece una excepción nueva. Con contenido autorable y
+features opcionales irá a más.
+
+**Decisión.** La regla se **precisa**, no se relaja:
+
+1. **Frame estacionario: cero.** Entre `arena_reset(&g_arena_frame)` y la presentación, jugando
+   sin cargar nada, el contador debe ser 0. Esto es exactamente lo que la regla siempre quiso
+   decir y se sigue verificando igual.
+2. **Cargar es una fase explícita y presupuestada**, no una excepción. Entrar en una escena,
+   cambiar de idioma o guardar partida son operaciones declaradas que pueden reservar de
+   arenas y pasar por código de terceros que asigna, con un **presupuesto propio** medido y con
+   nombre. Un tirón al cambiar de escena es correcto; uno por frame no lo es, y la diferencia
+   pasa a ser expresable en vez de resolverse con un `suspend` más.
+3. **Las capacidades se declaran en el manifiesto del proyecto y se validan al hornear.**
+   Sustituye al `VN_ASSERT` tardío: el error sale como "la escena `puente` pide 63 unidades y
+   el proyecto declara 40", en la herramienta, con nombres, y no en el frame 900.
+4. **Las ocho excepciones actuales siguen siendo válidas** y se reclasifican: las que ocurren
+   dentro de una operación de carga pasan a estar cubiertas por (2); las de herramienta de
+   desarrollo (editor, hot reload, subproceso del baker) siguen siendo excepciones de
+   desarrollo y no existen en el binario distribuido.
+
+**Alternativas descartadas.** Dejarla absoluta: la lista de excepciones seguiría creciendo hasta
+que nadie la lea, que es la forma en la que una regla medible se convierte en decoración.
+Relajarla a "poco heap": deja de ser medible, y lo que hace valiosa a esta regla es que el
+criterio es 0 y no "poco".
+
+**Consecuencias.** `core/budget` (la generalización de `heap_guard`) gana el concepto de fase
+presupuestada además del contador por frame. La tabla de excepciones del skill
+`vne-memory-model` se reescribe con la clasificación nueva. Y hay que decirlo claro: esto es una
+**pérdida de garantía** respecto a hoy, aprobada explícitamente por el usuario, a cambio de que
+la regla siga significando algo cuando haya treinta features.
+
+---
+
+## ADR-0078 — Los opcodes se validan con una tabla al arrancar, no con la exhaustividad del `switch`
+
+**Fecha:** 2026-09-12
+**Hito:** R0 (rediseño)
+**Estado:** aceptada, sustituye el mecanismo de SPEC.md §8.1
+
+**Contexto.** El intérprete actual son tres `switch` **sin `default`** sobre `CmdKind`, y la
+especificación lo documenta como red de seguridad: añadir un comando obliga a completar los
+cuatro sitios o el compilador se queja. El propio proyecto descubrió después que **esa red no
+existe bajo MSVC** (`C4062` está desactivado en `/W4`) y que los tres `switch` hay que
+completarlos a mano.
+
+El rediseño necesita que **cada feature aporte su rango de instrucciones** (diálogo, cutscenes,
+combate, minijuegos), lo que es directamente incompatible con un `enum` cerrado y un `switch`
+exhaustivo en el núcleo.
+
+**Decisión.** Se sustituye por una **tabla de rangos de opcodes registrada al inicializar las
+features y validada antes de ejecutar nada**:
+
+- Cada feature registra `[primer_opcode, n]` con su handler.
+- Al arrancar se comprueba que **no hay rangos solapados** y que **todo rango declarado tiene
+  handler**. Un proyecto mal montado falla al cargar, con el nombre de la feature.
+- El baker **rechaza contenido con un opcode que no esté en un rango declarado** por las
+  features que el manifiesto habilita. Es la mitad importante: el error se detecta al hornear,
+  con archivo y línea, que es donde el `switch` nunca llegaba a mirar.
+- Un opcode sin handler en runtime **degrada de forma visible** (se registra y se salta la
+  instrucción), nunca aborta: misma política que el placeholder magenta.
+
+**Alternativas descartadas.** Mantener un `enum` central y que las features añadan valores: es
+el acoplamiento que el rediseño elimina, y obliga a recompilar el núcleo por cada feature.
+Despacho por puntero a función **por instrucción** en el propio contenido: haría el contenido no
+relocalizable y no verificable offline.
+
+**Consecuencias.** Se cambia una verificación en **tiempo de compilación** por dos en **tiempo
+de horneado y de carga**. Es una pérdida real de garantía —aprobada explícitamente— mitigada por
+el hecho de que la garantía que se pierde ya no funcionaba en el compilador que usa el proyecto,
+y de que el baker cubre el caso que de verdad importa: contenido que referencia algo que el
+juego no tiene.
+
+---
+
+## ADR-0079 — Dos formas de clave en el catálogo: hash para el texto de contenido, nombre para el de interfaz
+
+**Fecha:** 2026-09-12
+**Hito:** R0 (rediseño)
+**Estado:** aceptada, extiende ADR-0047
+
+**Contexto.** M15 dejó abierto de dónde sale el texto de interfaz: las etiquetas de la botonera
+("Historial", "Guardar"), los nombres de bus y los "Cerrar" son literales en C++ y no pasan por
+el catálogo, mientras el diálogo y las opciones de `@choice` sí. `SPEC.md` §14 lo marcaba como
+decisión que el agente no debe tomar solo; el usuario la delegó explícitamente.
+
+Lo que hace interesante la pregunta es que **las dos clases de texto quieren lo contrario de su
+clave.** ADR-0047 decidió que el diálogo se identifica por el **hash del texto original**, y es
+lo correcto: si alguien reescribe una línea, la clave cambia y la traducción queda marcada como
+obsoleta en vez de mostrarse desactualizada. Para una etiqueta de interfaz eso es exactamente el
+comportamiento que no se quiere: cambiar "Guardar" por "Guardar partida" es cosmético y tirar
+las traducciones de todos los idiomas por eso sería absurdo.
+
+**Decisión.** **Un solo formato de catálogo y un solo camino en runtime** (`loc_text(key)`), con
+**dos recolectores** y **dos formas de clave**:
+
+- **Texto de contenido** (diálogo, opciones, nombres de ítem): clave = `fnv1a` del texto
+  original. El baker lo extrae escaneando el contenido, como ya hace. Sin cambios respecto a
+  ADR-0047.
+- **Texto de interfaz** (etiquetas, mensajes de sistema, nombres de bus): clave = **nombre
+  explícito y estable** (`ui.backlog.title`, `ui.button.save`). Se declara en una tabla de
+  strings **junto a la feature que lo usa** —una feature registra su tabla igual que registra
+  sus bloques y sus opcodes— más una tabla del proyecto para lo suyo propio.
+
+El baker funde las dos fuentes en el mismo `.szl`. En runtime no hay dos sistemas, hay uno.
+
+**Alternativas descartadas.** Hash también para la interfaz: rompe la traducción en cada
+reescritura cosmética. Un catálogo aparte para la interfaz: dos formatos, dos cargadores y dos
+cachés para resolver el mismo problema, y el doble de sitios donde una clave puede faltar.
+Dejar la interfaz sin localizar: contradice el objetivo, y ya está anotado como pendiente desde
+M15.
+
+**Consecuencias.** Una feature es responsable de su propio texto, que es coherente con que sea
+responsable de sus bloques, sus sistemas y sus paneles de editor. `vne_bake catalog-extract`
+gana la segunda fuente. Y la regla para quien escriba features queda clara: **si el jugador lo
+lee y no está en el contenido, va en la tabla de strings de la feature con una clave nombrada.**
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
 desviarte.
+
+- **El texto de la interfaz no se localiza.** Las etiquetas de la botonera de `VnMode`
+  ("Historial", "Guardar", "Saltar"...), los nombres de bus de `MenuMode` y los "Cerrar" de
+  los overlays son literales en C++ y no pasan por el catálogo (M15, ADR-0074). El diálogo y
+  las opciones de `@choice` **sí** se localizan, que es lo que pide SPEC.md §9.2 — el catálogo
+  se extrae de los guiones, y una etiqueta de botón no está en ningún guion. Hacerlo bien
+  pide decidir de dónde sale el texto de interfaz: un `.vnl` propio horneado desde una lista
+  de claves fijas, o extenderle a `vne_bake catalog-extract` una segunda fuente. No es una
+  decisión que el agente deba tomar solo (SPEC.md §14, "textos que ve el jugador").
+- **`script_load` dentro del frame** (M15, ADR-0073): pisar un trigger lee el `.vnc` en el
+  frame y la excepción del `heap_guard` lo absorbe. Si algún día un guion pesa lo suficiente
+  para que el tirón se note, lo correcto es traerlo por el hilo de IO de M11, lo que obliga a
+  que `MapMode` sepa esperar con un estado "trigger pisado, escena todavía no lista" que hoy
+  no existe.
+- **`text_layout` no libera nunca.** Cada línea de diálogo nueva reserva sus quads en
+  `g_arena_scene` y nadie resetea esa arena todavía (su propósito documentado es resetearse al
+  cambiar de capítulo o de mapa). Con las opciones de `@choice` de M15 hay una fuente más de
+  layouts, y encima se rehacen al cambiar de idioma. Una sesión larguísima sin cambio de
+  escena acabaría agotando los 256 MB. No es nuevo de M15 —pasa desde M7— pero ahora hay más
+  llamantes. La salida no es un `free` por layout: es resetear `g_arena_scene` en los cambios
+  de escena que ya están previstos.
+- **El ratón no se puede probar con el ratón de verdad.** La sesión de `tests/test_mouse_only.cpp`
+  escribe coordenadas virtuales directamente, así que lo único que sigue sin verificarse es la
+  traducción de un evento de ratón de SDL a un `InputState` (unas diez líneas de
+  `platform/input.cpp`) y la llamada a `gfx_window_to_virtual` de `main.cpp`. Es la misma
+  limitación de entorno de siempre, ahora reducida a su mínimo.
+- **La UI no tiene foco de teclado navegable sobre la botonera.** Los ocho botones de `VnMode`
+  se pulsan solo con el ratón; sus acciones tienen atajo de teclado (B/M/F5/F9/A/S/flechas),
+  así que no falta funcionalidad, pero no hay un `Tab` que recorra la botonera. Si alguna vez
+  hace falta accesibilidad por teclado de verdad, es ahí donde entra.
 
 - ~~**`k_max_vars = 512` se queda corto**~~ — disuelto en M14 (ADR-0067), y **sin tocar
   SPEC.md §8.2**. No se amplió el array: se quitó el hash. Con la tabla de símbolos del
@@ -2746,14 +3200,12 @@ nota de contexto.
   la necesita (`MenuMode::update`, comentario "un unico caso especial"): si se anade un
   tercer idioma con un alfabeto distinto (p. ej. coreano), hay que ampliar esa logica a
   una tabla idioma->fuente en vez de un booleano.
-- `atlas.bin` sigue sin nombres logicos ni sub-paginas (ADR-0025, y M11 lo mencionaba en
-  su descripcion): los sprites se indexan por posicion en el array. NO se implemento a
-  proposito, no por olvido: hoy no hay ningun consumidor que pida un sprite por nombre --
-  VnMode y MapMode dibujan con `gfx_white_texture()` y el unico lector del manifiesto es
-  el stress test de M1, que recorre por indice. Anadir la tabla de nombres ahora seria una
-  API sin llamante, justo lo que SPEC.md #1 dice que no se hace ("cada funcionalidad
-  existe porque el juego la necesita"). El hito que lo necesitara de verdad es M15 (arte
-  de UI real).
+- ~~`atlas.bin` sigue sin nombres logicos~~ — resuelto antes de lo previsto, en M13: la
+  tabla de nombres llego con `atlas_00.bin` v3 porque la validacion de `@show`/`@bg` al
+  compilar la necesitaba ya (ADR-0022 cerrado). M15 le anadio el sentido contrario
+  (`atlas_name_at`, para que el visor del editor pueda enumerar lo que hay dentro) y el arte
+  de UI real la usa por nombre (ADR-0074). Las sub-paginas del atlas siguen sin existir: hoy
+  cabe todo en una de 1024x1024.
 - El `.pak` se lee entero a memoria en vez de mapearse con `mmap` (ADR-0054): con ~12 MB
   de assets es irrelevante, pero es una divergencia real con la letra de SPEC.md #7.4
   ("mapeado a memoria"). Si los assets llegan a cientos de MB, hay que implementar el

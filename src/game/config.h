@@ -1,5 +1,5 @@
 #pragma once
-#include "base/types.h"
+#include "core/types.h"
 
 // Preferencias del jugador (M14, SPEC.md #12). **Viven FUERA de GameState** y ese es el
 // punto: el skill vne-serializable-state lo dice explicitamente — "¿es preferencia del

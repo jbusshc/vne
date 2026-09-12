@@ -1,11 +1,12 @@
 #pragma once
-#include "base/arena.h"
-#include "base/handle.h"
+#include "core/arena.h"
+#include "core/handle.h"
 #include "game/mode.h"
+#include "game/ui.h"
 #include "text/layout.h"
 #include "vm/backlog.h"
 #include "vm/save.h"
-#include "vm/state.h"
+#include "formats/state.h"
 
 constexpr u32 k_save_slot_count = 4;
 
@@ -26,6 +27,12 @@ struct SaveLoadMode : Mode {
     TextLayout    slot_label[k_save_slot_count];
     bool          labels_built = false;
 
+    // Raton (M15).
+    i32        hovered_slot      = -1;
+    bool       hovered_close     = false;
+    TextLayout close_label;
+    bool       close_label_built = false;
+
     void on_enter() override;
     void update(const InputState& input, f32 dt) override;
     void render() override;
@@ -33,3 +40,8 @@ struct SaveLoadMode : Mode {
 };
 
 const char* save_slot_path(u32 slot_index);
+
+// Rectangulos en coordenadas virtuales, compartidos por update() y render(). Expuestos para
+// que un test pinche un hueco concreto sin adivinar coordenadas.
+UiRect save_slot_rect(u32 slot_index);
+UiRect save_close_rect();

@@ -8,12 +8,12 @@
 
 #include <cstdio>
 
-#include "base/arena.h"
-#include "base/hash.h"
+#include "core/arena.h"
+#include "core/hash.h"
 #include "script/compiler.h"
 #include "script/parser.h"
 #include "vm/script_load.h"
-#include "vm/state.h"
+#include "formats/state.h"
 
 TEST_CASE("compiler: resuelve Jump a pc y anade End implicito si falta") {
     ParseResult parsed = parse_script(":: a\n@wait 1.0\n@jump a\n", "t.vns");
@@ -142,4 +142,37 @@ TEST_CASE("script_load: un .vnc v3 obsoleto se rechaza con un error claro, no se
     CHECK(script_load("test_stale_v3.vnc", &arena, &script) == ScriptLoadResult::BadFormat);
     arena_destroy(&arena);
     std::remove(path);
+}
+
+TEST_CASE("compiler: un @choice con mas opciones de las que la UI dibuja se rechaza (M15)") {
+    // El limite existe porque VnMode reserva un numero fijo de layouts para las opciones
+    // (k_max_choice_options, formats/cmd.h) y no puede asignar dentro del frame. Comprobarlo en
+    // el compilador da archivo y linea; dejarlo para la UI solo permitiria truncar en
+    // silencio y que el jugador no viera una opcion que el guion ofrece.
+    std::string source = "@choice\n";
+    for (u32 i = 0; i < k_max_choice_options + 1; ++i) {
+        source += "    \"opcion " + std::to_string(i) + "\" -> destino\n";
+    }
+    source += "@end\n:: destino\n@end\n";
+
+    ParseResult parsed = parse_script(source.c_str(), "muchas_opciones.vns");
+    REQUIRE(parsed.ok());
+    CompileResult compiled = compile_instructions(parsed.instructions, "muchas_opciones.vns",
+                                                   symbols_for_single_script(parsed.instructions));
+    REQUIRE_FALSE(compiled.ok());
+    MESSAGE("mensaje: " << compiled.errors[0].message);
+    CHECK(compiled.errors[0].message.find("como mucho 8") != std::string::npos);
+    CHECK(compiled.errors[0].line == 1);
+
+    // Y con exactamente el maximo si compila: el limite es 8, no 7.
+    std::string ok_source = "@choice\n";
+    for (u32 i = 0; i < k_max_choice_options; ++i) {
+        ok_source += "    \"opcion " + std::to_string(i) + "\" -> destino\n";
+    }
+    ok_source += "@end\n:: destino\n@end\n";
+    ParseResult ok_parsed = parse_script(ok_source.c_str(), "justas.vns");
+    REQUIRE(ok_parsed.ok());
+    CompileResult ok_compiled = compile_instructions(
+        ok_parsed.instructions, "justas.vns", symbols_for_single_script(ok_parsed.instructions));
+    CHECK(ok_compiled.ok());
 }

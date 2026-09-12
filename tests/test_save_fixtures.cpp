@@ -6,13 +6,13 @@
 #include "test_config.h"
 #include "vm/backlog.h"
 #include "vm/save.h"
-#include "vm/state.h"
+#include "formats/state.h"
 
 // Criterio de SPEC.md #12 para M14: "las tres versiones de guardado cargan correctamente
 // desde tests/saves/ en un test". Son cuatro versiones historicas ya (v1..v4) mas la actual.
 //
 // Estos archivos NO se fabrican aqui: son fijos, estan en el repositorio y los escribio
-// `vne_bake save-fixtures` byte a byte como lo habria hecho el binario de cada epoca. La
+// `sz_bake save-fixtures` byte a byte como lo habria hecho el binario de cada epoca. La
 // diferencia importa: un test que se fabrica su propio archivo prueba la migracion contra lo
 // que el test CREE que escribia un binario viejo, no contra lo que escribia. Ver
 // tests/saves/README.md.
@@ -20,7 +20,7 @@
 namespace {
 
 std::string fixture_path(const char* name) {
-    return std::string(VNE_SOURCE_DIR) + "/tests/saves/" + name;
+    return std::string(SZ_SOURCE_DIR) + "/tests/saves/" + name;
 }
 
 }  // namespace

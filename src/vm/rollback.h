@@ -1,6 +1,6 @@
 #pragma once
-#include "base/types.h"
-#include "vm/state.h"
+#include "core/types.h"
+#include "formats/state.h"
 
 // Buffer circular de instantaneas completas de GameState (SPEC.md #8.3). El rollback no
 // reejecuta nada: retroceder es copiar una instantanea de vuelta. Semantica de

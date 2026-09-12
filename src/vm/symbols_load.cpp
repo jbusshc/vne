@@ -2,8 +2,8 @@
 
 #include <cstring>
 
-#include "assets/pak.h"
-#include "base/log.h"
+#include "vfs/pak.h"
+#include "core/log.h"
 
 namespace {
 
@@ -32,7 +32,7 @@ bool symbols_load(Arena* arena) {
     const u8* bytes = nullptr;
     usize     size  = 0;
     if (!pak_resolve_into_arena("project.vnsym", arena, &bytes, &size)) {
-        log_error("symbols_load: no se encontro 'project.vnsym'; ejecuta 'vne_bake symbols'");
+        log_error("symbols_load: no se encontro 'project.vnsym'; ejecuta 'sz_bake symbols'");
         return false;
     }
 
@@ -51,7 +51,7 @@ bool symbols_load(Arena* arena) {
     if (version != k_version) {
         // Se rechaza, no se migra: es un artefacto generado desde los guiones, como el .vnc.
         log_error("symbols_load: 'project.vnsym' es version %u, se esperaba %u; vuelve a "
-                  "ejecutar 'vne_bake symbols'",
+                  "ejecutar 'sz_bake symbols'",
                   version, k_version);
         return false;
     }

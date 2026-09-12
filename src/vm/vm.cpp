@@ -1,10 +1,12 @@
 #include "vm/vm.h"
 
 #include "audio/audio.h"
-#include "base/log.h"
-#include "script/lua_bindings.h"
+#include "core/log.h"
 #include "vm/backlog.h"
 #include "vm/rollback.h"
+
+void (*g_script_call_hook)(const char* code, GameState* state,
+                            const CompiledScript* script) = nullptr;
 
 namespace {
 
@@ -88,7 +90,7 @@ void cmd_start(const Cmd& cmd, GameState* state, const CompiledScript& script) {
             break;
         case CmdKind::SetFlag: {
             // M13: mismo bitset que ya usaban vn.set_flag/vn.get_flag desde Lua
-            // (script/lua_bindings.cpp), con el mismo flag_id: los dos caminos tienen que
+            // (lua/lua_bindings.cpp), con el mismo flag_id: los dos caminos tienen que
             // ver la misma bandera o @flag y Lua se contradirian.
             u8& byte = state->flags[cmd.set_flag.flag_id / 8];
             u8  bit  = static_cast<u8>(1u << (cmd.set_flag.flag_id % 8));
@@ -132,7 +134,12 @@ void cmd_start(const Cmd& cmd, GameState* state, const CompiledScript& script) {
             }
             break;
         case CmdKind::LuaCall:
-            lua_run(script_string(script, cmd.lua_call.fn_id), state, &script);
+            if (g_script_call_hook != nullptr) {
+                g_script_call_hook(script_string(script, cmd.lua_call.fn_id), state, &script);
+            } else {
+                log_error("LuaCall sin interprete registrado: se ignora (@lua necesita la "
+                           "feature de scripting habilitada)");
+            }
             break;
         case CmdKind::Sfx: {
             SoundHandle h{};
@@ -389,4 +396,18 @@ bool vm_select_choice(VmState* vm, GameState* state, const CompiledScript& scrip
     vm->pc        = opt.target_pc;
     vm->cmd_phase = 0;
     return true;
+}
+
+bool vm_choice_option_available(const GameState& state, const CompiledScript& script,
+                                 u8 option_index) {
+    if (state.vm.pc >= script.cmd_count) {
+        return false;
+    }
+    const Cmd& cmd = script.cmds[state.vm.pc];
+    if (cmd.kind != CmdKind::Choice || option_index >= cmd.choice.option_count) {
+        return false;
+    }
+    const ChoiceOption& opt = script.choice_options[cmd.choice.first_option + option_index];
+    return opt.has_condition == 0 ||
+           eval_cmp(state.vars[opt.cond_var_id], opt.cond_op, opt.cond_rhs);
 }

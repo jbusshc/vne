@@ -14,7 +14,7 @@
 
 namespace {
 CompiledScript load_demo_script(CompileResult* out_compiled) {
-    std::string path = std::string(VNE_SOURCE_DIR) + "/assets_src/scripts/demo.vns";
+    std::string path = std::string(SZ_SOURCE_DIR) + "/assets_src/scripts/demo.vns";
     std::FILE*  f    = std::fopen(path.c_str(), "rb");
     REQUIRE(f != nullptr);
     std::fseek(f, 0, SEEK_END);

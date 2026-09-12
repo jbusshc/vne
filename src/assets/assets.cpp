@@ -5,12 +5,12 @@
 #include <cstdio>
 #include <cstring>
 
-#include "assets/pak.h"
+#include "vfs/pak.h"
 #include "audio/audio.h"
-#include "base/hash.h"
-#include "base/heap_guard.h"
-#include "base/log.h"
-#include "gfx/texture.h"
+#include "core/hash.h"
+#include "core/heap_guard.h"
+#include "core/log.h"
+#include "render/texture.h"
 #include "text/font.h"
 
 namespace {

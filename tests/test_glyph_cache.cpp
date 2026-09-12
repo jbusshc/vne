@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "base/arena.h"
+#include "core/arena.h"
 #include "test_fonts.h"
 #include "text/glyph_cache.h"
 #include "text/layout.h"

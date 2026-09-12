@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "base/log.h"
+#include "core/log.h"
 #include "game/vn_mode.h"
 #include "text/font.h"
 #include "platform/input.h"

@@ -1,6 +1,6 @@
 #include "vm/rollback.h"
 
-#include "base/arena.h"
+#include "core/arena.h"
 
 RollbackBuffer g_rollback;
 

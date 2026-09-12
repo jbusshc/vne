@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-#include "base/types.h"
+#include "core/types.h"
 #include "script/parser.h"
 
 // Tabla de simbolos del proyecto (M14). **Un unico sitio donde un nombre se convierte en un
@@ -78,7 +78,7 @@ void symbols_collect_from_lua(const std::string& code, SymbolTable* table);
 
 // Recorre las instrucciones ya parseadas de un guion y mete en la tabla todos los nombres
 // que use. Se llama una vez por guion ANTES de compilar ninguno: por eso el paso de
-// simbolos es su propio comando (`vne_bake symbols`) y no algo que haga `vne_bake script`,
+// simbolos es su propio comando (`sz_bake symbols`) y no algo que haga `sz_bake script`,
 // que ve un guion cada vez y no podria dar ids estables entre todos.
 //
 // Devuelve false y llena *out_error si alguna clase se pasa de su tope.
@@ -86,7 +86,7 @@ bool symbols_collect_from_script(const std::vector<ParsedInstr>& instructions,
                                   const std::string& file_name, SymbolTable* table,
                                   std::string* out_error);
 
-// Lee un `.vnsym` ya horneado. Uso offline (`vne_bake script` lo necesita para compilar con
+// Lee un `.vnsym` ya horneado. Uso offline (`sz_bake script` lo necesita para compilar con
 // los ids del proyecto); el runtime tiene su propio lector sin std::string (vm/symbols_load.h).
 bool read_vnsym(const std::string& path, SymbolTable* out);
 

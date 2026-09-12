@@ -7,12 +7,12 @@
 #include <string>
 #include <utility>
 
-#include "assets/pak.h"
-#include "base/hash.h"
+#include "vfs/pak.h"
+#include "core/hash.h"
 
 // Tests del formato .pak y de la resolucion de ruta logica -> bytes (SPEC.md #7.4/#11,
 // M11). Los fixtures se escriben a mano, mismo patron que test_save_load.cpp con
-// .vnsave: no hay un .pak real generado por vne_bake todavia en el arbol de tests, asi
+// .vnsave: no hay un .pak real generado por sz_bake todavia en el arbol de tests, asi
 // que se fabrica el formato exacto byte a byte.
 //
 // pak_resolve() es seguro desde cualquier hilo (no toma Arena*, ver pak.h): cada test

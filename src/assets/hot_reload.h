@@ -1,6 +1,6 @@
 #pragma once
-#include "base/handle.h"
-#include "base/types.h"
+#include "core/handle.h"
+#include "core/types.h"
 
 // Recarga en caliente de assets (SPEC.md #7.4: "en Debug y Dev, un watcher comprueba
 // mtimes cada 500 ms y recarga texturas, fuentes, shaders y scripts en caliente").
@@ -10,12 +10,12 @@
 //   - Aqui: lo que se recarga entero dentro del sistema de assets (texturas y fuentes).
 //     assets/ no sabe que es un GameState ni una VM, y no debe saberlo.
 //   - editor/editor.cpp: los .vns, porque recargar un guion significa ademas tocar el
-//     CompiledScript vivo y el pc de la VM (ADR-0042: vne_bake se invoca como subproceso
+//     CompiledScript vivo y el pc de la VM (ADR-0042: sz_bake se invoca como subproceso
 //     desde el editor, no desde el juego).
 // Juntos cubren el criterio de M11: tocar un .png, un .ttf o un .vns recarga los tres.
 //
 // Los shaders que menciona SPEC.md #7.4 no entran: se escriben a mano en C++
-// (src/gfx/shaders.h, ADR-0010), no hay archivo suelto que vigilar.
+// (src/render/shaders.h, ADR-0010), no hay archivo suelto que vigilar.
 //
 // Todo esto solo existe en Debug/Dev. En Ship el .pak es inmutable y no hay nada que
 // vigilar: las funciones se compilan vacias.

@@ -3,10 +3,10 @@
 #include <cstdio>
 #include <vector>
 
-#include "assets/pak.h"
+#include "vfs/pak.h"
 #include "audio/audio.h"
-#include "base/hash.h"
-#include "base/heap_guard.h"
+#include "core/hash.h"
+#include "core/heap_guard.h"
 
 // audio_init() ya se llamo una vez en test_main.cpp (mismo patron que lua_init()): un
 // unico ma_engine persistente creado fuera del bucle de frame.

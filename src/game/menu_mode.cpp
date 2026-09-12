@@ -5,7 +5,7 @@
 #include <SDL3/SDL.h>
 
 #include "audio/audio.h"
-#include "gfx/gfx.h"
+#include "render/render.h"
 #include "game/config.h"
 #include "game/locales.h"
 #include "text/catalog.h"
@@ -13,8 +13,33 @@
 namespace {
 constexpr f32       k_volume_step = 0.1f;
 const char* const k_bus_names[4] = {"Master", "Musica", "Efectos", "Voces"};
-constexpr i32       k_row_count    = 5;  // 4 buses + idioma
+constexpr i32       k_row_count    = k_menu_row_count;
+
+// Paso al que se redondea un volumen puesto con el raton. Sin redondeo, arrastrar daria
+// 0.43871 y la fila mostraria "43%" de un valor que no se puede reproducir con el teclado;
+// con 0.05 las dos formas de moverlo llegan a los mismos sitios.
+constexpr f32 k_volume_snap = 0.05f;
+
+f32 clamp01(f32 v) {
+    if (v < 0.0f) return 0.0f;
+    if (v > 1.0f) return 1.0f;
+    return v;
+}
 }  // namespace
+
+UiRect menu_row_rect(i32 row) {
+    return UiRect{540.0f, 300.0f + static_cast<f32>(row) * 90.0f, 820.0f, 74.0f};
+}
+
+UiRect menu_slider_rect(i32 bus) {
+    UiRect row = menu_row_rect(bus);
+    // Carril a la derecha de la etiqueta, centrado en la fila.
+    return UiRect{row.x + 440.0f, row.y + row.h * 0.5f - 14.0f, 340.0f, 28.0f};
+}
+
+UiRect menu_close_rect() {
+    return UiRect{540.0f, 300.0f + static_cast<f32>(k_menu_row_count) * 90.0f, 200.0f, 60.0f};
+}
 
 void MenuMode::update(const InputState& input, f32 dt) {
     (void)dt;
@@ -28,6 +53,57 @@ void MenuMode::update(const InputState& input, f32 dt) {
         selected += 1;
     }
 
+    // ---- Raton (M15) ----
+    hovered_row = -1;
+    for (i32 row = 0; row < k_row_count; ++row) {
+        if (ui_hover(menu_row_rect(row), input)) {
+            hovered_row = row;
+        }
+    }
+    hovered_close = ui_hover(menu_close_rect(), input);
+    if (hovered_close && input.mouse_pressed[0]) {
+        wants_close = true;
+        return;
+    }
+    // Pinchar una fila la selecciona, para que el teclado siga desde donde esta el raton en
+    // vez de tener dos cursores distintos.
+    if (input.mouse_pressed[0] && hovered_row >= 0) {
+        selected = hovered_row;
+    }
+
+    if (state != nullptr) {
+        if (dragging_bus < 0 && input.mouse_pressed[0]) {
+            for (i32 bus = 0; bus < 4; ++bus) {
+                if (ui_hover(menu_slider_rect(bus), input)) {
+                    dragging_bus = bus;
+                    break;
+                }
+            }
+        }
+        if (dragging_bus >= 0) {
+            if (input.mouse_down[0]) {
+                // La posicion del cursor a lo largo del carril ES el valor: arrastrar y
+                // pinchar en un punto concreto son la misma operacion, sin casos especiales.
+                UiRect track = menu_slider_rect(dragging_bus);
+                f32    t     = clamp01((input.mouse_x - track.x) / track.w);
+                f32    snapped =
+                    clamp01(static_cast<f32>(static_cast<i32>(t / k_volume_snap + 0.5f)) *
+                            k_volume_snap);
+                state->bus_volume[dragging_bus]  = snapped;
+                g_config.bus_volume[dragging_bus] = snapped;
+                audio_set_bus_volume(static_cast<Bus>(dragging_bus), snapped);
+            } else {
+                // Soltar: aqui y solo aqui se escribe config.ini (ver dragging_bus en la
+                // cabecera).
+                dragging_bus = -1;
+                if (persist_config) {
+                    config_save();
+                }
+            }
+            return;
+        }
+    }
+
     if (selected < 4) {
         f32 delta = 0.0f;
         if (input.key_pressed[SDL_SCANCODE_LEFT]) {
@@ -37,32 +113,38 @@ void MenuMode::update(const InputState& input, f32 dt) {
             delta = k_volume_step;
         }
         if (delta != 0.0f && state != nullptr) {
-            f32 v = state->bus_volume[selected] + delta;
-            if (v < 0.0f) v = 0.0f;
-            if (v > 1.0f) v = 1.0f;
+            f32 v                       = clamp01(state->bus_volume[selected] + delta);
             state->bus_volume[selected] = v;
             audio_set_bus_volume(static_cast<Bus>(selected), v);
             // Igual que el idioma: se persiste al cambiar (M14).
             g_config.bus_volume[selected] = v;
-            config_save();
+            if (persist_config) {
+                config_save();
+            }
         }
         return;
     }
 
-    // Fila de idioma (M10, SPEC.md #10: "cambia de espanol a japones sin reiniciar").
-    if (!input.key_pressed[SDL_SCANCODE_LEFT] && !input.key_pressed[SDL_SCANCODE_RIGHT]) {
+    // Fila de idioma (M10, SPEC.md #10: "cambia de espanol a japones sin reiniciar"). Con
+    // el raton se cicla pinchandola, que es lo que hace una fila de un solo ajuste.
+    bool next_locale =
+        input.key_pressed[SDL_SCANCODE_RIGHT] ||
+        (input.mouse_pressed[0] && hovered_row == 4);
+    bool prev_locale = input.key_pressed[SDL_SCANCODE_LEFT];
+    if (!next_locale && !prev_locale) {
         return;
     }
-    locale_index =
-        (locale_index + (input.key_pressed[SDL_SCANCODE_RIGHT] ? 1 : k_locale_count - 1)) %
-        static_cast<i32>(k_locale_count);
+    locale_index = (locale_index + (next_locale ? 1 : k_locale_count - 1)) %
+                   static_cast<i32>(k_locale_count);
 
     apply_locale();
 
     // Se persiste AL CAMBIAR, no al salir: si el juego se cierra de forma anormal, la
     // preferencia ya esta guardada (M14, criterio de SPEC.md #12).
     g_config.locale_index = static_cast<u32>(locale_index);
-    config_save();
+    if (persist_config) {
+        config_save();
+    }
 }
 
 void MenuMode::apply_locale() {
@@ -88,14 +170,14 @@ void MenuMode::apply_locale() {
 
 void MenuMode::render() {
     Sprite panel{};
-    panel.tex   = gfx_white_texture();
+    panel.tex   = render_white_texture();
     panel.dst_x = 500.0f;
     panel.dst_y = 260.0f;
     panel.dst_w = 900.0f;
     panel.dst_h = 560.0f;
     panel.color = 0xF0202020u;
-    panel.layer = static_cast<u16>(GfxLayer::UI);
-    gfx_draw_sprite(panel);
+    panel.layer = static_cast<u16>(RenderLayer::UI);
+    render_draw_sprite(panel);
 
     if (!font.valid() || state == nullptr) {
         return;
@@ -123,9 +205,27 @@ void MenuMode::render() {
         cached_locale    = locale_index;
     }
 
-    f32 y = 310.0f;
-    for (u32 i = 0; i < 5; ++i) {
-        text_draw(cached_lines[i], 550.0f, y, cached_lines[i].count);
-        y += 90.0f;
+    for (i32 i = 0; i < k_menu_row_count; ++i) {
+        UiRect row = menu_row_rect(i);
+        if (i == selected) {
+            ui_draw_button(row, k_ui_row_selected);
+        } else if (i == hovered_row) {
+            ui_draw_button(row, k_ui_button_idle);
+        }
+        text_draw(cached_lines[i], row.x + 10.0f, row.y + 8.0f, cached_lines[i].count);
+
+        if (i < 4) {
+            // Carril y relleno. El relleno es el valor, asi que lo que se ve y lo que se
+            // arrastra son literalmente el mismo rectangulo (ver menu_slider_rect).
+            ui_draw_slider(menu_slider_rect(i), state->bus_volume[i]);
+        }
     }
+
+    if (!close_label_built) {
+        close_label       = text_layout(font, "Cerrar", 200.0f, scratch_arena);
+        close_label_built = true;
+    }
+    UiRect close = menu_close_rect();
+    ui_draw_button(close, hovered_close ? k_ui_button_hover : k_ui_button_idle);
+    text_draw(close_label, close.x + 16.0f, close.y + 8.0f, close_label.count);
 }

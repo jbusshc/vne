@@ -7,13 +7,13 @@
 #include <string_view>
 #include <vector>
 
-#include "base/hash.h"
+#include "core/hash.h"
 #include <cstddef>
 
-#include "base/crc32.h"
-#include "game/map_format.h"
+#include "core/crc32.h"
+#include "formats/map_format.h"
 #include "vm/backlog.h"
-#include "vm/state.h"
+#include "formats/state.h"
 #include "script/asset_validate.h"
 #include "script/hash_collisions.h"
 #include "script/symbols.h"
@@ -49,8 +49,8 @@
 #pragma warning(pop)
 #endif
 
-#include "base/log.h"
-#include "base/types.h"
+#include "core/log.h"
+#include "core/types.h"
 
 // Sin <filesystem>: sus headers usan try/catch internamente y disparan C4530 bajo MSVC
 // con las excepciones desactivadas (SPEC.md #4). Crear un directorio y listar un
@@ -65,7 +65,7 @@ static void ensure_directory_exists(const char* path) {
 }
 
 // extension incluye el punto (".png"); nullptr o "" lista todo el directorio (M11,
-// vne_bake pack, que necesita recorrer assets_baked/ entero sin filtrar por tipo).
+// sz_bake pack, que necesita recorrer assets_baked/ entero sin filtrar por tipo).
 static std::vector<std::string> list_files_in_dir(const char* dir, const char* extension) {
     std::vector<std::string> result;
     auto matches = [&](const std::string& name) {
@@ -202,11 +202,11 @@ bool read_whole_file(const char* path, std::string* out) {
     return read == static_cast<usize>(size);
 }
 
-// vne_bake script <entrada.vns> <salida.vnc> (SPEC.md #9.3, pipeline de SPEC.md #11).
+// sz_bake script <entrada.vns> <salida.vnc> (SPEC.md #9.3, pipeline de SPEC.md #11).
 int bake_script(const char* in_path, const char* out_path) {
     std::string source;
     if (!read_whole_file(in_path, &source)) {
-        log_error("vne_bake: no se pudo leer '%s'", in_path);
+        log_error("sz_bake: no se pudo leer '%s'", in_path);
         return 1;
     }
 
@@ -224,7 +224,7 @@ int bake_script(const char* in_path, const char* out_path) {
     if (AssetRegistry::load_from_atlas_bin("assets_baked/atlas_00.bin", &registry)) {
         validate_asset_names(parsed.instructions, in_path, registry, &parsed.errors);
     } else {
-        log_warn("vne_bake: no se pudo leer 'assets_baked/atlas_00.bin'; los nombres de "
+        log_warn("sz_bake: no se pudo leer 'assets_baked/atlas_00.bin'; los nombres de "
                  "actor, pose y fondo NO se validan en esta compilacion");
     }
 
@@ -241,7 +241,7 @@ int bake_script(const char* in_path, const char* out_path) {
     // valen para este guion y no para el proyecto.
     SymbolTable symbols;
     if (!read_vnsym("assets_baked/project.vnsym", &symbols)) {
-        log_warn("vne_bake: no se pudo leer 'assets_baked/project.vnsym'; los ids se sacan "
+        log_warn("sz_bake: no se pudo leer 'assets_baked/project.vnsym'; los ids se sacan "
                  "de este guion solo y NO seran compatibles con el resto del proyecto");
         symbols = symbols_for_single_script(parsed.instructions);
     }
@@ -255,18 +255,18 @@ int bake_script(const char* in_path, const char* out_path) {
     }
 
     if (!write_vnc(out_path, compiled.data)) {
-        log_error("vne_bake: no se pudo escribir '%s'", out_path);
+        log_error("sz_bake: no se pudo escribir '%s'", out_path);
         return 1;
     }
 
-    log_info("vne_bake: %s -> %s (%zu comandos, %zu bytes de strings)", in_path, out_path,
+    log_info("sz_bake: %s -> %s (%zu comandos, %zu bytes de strings)", in_path, out_path,
               compiled.data.cmds.size(), compiled.data.string_pool.size());
     return 0;
 }
 
-// --- vne_bake font: subconjunto de glifos (M13) ----------------------------------------
+// --- sz_bake font: subconjunto de glifos (M13) ----------------------------------------
 //
-// SPEC.md #11 lista `vne_bake font` como la herramienta que faltaba, y M13 le pone un
+// SPEC.md #11 lista `sz_bake font` como la herramienta que faltaba, y M13 le pone un
 // criterio concreto: "el repositorio deja de contener una fuente de 9.5 MB". NotoSansJP.ttf
 // pesa 9.5 MB porque cubre el japones entero, y el proyecto usaba una fraccion minuscula.
 //
@@ -321,7 +321,7 @@ void add_base_codepoints(hb_set_t* set) {
 bool add_codepoints_from_file(const char* path, hb_set_t* set) {
     std::string content;
     if (!read_whole_file(path, &content)) {
-        log_error("vne_bake font: no se pudo leer '%s'", path);
+        log_error("sz_bake font: no se pudo leer '%s'", path);
         return false;
     }
     usize i = 0;
@@ -352,11 +352,11 @@ bool add_codepoints_from_file(const char* path, hb_set_t* set) {
     return true;
 }
 
-// vne_bake font <entrada.ttf> <salida.ttf> [archivo_de_texto ...]
+// sz_bake font <entrada.ttf> <salida.ttf> [archivo_de_texto ...]
 int bake_font(const char* in_path, const char* out_path, int extra_count, char** extra_paths) {
     std::string ttf;
     if (!read_whole_file(in_path, &ttf)) {
-        log_error("vne_bake font: no se pudo leer '%s'", in_path);
+        log_error("sz_bake font: no se pudo leer '%s'", in_path);
         return 1;
     }
 
@@ -366,14 +366,14 @@ int bake_font(const char* in_path, const char* out_path, int extra_count, char**
     hb_blob_destroy(blob);
     if (hb_face_get_glyph_count(face) == 0) {
         hb_face_destroy(face);
-        log_error("vne_bake font: '%s' no parece un TTF valido (0 glifos)", in_path);
+        log_error("sz_bake font: '%s' no parece un TTF valido (0 glifos)", in_path);
         return 1;
     }
 
     hb_subset_input_t* input = hb_subset_input_create_or_fail();
     if (input == nullptr) {
         hb_face_destroy(face);
-        log_error("vne_bake font: hb_subset_input_create_or_fail fallo");
+        log_error("sz_bake font: hb_subset_input_create_or_fail fallo");
         return 1;
     }
     hb_set_t* unicodes = hb_subset_input_unicode_set(input);
@@ -391,7 +391,7 @@ int bake_font(const char* in_path, const char* out_path, int extra_count, char**
     hb_subset_input_destroy(input);
     if (subset == nullptr) {
         hb_face_destroy(face);
-        log_error("vne_bake font: hb_subset_or_fail fallo sobre '%s'", in_path);
+        log_error("sz_bake font: hb_subset_or_fail fallo sobre '%s'", in_path);
         return 1;
     }
 
@@ -411,18 +411,18 @@ int bake_font(const char* in_path, const char* out_path, int extra_count, char**
     hb_face_destroy(face);
 
     if (!ok) {
-        log_error("vne_bake font: no se pudo escribir '%s'", out_path);
+        log_error("sz_bake font: no se pudo escribir '%s'", out_path);
         return 1;
     }
-    log_info("vne_bake font: %s -> %s (%zu KB -> %u KB, %u codepoints pedidos)", in_path,
+    log_info("sz_bake font: %s -> %s (%zu KB -> %u KB, %u codepoints pedidos)", in_path,
               out_path, ttf.size() / 1024, out_size / 1024, requested);
     return 0;
 }
 
-// vne_bake symbols <salida.vnsym> <guion1.vns> [guion2.vns ...] (M14).
+// sz_bake symbols <salida.vnsym> <guion1.vns> [guion2.vns ...] (M14).
 //
-// Su propio comando y no parte de `vne_bake script` a proposito: los ids tienen que ser
-// estables ENTRE TODOS los guiones del proyecto, y `vne_bake script` ve uno cada vez. Mismo
+// Su propio comando y no parte de `sz_bake script` a proposito: los ids tienen que ser
+// estables ENTRE TODOS los guiones del proyecto, y `sz_bake script` ve uno cada vez. Mismo
 // patron que `catalog-extract`, que ya recorre todos los guiones por la misma razon.
 int bake_symbols(const char* out_path, int script_count, char** script_paths) {
     SymbolTable table;
@@ -433,7 +433,7 @@ int bake_symbols(const char* out_path, int script_count, char** script_paths) {
     for (int i = 0; i < script_count; ++i) {
         std::string source;
         if (!read_whole_file(script_paths[i], &source)) {
-            log_error("vne_bake symbols: no se pudo leer '%s'", script_paths[i]);
+            log_error("sz_bake symbols: no se pudo leer '%s'", script_paths[i]);
             return 1;
         }
         ParseResult parsed = parse_script(source, script_paths[i]);
@@ -445,16 +445,16 @@ int bake_symbols(const char* out_path, int script_count, char** script_paths) {
         }
         std::string error;
         if (!symbols_collect_from_script(parsed.instructions, script_paths[i], &table, &error)) {
-            log_error("vne_bake symbols: %s", error.c_str());
+            log_error("sz_bake symbols: %s", error.c_str());
             return 1;
         }
     }
 
     if (!write_vnsym(out_path, table)) {
-        log_error("vne_bake symbols: no se pudo escribir '%s'", out_path);
+        log_error("sz_bake symbols: no se pudo escribir '%s'", out_path);
         return 1;
     }
-    log_info("vne_bake symbols: %s (%u variables, %u banderas, %u actores, %u poses, "
+    log_info("sz_bake symbols: %s (%u variables, %u banderas, %u actores, %u poses, "
               "%u fondos, %u hablantes)",
               out_path, table.count(SymbolKind::Var), table.count(SymbolKind::Flag),
               table.count(SymbolKind::Actor), table.count(SymbolKind::Pose),
@@ -462,7 +462,7 @@ int bake_symbols(const char* out_path, int script_count, char** script_paths) {
     return 0;
 }
 
-// --- vne_bake save-fixtures: partidas de ejemplo de cada version historica (M14) --------
+// --- sz_bake save-fixtures: partidas de ejemplo de cada version historica (M14) --------
 //
 // El skill vne-serializable-state pide "una partida de ejemplo de cada version historica en
 // tests/saves/ y un test que verifique que todas cargan", y SPEC.md #12 lo hace criterio de
@@ -509,7 +509,7 @@ int bake_save_fixtures(const char* out_dir) {
         std::snprintf(path, sizeof(path), "%s/v%u.vnsave", out_dir, version);
         std::FILE* f = std::fopen(path, "wb");
         if (f == nullptr) {
-            log_error("vne_bake save-fixtures: no se pudo escribir '%s'", path);
+            log_error("sz_bake save-fixtures: no se pudo escribir '%s'", path);
             return false;
         }
         u32 size32 = static_cast<u32>(state_size);
@@ -533,7 +533,7 @@ int bake_save_fixtures(const char* out_dir) {
         std::fwrite(entries, sizeof(BacklogEntryV4), 2, f);
         std::fclose(f);
 
-        log_info("vne_bake save-fixtures: %s (version %u, GameState de %zu bytes)", path,
+        log_info("sz_bake save-fixtures: %s (version %u, GameState de %zu bytes)", path,
                  version, state_size);
         return true;
     };
@@ -543,6 +543,131 @@ int bake_save_fixtures(const char* out_dir) {
             return 1;
         }
     }
+    return 0;
+}
+
+// --- sz_bake input-fixture: la sesion grabada que pide el criterio de M15 --------------
+//
+// SPEC.md #12 pide "una sesion grabada que abre el menu, baja un volumen, guarda, carga, hace
+// rollback y cambia de idioma" reproducida dentro de la suite de tests. Esta herramienta la
+// escribe con el mismo formato .vnrec que produce `sz_runtime --record-input`.
+//
+// **Es sintetica y hay que decirlo.** En este entorno no se pueden inyectar pulsaciones en
+// una ventana real, asi que la secuencia se construye aqui en vez de teclearla. Lo que el
+// test prueba con ella es todo lo que hay POR ENCIMA de platform_poll_events: el router de
+// modos, MenuMode, SaveLoadMode, el rollback y el cambio de idioma, con sus manejadores de
+// tecla de verdad. El unico eslabon que sigue sin verificarse es la traduccion de un evento
+// de SDL a un InputState, que son unas cuarenta lineas compartidas por todas las teclas.
+int bake_input_fixture(const char* out_path) {
+    constexpr u32 k_max_scancodes_local     = 512;
+    constexpr u32 k_max_mouse_buttons_local = 3;
+
+    // Copia del layout de InputState (platform/input.h). Duplicado a proposito, mismo patron
+    // que el resto de formatos: lo escribe una herramienta offline y lo lee el juego.
+    struct InputStateFixture {
+        bool quit_requested;
+        bool key_down[k_max_scancodes_local];
+        bool key_pressed[k_max_scancodes_local];
+        u8   _pad0[3];
+        f32  mouse_x, mouse_y, mouse_wheel_y;
+        bool mouse_down[k_max_mouse_buttons_local];
+        bool mouse_pressed[k_max_mouse_buttons_local];
+        u8   _pad1[2];
+    };
+    static_assert(sizeof(InputStateFixture) == 1048);
+
+    struct RecordFixture {
+        u32               repeat;
+        InputStateFixture state;
+    };
+
+    std::vector<RecordFixture> records;
+
+    // Un frame con una tecla pulsada, seguido de `idle` frames sin nada. Los frames vacios
+    // importan: `key_pressed` es un flanco y sin soltar la tecla el modo la veria una sola
+    // vez igual, pero el juego necesita frames para procesar el cambio de modo.
+    auto press = [&](int scancode, u32 idle) {
+        RecordFixture down{};
+        down.repeat = 1;
+        if (scancode >= 0) {
+            down.state.key_pressed[scancode] = true;
+            down.state.key_down[scancode]    = true;
+        }
+        records.push_back(down);
+
+        if (idle > 0) {
+            RecordFixture rest{};
+            rest.repeat = idle;
+            records.push_back(rest);
+        }
+    };
+
+    // SDL scancodes, los mismos que usa el juego (SDL_scancode.h).
+    constexpr int k_space = 44, k_escape = 41, k_m = 16, k_b = 5;
+    constexpr int k_right = 79, k_left = 80, k_down = 81;
+    constexpr int k_f5 = 62, k_f9 = 66, k_return = 40;
+
+    press(-1, 30);  // arranque: que la primera linea aparezca y el Say se pare a esperar
+
+    // Avanzar algo de dialogo, para que el rollback tenga instantaneas que deshacer.
+    for (int i = 0; i < 3; ++i) {
+        press(k_space, 20);
+    }
+
+    // Abrir el menu y bajar un volumen (fila 0 = Master).
+    press(k_m, 5);
+    press(k_left, 3);
+    press(k_left, 3);
+    press(k_escape, 5);
+
+    // Guardar en el primer hueco.
+    press(k_f5, 5);
+    press(k_return, 10);
+
+    // Cargar ese mismo hueco.
+    press(k_f9, 5);
+    press(k_return, 10);
+
+    // Rollback hacia atras y hacia delante.
+    press(k_left, 5);
+    press(k_right, 5);
+
+    // Abrir el backlog y cerrarlo.
+    press(k_b, 5);
+    press(k_escape, 5);
+
+    // Menu otra vez, bajar hasta la fila de idioma (la 4) y cambiarlo.
+    press(k_m, 5);
+    for (int i = 0; i < 4; ++i) {
+        press(k_down, 3);
+    }
+    press(k_right, 10);
+    press(k_escape, 5);
+
+    // Salir: ESC en la base cierra el juego. Asi la sesion termina de forma determinista.
+    press(k_escape, 2);
+
+    std::FILE* f = std::fopen(out_path, "wb");
+    if (f == nullptr) {
+        log_error("sz_bake input-fixture: no se pudo escribir '%s'", out_path);
+        return 1;
+    }
+    const u32 magic   = 0x43524E56u;  // 'VNRC'
+    const u32 version = 2;  // ver k_version en src/platform/input_record.cpp (M15)
+    const f32 dt      = 1.0f / 60.0f;
+    u32       count   = static_cast<u32>(records.size());
+    std::fwrite(&magic, sizeof(u32), 1, f);
+    std::fwrite(&version, sizeof(u32), 1, f);
+    std::fwrite(&dt, sizeof(f32), 1, f);
+    std::fwrite(&count, sizeof(u32), 1, f);
+    std::fwrite(records.data(), sizeof(RecordFixture), records.size(), f);
+    std::fclose(f);
+
+    u32 frames = 0;
+    for (const RecordFixture& r : records) {
+        frames += r.repeat;
+    }
+    log_info("sz_bake input-fixture: %s (%u frames en %u registros)", out_path, frames, count);
     return 0;
 }
 
@@ -558,13 +683,13 @@ constexpr u32 k_vnl_magic_local   = 0x434C4E56u;  // 'VNLC'
 constexpr u32 k_vnl_version_local = 1;
 }  // namespace
 
-// vne_bake catalog-extract <salida.csv> <guion1.vns> [guion2.vns ...] (SPEC.md #10:
+// sz_bake catalog-extract <salida.csv> <guion1.vns> [guion2.vns ...] (SPEC.md #10:
 // "extraccion del catalogo"). No escribe ningun .vnc: solo parsea y compila en memoria
 // para recolectar los textos.
 int bake_catalog_extract(const char* out_path, int script_count, char** script_paths) {
     std::FILE* out = std::fopen(out_path, "wb");
     if (out == nullptr) {
-        log_error("vne_bake: no se pudo escribir '%s'", out_path);
+        log_error("sz_bake: no se pudo escribir '%s'", out_path);
         return 1;
     }
 
@@ -573,7 +698,7 @@ int bake_catalog_extract(const char* out_path, int script_count, char** script_p
     for (int i = 0; i < script_count; ++i) {
         std::string source;
         if (!read_whole_file(script_paths[i], &source)) {
-            log_error("vne_bake: no se pudo leer '%s'", script_paths[i]);
+            log_error("sz_bake: no se pudo leer '%s'", script_paths[i]);
             std::fclose(out);
             return 1;
         }
@@ -603,7 +728,7 @@ int bake_catalog_extract(const char* out_path, int script_count, char** script_p
             // detectarlo cuesta un diccionario y no detectarlo cuesta una tarde.
             std::string previous_text;
             if (!catalog_keys.add(entry.text, fnv1a_u32(entry.text.c_str()), &previous_text)) {
-                log_error("vne_bake catalog-extract: colision de hash entre dos textos "
+                log_error("sz_bake catalog-extract: colision de hash entre dos textos "
                           "distintos, que compartirian traduccion: '%s' y '%s'",
                           entry.text.c_str(), previous_text.c_str());
                 std::fclose(out);
@@ -618,12 +743,12 @@ int bake_catalog_extract(const char* out_path, int script_count, char** script_p
     }
 
     std::fclose(out);
-    log_info("vne_bake: catalogo extraido a '%s' (%zu entradas de %d guiones)", out_path,
+    log_info("sz_bake: catalogo extraido a '%s' (%zu entradas de %d guiones)", out_path,
               total_entries, script_count);
     return 0;
 }
 
-// vne_bake catalog-compile <entrada.csv> <salida.vnl>: hornea un catalogo (extraido o
+// sz_bake catalog-compile <entrada.csv> <salida.vnl>: hornea un catalogo (extraido o
 // traducido a mano conservando las mismas claves, ver docs/DECISIONS.md ADR-0046) a
 // binario. La clave real en runtime es solo el hash hexadecimal al final de la clave
 // "archivo:linea:hash" (SPEC.md #9.2): el traductor nunca lo recalcula, solo conserva la
@@ -631,7 +756,7 @@ int bake_catalog_extract(const char* out_path, int script_count, char** script_p
 int bake_catalog_compile(const char* in_path, const char* out_path) {
     std::string source;
     if (!read_whole_file(in_path, &source)) {
-        log_error("vne_bake: no se pudo leer '%s'", in_path);
+        log_error("sz_bake: no se pudo leer '%s'", in_path);
         return 1;
     }
 
@@ -652,14 +777,14 @@ int bake_catalog_compile(const char* in_path, const char* out_path) {
 
         usize last_colon = key.find_last_of(':');
         if (last_colon == std::string::npos) {
-            log_error("vne_bake: '%s' clave mal formada: '%s'", in_path, key.c_str());
+            log_error("sz_bake: '%s' clave mal formada: '%s'", in_path, key.c_str());
             continue;
         }
         std::string hex = key.substr(last_colon + 1);
         u32          key_hash = 0;
         auto res = std::from_chars(hex.data(), hex.data() + hex.size(), key_hash, 16);
         if (res.ec != std::errc()) {
-            log_error("vne_bake: '%s' hash invalido en clave '%s'", in_path, key.c_str());
+            log_error("sz_bake: '%s' hash invalido en clave '%s'", in_path, key.c_str());
             continue;
         }
         entries.push_back(Entry{key_hash, text});
@@ -679,7 +804,7 @@ int bake_catalog_compile(const char* in_path, const char* out_path) {
 
     std::FILE* out = std::fopen(out_path, "wb");
     if (out == nullptr) {
-        log_error("vne_bake: no se pudo escribir '%s'", out_path);
+        log_error("sz_bake: no se pudo escribir '%s'", out_path);
         return 1;
     }
     u32 header[4] = {k_vnl_magic_local, k_vnl_version_local, static_cast<u32>(entries.size()),
@@ -696,38 +821,38 @@ int bake_catalog_compile(const char* in_path, const char* out_path) {
     }
     std::fclose(out);
     if (!ok) {
-        log_error("vne_bake: escritura incompleta de '%s'", out_path);
+        log_error("sz_bake: escritura incompleta de '%s'", out_path);
         return 1;
     }
 
-    log_info("vne_bake: %s -> %s (%zu entradas)", in_path, out_path, entries.size());
+    log_info("sz_bake: %s -> %s (%zu entradas)", in_path, out_path, entries.size());
     return 0;
 }
 
-// vne_bake map <entrada.tmx> <salida.vnm> (SPEC.md #11). El escaner de TMX vive en
-// script/map_bake.cpp (vne_script_tools) y no aqui, para que los tests puedan
+// sz_bake map <entrada.tmx> <salida.vnm> (SPEC.md #11). El escaner de TMX vive en
+// script/map_bake.cpp (sz_content) y no aqui, para que los tests puedan
 // ejercitarlo con un TMX literal sin archivos ni subprocesos: esta funcion es solo la
 // capa de E/S y de mensajes.
 int bake_map(const char* in_path, const char* out_path) {
     std::string xml;
     if (!read_whole_file(in_path, &xml)) {
-        log_error("vne_bake: no se pudo leer '%s'", in_path);
+        log_error("sz_bake: no se pudo leer '%s'", in_path);
         return 1;
     }
 
     ParsedMap   map;
     std::string error;
     if (!tmx_parse(xml, &map, &error)) {
-        log_error("vne_bake: '%s': %s", in_path, error.c_str());
+        log_error("sz_bake: '%s': %s", in_path, error.c_str());
         return 1;
     }
 
     if (!write_vnm(out_path, map)) {
-        log_error("vne_bake: no se pudo escribir '%s'", out_path);
+        log_error("sz_bake: no se pudo escribir '%s'", out_path);
         return 1;
     }
 
-    log_info("vne_bake: %s -> %s (%ux%u tiles, %zu triggers)", in_path, out_path, map.grid_w,
+    log_info("sz_bake: %s -> %s (%ux%u tiles, %zu triggers)", in_path, out_path, map.grid_w,
               map.grid_h, map.triggers.size());
     return 0;
 }
@@ -796,13 +921,13 @@ int bake_atlas_from_png(const std::vector<std::string>& png_paths) {
         int w = 0, h = 0, channels = 0;
         u8* pixels = stbi_load(path.c_str(), &w, &h, &channels, 4);
         if (pixels == nullptr) {
-            log_error("vne_bake: no se pudo decodificar '%s'", path.c_str());
+            log_error("sz_bake: no se pudo decodificar '%s'", path.c_str());
             continue;
         }
         images.push_back(DecodedImage{w, h, pixels, logical_name_from_path(path)});
     }
     if (images.empty()) {
-        log_error("vne_bake: ningun PNG valido en assets_src/png/");
+        log_error("sz_bake: ningun PNG valido en assets_src/png/");
         return 1;
     }
 
@@ -811,7 +936,7 @@ int bake_atlas_from_png(const std::vector<std::string>& png_paths) {
         for (const DecodedImage& img : images) {
             stbi_image_free(img.pixels);
         }
-        log_error("vne_bake: %zu sprites no caben en un atlas de %dx%d", images.size(),
+        log_error("sz_bake: %zu sprites no caben en un atlas de %dx%d", images.size(),
                   k_atlas_w, k_atlas_h);
         return 1;
     }
@@ -836,7 +961,7 @@ int bake_atlas_from_png(const std::vector<std::string>& png_paths) {
     desc.channels   = 4;
     desc.colorspace = QOI_SRGB;
     if (!qoi_write("assets_baked/atlas_00.qoi", atlas.data(), &desc)) {
-        log_error("vne_bake: fallo al escribir assets_baked/atlas_00.qoi");
+        log_error("sz_bake: fallo al escribir assets_baked/atlas_00.qoi");
         return 1;
     }
     std::vector<std::string> names;
@@ -845,11 +970,11 @@ int bake_atlas_from_png(const std::vector<std::string>& png_paths) {
         names.push_back(img.name);
     }
     if (!write_atlas_bin("assets_baked/atlas_00.bin", k_atlas_w, k_atlas_h, placements, names)) {
-        log_error("vne_bake: fallo al escribir assets_baked/atlas_00.bin");
+        log_error("sz_bake: fallo al escribir assets_baked/atlas_00.bin");
         return 1;
     }
 
-    log_info("vne_bake: atlas_00.qoi (%dx%d, %zu sprites reales de assets_src/png/, CC0 "
+    log_info("sz_bake: atlas_00.qoi (%dx%d, %zu sprites reales de assets_src/png/, CC0 "
               "Kenney UI Pack) y atlas_00.bin generados",
               k_atlas_w, k_atlas_h, images.size());
     return 0;
@@ -911,15 +1036,15 @@ int bake_atlas_procedural_fallback() {
     desc.channels   = 4;
     desc.colorspace = QOI_SRGB;
     if (!qoi_write("assets_baked/atlas_00.qoi", pixels.data(), &desc)) {
-        log_error("vne_bake: fallo al escribir assets_baked/atlas_00.qoi");
+        log_error("sz_bake: fallo al escribir assets_baked/atlas_00.qoi");
         return 1;
     }
     if (!write_atlas_bin("assets_baked/atlas_00.bin", k_w, k_h, sprites, names)) {
-        log_error("vne_bake: fallo al escribir assets_baked/atlas_00.bin");
+        log_error("sz_bake: fallo al escribir assets_baked/atlas_00.bin");
         return 1;
     }
 
-    log_info("vne_bake: assets_src/png/ vacio, atlas_00.qoi procedural (%dx%d, rejilla "
+    log_info("sz_bake: assets_src/png/ vacio, atlas_00.qoi procedural (%dx%d, rejilla "
               "%dx%d) generado como respaldo",
               k_w, k_h, k_grid_cols, k_grid_rows);
     return 0;
@@ -988,12 +1113,12 @@ int bake_placeholders() {
         char path[256];
         std::snprintf(path, sizeof(path), "assets_src/png/%s.png", spec.name);
         if (stbi_write_png(path, spec.w, spec.h, 4, pixels.data(), spec.w * 4) == 0) {
-            log_error("vne_bake: fallo al escribir '%s'", path);
+            log_error("sz_bake: fallo al escribir '%s'", path);
             return 1;
         }
     }
 
-    log_info("vne_bake: %zu placeholders de actor/fondo generados en assets_src/png/ "
+    log_info("sz_bake: %zu placeholders de actor/fondo generados en assets_src/png/ "
               "(rectangulos de color con aspa, NO son arte: sustituyelos dejando caer un "
               "PNG con el mismo nombre)",
               sizeof(specs) / sizeof(specs[0]));
@@ -1042,11 +1167,11 @@ PakEntryType pak_type_for_extension(const std::string& logical_name) {
     return PakEntryType::Other;
 }
 
-// vne_bake pack <salida.pak> <assets_baked_dir> <assets_src_dir>. assets_baked_dir se
+// sz_bake pack <salida.pak> <assets_baked_dir> <assets_src_dir>. assets_baked_dir se
 // recorre entero y plano (atlas, .vnc, .vnm, .vnl: todo ya horneado con nombres finales).
 // De assets_src_dir solo entran ttf/ y ogg/, con ese prefijo en su nombre logico dentro
 // del pak -- son los dos unicos tipos que SPEC.md #11 todavia no hornea a un formato
-// propio (vne_bake font no existe hasta M13; audio es copia directa desde M6), asi que
+// propio (sz_bake font no existe hasta M13; audio es copia directa desde M6), asi que
 // esta es la unica forma de que Ship no dependa de leerlos sueltos de assets_src/.
 int bake_pack(const char* out_path, const char* baked_dir, const char* src_dir) {
     struct PendingEntry { std::string logical_name; std::string bytes; PakEntryType type; };
@@ -1056,7 +1181,7 @@ int bake_pack(const char* out_path, const char* baked_dir, const char* src_dir) 
         for (const std::string& path : paths) {
             std::string content;
             if (!read_whole_file(path.c_str(), &content)) {
-                log_error("vne_bake pack: no se pudo leer '%s'", path.c_str());
+                log_error("sz_bake pack: no se pudo leer '%s'", path.c_str());
                 continue;
             }
             usize       slash    = path.find_last_of("/\\");
@@ -1115,7 +1240,7 @@ struct OggCatalogRecord {
             // no apunta a ningun sitio.
             std::string previous_track;
             if (!track_ids.add(name_no_ext, record.track_id, &previous_track)) {
-                log_error("vne_bake pack: colision de hash entre las pistas '%s' y '%s' "
+                log_error("sz_bake pack: colision de hash entre las pistas '%s' y '%s' "
                           "(las dos dan track_id %u). Renombra una de las dos.",
                           name_no_ext.c_str(), previous_track.c_str(), record.track_id);
                 return 1;
@@ -1146,7 +1271,7 @@ struct OggCatalogRecord {
             record.map_id = static_cast<u16>(fnv1a_u32(name_no_ext.c_str()) % 65536u);
             std::string previous_map;
             if (!map_ids.add(name_no_ext, record.map_id, &previous_map)) {
-                log_error("vne_bake pack: colision de hash entre los mapas '%s' y '%s' "
+                log_error("sz_bake pack: colision de hash entre los mapas '%s' y '%s' "
                           "(los dos dan map_id %u). Renombra uno de los dos.",
                           name_no_ext.c_str(), previous_map.c_str(), record.map_id);
                 return 1;
@@ -1162,7 +1287,7 @@ struct OggCatalogRecord {
     }
 
     if (pending.empty()) {
-        log_error("vne_bake pack: no se encontro ningun asset en '%s' ni en '%s'", baked_dir,
+        log_error("sz_bake pack: no se encontro ningun asset en '%s' ni en '%s'", baked_dir,
                    src_dir);
         return 1;
     }
@@ -1175,7 +1300,7 @@ struct OggCatalogRecord {
 
     std::FILE* out = std::fopen(out_path, "wb");
     if (out == nullptr) {
-        log_error("vne_bake pack: no se pudo escribir '%s'", out_path);
+        log_error("sz_bake pack: no se pudo escribir '%s'", out_path);
         return 1;
     }
 
@@ -1196,18 +1321,21 @@ struct OggCatalogRecord {
     }
     std::fclose(out);
 
-    log_info("vne_bake: %zu assets empaquetados en '%s'", pending.size(), out_path);
+    log_info("sz_bake: %zu assets empaquetados en '%s'", pending.size(), out_path);
     return 0;
 }
 
 }  // namespace
 
-// Uso: vne_bake [atlas | script <in.vns> <out.vnc> | map <in.tmx> <out.vnm> |
+// Uso: sz_bake [atlas | script <in.vns> <out.vnc> | map <in.tmx> <out.vnm> |
 //                catalog-extract <out.csv> <guion.vns...> | catalog-compile <in.csv> <out.vnl> |
 //                pack <out.pak> <assets_baked_dir> <assets_src_dir>]
 // Sin argumentos (o "atlas"): empaqueta assets_src/png/*.png si hay alguno (ADR-0025), o
 // genera el placeholder procedural de respaldo si no.
 int main(int argc, char** argv) {
+    if (argc == 3 && std::strcmp(argv[1], "input-fixture") == 0) {
+        return bake_input_fixture(argv[2]);
+    }
     if (argc == 3 && std::strcmp(argv[1], "save-fixtures") == 0) {
         return bake_save_fixtures(argv[2]);
     }
@@ -1225,35 +1353,35 @@ int main(int argc, char** argv) {
     }
     if (argc >= 2 && std::strcmp(argv[1], "pack") == 0) {
         if (argc < 5) {
-            log_error("uso: vne_bake pack <salida.pak> <assets_baked_dir> <assets_src_dir>");
+            log_error("uso: sz_bake pack <salida.pak> <assets_baked_dir> <assets_src_dir>");
             return 1;
         }
         return bake_pack(argv[2], argv[3], argv[4]);
     }
     if (argc >= 2 && std::strcmp(argv[1], "script") == 0) {
         if (argc < 4) {
-            log_error("uso: vne_bake script <entrada.vns> <salida.vnc>");
+            log_error("uso: sz_bake script <entrada.vns> <salida.vnc>");
             return 1;
         }
         return bake_script(argv[2], argv[3]);
     }
     if (argc >= 2 && std::strcmp(argv[1], "map") == 0) {
         if (argc < 4) {
-            log_error("uso: vne_bake map <entrada.tmx> <salida.vnm>");
+            log_error("uso: sz_bake map <entrada.tmx> <salida.vnm>");
             return 1;
         }
         return bake_map(argv[2], argv[3]);
     }
     if (argc >= 2 && std::strcmp(argv[1], "catalog-extract") == 0) {
         if (argc < 4) {
-            log_error("uso: vne_bake catalog-extract <salida.csv> <guion1.vns> [guion2.vns ...]");
+            log_error("uso: sz_bake catalog-extract <salida.csv> <guion1.vns> [guion2.vns ...]");
             return 1;
         }
         return bake_catalog_extract(argv[2], argc - 3, argv + 3);
     }
     if (argc >= 2 && std::strcmp(argv[1], "catalog-compile") == 0) {
         if (argc < 4) {
-            log_error("uso: vne_bake catalog-compile <entrada.csv> <salida.vnl>");
+            log_error("uso: sz_bake catalog-compile <entrada.csv> <salida.vnl>");
             return 1;
         }
         return bake_catalog_compile(argv[2], argv[3]);

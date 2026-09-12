@@ -129,7 +129,7 @@ TEST_CASE("asset_validate: leer un atlas que no existe devuelve false y no revie
 }
 
 TEST_CASE("asset_validate: el atlas horneado del build carga y trae los placeholders") {
-    // Este si toca el atlas real: comprueba que el formato v3 que escribe vne_bake es el
+    // Este si toca el atlas real: comprueba que el formato v3 que escribe sz_bake es el
     // que lee el validador (son dos binarios distintos con el layout duplicado a
     // proposito, asi que conviene fijarlo con un test).
     AssetRegistry r;

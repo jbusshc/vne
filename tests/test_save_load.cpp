@@ -4,8 +4,8 @@
 #include <cstdio>
 #include <cstring>
 
-#include "base/hash.h"
-#include "base/crc32.h"
+#include "core/hash.h"
+#include "core/crc32.h"
 #include "vm/symbols_load.h"
 #include "vm/save.h"
 

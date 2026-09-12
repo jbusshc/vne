@@ -3,9 +3,9 @@
 #include <cstdio>
 #include <cstring>
 
-#include "assets/pak.h"
-#include "base/hash.h"
-#include "base/log.h"
+#include "vfs/pak.h"
+#include "core/hash.h"
+#include "core/log.h"
 #include "platform/files.h"
 
 namespace {

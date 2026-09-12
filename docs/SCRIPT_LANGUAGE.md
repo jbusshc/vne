@@ -192,8 +192,21 @@ rechaza diciéndolo. La vuelta es usar una variable, o envolver el `@choice` en 
 ```
 
 Cada opción es `"texto" [if var OP valor] -> etiqueta`, indentada un nivel respecto al
-`@choice`. Una opción con condición que no se cumple no se puede elegir. El juego espera
-en el `@choice` hasta que el jugador elige; en modo skip se toma la primera opción válida.
+`@choice`. El juego espera en el `@choice` hasta que el jugador elige; en modo skip se toma
+la primera opción válida.
+
+**Como mucho 8 opciones por `@choice`** (`k_max_choice_options`). Pasarse es error de
+compilación con archivo y línea, no un truncado silencioso: la UI reserva sitio para un
+número fijo de opciones porque no puede asignar memoria dentro del frame (M15).
+
+Una opción con condición que no se cumple **se ve en pantalla, apagada, y no se puede
+elegir** — ni pinchándola ni con las flechas, que la saltan. Se muestra en vez de
+esconderse porque que una opción exista pero no esté disponible es información para el
+jugador, y ocultarla haría que el menú cambiara de tamaño según el estado de las variables.
+
+Las opciones se eligen con las flechas y intro, con las teclas `1`..`8`, o con el ratón
+(pasar por encima las resalta, un clic las elige). Desde M15: hasta entonces el juego se
+quedaba parado para siempre al llegar a un `@choice`, porque nada las dibujaba.
 
 ## Audio
 

@@ -2,16 +2,16 @@
 #include <doctest/doctest.h>
 
 #include "assets/assets.h"
-#include "assets/pak.h"
-#include "base/arena.h"
-#include "gfx/gfx.h"
+#include "vfs/pak.h"
+#include "core/arena.h"
+#include "render/render.h"
 #include "platform/window.h"
 #include "test_config.h"
 #include "test_fonts.h"
 #include "text/font.h"
 #include "text/glyph_cache.h"
 #include "audio/audio.h"
-#include "script/lua_bindings.h"
+#include "lua/lua_bindings.h"
 #include "vm/backlog.h"
 #include "vm/rollback.h"
 #include "vm/symbols_load.h"
@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
     g_arena_perm  = arena_create(64ull * 1024 * 1024, "test_perm");
     g_arena_scene = arena_create(64ull * 1024 * 1024, "test_scene");
     g_arena_frame = arena_create(8ull * 1024 * 1024, "test_frame");
-    // "." y no VNE_SOURCE_DIR (que en la practica solo hacia falta para los .ttf, ver
+    // "." y no SZ_SOURCE_DIR (que en la practica solo hacia falta para los .ttf, ver
     // git blame): el directorio de build ya se autocontiene con assets_baked/ y una
     // copia propia de assets_src/ttf|ogg (CMakeLists.txt las copia ahi), exactamente
     // igual que main.cpp (M11). Antes de audio_init(): scan_music_catalog() pasara a
@@ -47,13 +47,13 @@ int main(int argc, char** argv) {
 
     PlatformWindow window{};
     bool           have_window = platform_window_create(&window, "vne tests", 64, 64);
-    bool           have_gfx    = have_window && gfx_init(&window);
+    bool           have_gfx    = have_window && render_init(&window);
     if (have_gfx) {
-        // Algunos tests de M2 llaman a text_draw() (que llama a gfx_draw_sprite()), asi
-        // que hace falta al menos un gfx_begin_frame() para que la cola de sprites de
+        // Algunos tests de M2 llaman a text_draw() (que llama a render_draw_sprite()), asi
+        // que hace falta al menos un render_begin_frame() para que la cola de sprites de
         // g_arena_frame este inicializada.
         glyph_cache_init();
-        gfx_begin_frame();
+        render_begin_frame();
         // Despues del sistema de texturas (reserva el handle placeholder) y con el backend
         // ya montado arriba: assets_init() arranca el hilo de IO.
         assets_init();
@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
     if (have_gfx) {
         assets_shutdown();  // para el hilo de IO antes de tirar el contexto grafico
         glyph_cache_shutdown();
-        gfx_shutdown();
+        render_shutdown();
     }
     if (have_window) {
         platform_window_destroy(&window);

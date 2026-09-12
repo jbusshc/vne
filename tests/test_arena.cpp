@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "base/arena.h"
+#include "core/arena.h"
 
 TEST_CASE("arena_alloc respeta la alineacion pedida") {
     Arena a = arena_create(1024, "test");
@@ -44,8 +44,8 @@ TEST_CASE("arena_reset libera todo el espacio usado") {
     arena_destroy(&a);
 }
 
-#if defined(VN_DEBUG)
-TEST_CASE("arena_reset rellena la memoria con 0xCD en VN_DEBUG") {
+#if defined(SZ_DEBUG)
+TEST_CASE("arena_reset rellena la memoria con 0xCD en SZ_DEBUG") {
     Arena a = arena_create(16, "test");
 
     u8* p = static_cast<u8*>(arena_alloc(&a, 16, 1));

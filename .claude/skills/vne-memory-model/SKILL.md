@@ -151,11 +151,20 @@ alrededor de la llamada, **nunca más ancho que eso** (por ejemplo: `hb_shape` s
 | `hot_reload_update` | Recorrer los directorios vigilados cuesta 673 asignaciones de SDL cada 500 ms; solo en builds `Debug`/`Dev`. | ADR-0058 |
 | `platform_poll_events` | SDL inicializa su subsistema de eventos de forma diferida (9 asignaciones, una vez, en un frame impredecible). **No es una suspensión sin más: es un presupuesto de por vida de 64**, y agotado el presupuesto el guard vuelve a vigilar. | ADR-0066 |
 | El editor abierto | ImGui asigna al dimensionar sus buffers (54 en su primer frame, luego ~0); solo en builds `Dev`. | ADR-0060 |
+| Guardar o cargar partida, y abrir el panel de guardado | `qoi_encode` de la miniatura asigna 2 veces al guardar; decodificar las cuatro miniaturas al abrir el panel, más. Operación pesada y puntual pedida por el jugador. | ADR-0035 (ampliada), M15 |
+| `catalog_load` y `script_load` | Leer el archivo va por SDL, que asigna 13 veces. Ocurre dentro del frame al cambiar de idioma desde el menú y al pisar un trigger del mapa. La suspensión vive **dentro** de esas dos funciones, no en sus llamantes: tienen varios y dos corren en el frame. | ADR-0073 |
 
 Fíjate en cuáles **no existen en Ship** porque son herramienta de desarrollo: el subproceso del
 editor, `hot_reload_update` y el editor abierto. Las que sí corren en el juego distribuido
-(`LuaCall`, cargar un asset, `platform_poll_events`) están acotadas al máximo: al decodificador
-concreto, o a un presupuesto que se agota.
+(`LuaCall`, cargar un asset, `platform_poll_events`, guardar/cargar, `catalog_load`/`script_load`)
+están acotadas al máximo: al decodificador concreto, a una sola llamada, o a un presupuesto que
+se agota.
+
+Las tres últimas las destapó M15 al reproducir una sesión de input grabada, y de ahí sale la
+lección que conviene no volver a aprender: **hasta M15 la regla de cero heap solo se había
+verificado en frames donde el jugador no hace nada.** Un frame en el que se guarda, se cambia
+de idioma o se pisa un trigger no se había medido nunca. Si añades un camino que solo ocurre
+cuando el jugador hace algo, mídelo grabando una sesión que lo haga.
 
 La primera la decidió el usuario tras pararse a preguntar, porque era un conflicto real entre
 dos reglas del proyecto; la ampliación de la segunda también. **No amplíes esta lista por tu
@@ -189,13 +198,8 @@ que conviene tenerlo presente:
 
 ## Hilos
 
-**Hoy el motor es de un solo hilo.** El hilo de carga de assets que describe SPEC.md §7.4 no
-existe todavía: `src/assets/` está vacío y toda carga es síncrona. Lo construye M11, así que
-hasta entonces no hay ninguna cola ni `assets_process_completed_loads()` al que llamar, por
-mucho que otras partes de la documentación lo den por hecho.
-
-Cuando exista, el diseño es: solo dos hilos, el principal y el de carga. Cada uno con su propia
-arena de scratch — **las arenas no son thread-safe y no se comparten**. El hilo de IO comunica
+**Dos hilos desde M11: el principal y el de carga de assets** (SPEC.md §7.4), y no más.
+Cada uno con su propia arena de scratch — **las arenas no son thread-safe y no se comparten**. El hilo de IO comunica
 resultados por una cola con un mutex y el principal los integra en
 `assets_process_completed_loads()`, que es el único punto donde un asset cargado entra en el
 mundo del juego.

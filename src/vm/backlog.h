@@ -1,7 +1,7 @@
 #pragma once
 #include <type_traits>
 
-#include "base/types.h"
+#include "core/types.h"
 
 // Historial de dialogo (SPEC.md #8.4): vive fuera de GameState porque no afecta a la
 // logica del juego, pero se serializa a continuacion en el mismo archivo de guardado.

@@ -1,5 +1,5 @@
 #pragma once
-#include "base/types.h"
+#include "core/types.h"
 
 // Catalogo de mapas por map_id (M13). Mismo problema y misma solucion que el catalogo de
 // musica de M6 (ADR-0034): `GameState.map_id` es un `u16` fijo por SPEC.md #8.2, tiene que
@@ -14,7 +14,7 @@
 // colisiones se detectan al hornear (ADR-0063).
 
 // Escanea los mapas disponibles. En backend suelto recorre assets_baked/ buscando `.vnm`;
-// en empaquetado lee `map_catalog.bin`, que escribe `vne_bake pack` (no hay directorio que
+// en empaquetado lee `map_catalog.bin`, que escribe `sz_bake pack` (no hay directorio que
 // recorrer dentro de un .pak). Llamar una vez al arrancar, despues de montar el backend.
 void map_catalog_init();
 

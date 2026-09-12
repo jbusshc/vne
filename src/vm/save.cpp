@@ -1,6 +1,6 @@
 #include "vm/save.h"
 
-#include "base/hash.h"
+#include "core/hash.h"
 #include "vm/symbols_load.h"
 
 #include <cstddef>
@@ -8,8 +8,8 @@
 #include <cstring>
 
 #include "audio/audio.h"
-#include "base/crc32.h"
-#include "base/log.h"
+#include "core/crc32.h"
+#include "core/log.h"
 
 namespace {
 constexpr u32 k_vnsave_magic = 0x56534E56u;  // 'VNSV'

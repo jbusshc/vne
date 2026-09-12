@@ -9,7 +9,7 @@
 #include "script/map_bake.h"
 
 // Tests del escaner de TMX (ADR-0044). Existen porque los tres bugs que cubren se
-// colaron cuando este codigo vivia dentro del main.cpp de vne_bake, donde ningun test
+// colaron cuando este codigo vivia dentro del main.cpp de sz_bake, donde ningun test
 // podia alcanzarlo.
 
 namespace {

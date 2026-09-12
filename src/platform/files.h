@@ -1,11 +1,11 @@
 #pragma once
-#include "base/arena.h"
-#include "base/types.h"
+#include "core/arena.h"
+#include "core/types.h"
 
 // Filesystem portable sobre SDL3 (SPEC.md #2, "Como se programa la portabilidad": lo
 // especifico del sistema operativo vive detras de platform/, que es la unica capa que
-// habla con SDL3 para filesystem entre otras cosas). Codigo de runtime (vne_base/
-// vne_game/vne_tests) pasa por aqui, nunca por <windows.h>/<dirent.h> directamente.
+// habla con SDL3 para filesystem entre otras cosas). Codigo de runtime (sz_engine/
+// sz_runtime/sz_tests) pasa por aqui, nunca por <windows.h>/<dirent.h> directamente.
 //
 // tools/bake/ es la excepcion deliberada: enlaza sin SDL3 a proposito (ver el comentario
 // de su propio CMakeLists.txt, "no abre ventana ni dibuja nada") y mantiene su propio

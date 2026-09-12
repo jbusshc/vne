@@ -3,8 +3,9 @@
 #include <algorithm>
 #include <cstring>
 
-#include "assets/pak.h"
-#include "base/log.h"
+#include "vfs/pak.h"
+#include "core/heap_guard.h"
+#include "core/log.h"
 
 namespace {
 const u32*  g_keys          = nullptr;
@@ -22,11 +23,18 @@ CatalogLoadResult catalog_load(const char* logical_name, Arena* arena) {
     catalog_clear();
 
     // M11: ya no abre directamente por ruta de archivo -- se resuelve a traves del
-    // backend activo (directorio suelto o .pak, ver assets/pak.h), mismo patron que
+    // backend activo (directorio suelto o .pak, ver vfs/pak.h), mismo patron que
     // vm/script_load.cpp y MapMode::load.
+    // Leer el archivo pasa por SDL, que asigna (13 veces, medido en M15 al reproducir la
+    // sesion grabada que cambia de idioma). Misma excepcion acotada que ADR-0035: cargar un
+    // asset bajo demanda, aqui disparado por el jugador al cambiar de idioma desde el menu.
+    // Va aqui dentro y no en el llamante para que valga para todos por igual.
     const u8* bytes = nullptr;
     usize     size  = 0;
-    if (!pak_resolve_into_arena(logical_name, arena, &bytes, &size)) {
+    heap_guard_suspend();
+    bool found = pak_resolve_into_arena(logical_name, arena, &bytes, &size);
+    heap_guard_resume();
+    if (!found) {
         log_error("catalog_load: no se encontro '%s'", logical_name);
         return CatalogLoadResult::NotFound;
     }

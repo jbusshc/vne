@@ -3,10 +3,10 @@
 #include <ostream>
 #include <string>
 
-#include "base/arena.h"
-#include "gfx/atlas.h"
+#include "core/arena.h"
+#include "render/atlas.h"
 #include "vm/script_load.h"
-#include "vm/state.h"
+#include "formats/state.h"
 #include "vm/symbols_load.h"
 #include "vm/vm.h"
 
@@ -20,7 +20,7 @@
 // signifique lo mismo en todos y que GameState pueda sobrevivir a un guardado entre guiones
 // distintos.
 //
-// Lo unico que este test no cubre es la llamada final a gfx_draw_sprite, que necesita GPU.
+// Lo unico que este test no cubre es la llamada final a render_draw_sprite, que necesita GPU.
 
 TEST_CASE("escena: los ids del .vnc resuelven por la tabla de simbolos y estan en el atlas") {
     CompiledScript script{};

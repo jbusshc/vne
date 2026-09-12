@@ -6,12 +6,12 @@
 
 #include <SDL3/SDL.h>
 
-#include "base/arena.h"
+#include "core/arena.h"
 #include "game/config.h"
 #include "game/locales.h"
 #include "game/menu_mode.h"
 #include "text/catalog.h"
-#include "vm/state.h"
+#include "formats/state.h"
 
 // Preferencias del jugador (M14). El criterio de SPEC.md #12 es "cambiar el idioma, cerrar el
 // proceso y volver a abrirlo mantiene el idioma elegido". No se puede cerrar y reabrir el

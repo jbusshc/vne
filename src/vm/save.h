@@ -1,7 +1,7 @@
 #pragma once
-#include "base/types.h"
+#include "core/types.h"
 #include "vm/backlog.h"
-#include "vm/state.h"
+#include "formats/state.h"
 
 // Formato .vnsave (SPEC.md #8.3). La miniatura llega en M7 (ADR-0026 la difirio desde
 // M4): se codifica en QOI en vez de PNG (ADR de M7 en docs/DECISIONS.md — QOI ya esta en

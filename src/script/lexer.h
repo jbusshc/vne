@@ -3,9 +3,9 @@
 #include <string_view>
 #include <vector>
 
-#include "base/types.h"
+#include "core/types.h"
 
-// Uso exclusivo de herramientas offline (vne_bake): nunca se linka en vne_game (SPEC.md
+// Uso exclusivo de herramientas offline (sz_bake): nunca se linka en sz_runtime (SPEC.md
 // #9.3, "cero parsing en release"). std::string/std::vector son aceptables aqui porque
 // este codigo jamas corre en el bucle de frame del juego (skill vne-memory-model).
 

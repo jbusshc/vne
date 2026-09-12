@@ -15,14 +15,20 @@ portabilidad y una ruta abierta a 3D simple en el futuro.
 
 ## Estado
 
-M0–M10 están implementados y cerrados: esqueleto, renderizado 2D, texto, VM y DSL,
-guardado/rollback, ramificación, audio, UI de novela visual, editor, MapMode y
-localización. El motor se juega de principio a fin.
+**M0–M15 están implementados y cerrados**, con lo que la hoja de ruta de `docs/SPEC.md` §12
+queda completa: esqueleto, renderizado 2D, texto, VM y DSL, guardado/rollback, ramificación,
+audio, UI de novela visual, editor, `MapMode`, localización, sistema de assets y `game.pak`,
+presentación y jugabilidad (transiciones, marcado con efecto, polifonía, colisión AABB),
+integridad de datos y herramientas offline, configuración y localización completas, e
+interacción y testabilidad de la UI.
 
-Quedan cinco hitos por delante (M11–M15, ver `docs/SPEC.md` §12 y ADR-0050), que cierran lo
-que M0–M10 dejó fuera: el sistema de assets de §7.4 y el `game.pak` de §11 —
-`src/assets/` está vacío y hoy toda carga es síncrona—, los comandos `Move` y `Transition`,
-la validación de identificadores al compilar, `config.ini` y el soporte de ratón.
+El juego se juega de principio a fin **con teclado o solo con el ratón**, y una sesión de
+input grabada (`--record-input` / `--replay-input`, formato `.vnrec`) se reproduce dentro de la
+suite de tests: es lo que permite verificar la UI real en vez de su lógica interna.
+
+De la especificación queda §13.1 (compilar y verificar en Linux y macOS, escribir el backend
+Metal), que no es un hito porque está bloqueado por falta de máquinas, y §13.2 (3D), fuera de
+alcance.
 
 Solo Windows está **verificado**. El código se escribe portable desde el principio —es la
 prioridad 2 de `docs/SPEC.md` §1, con reglas concretas en §2— pero Linux y macOS no se han

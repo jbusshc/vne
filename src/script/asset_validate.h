@@ -13,7 +13,7 @@
 // atlas horneado, y separarlo permite testear la validacion con un registro fabricado a
 // mano en vez de depender del atlas real.
 //
-// Solo herramientas offline (`vne_script_tools`): el juego nunca valida nada de esto, lee
+// Solo herramientas offline (`sz_content`): el juego nunca valida nada de esto, lee
 // IDs ya internados de un `.vnc` (skill vne-script-dsl, "cero parsing en release").
 
 // Convencion de nombres (ADR de M13): un actor con su pose es el sprite
@@ -32,7 +32,7 @@ struct AssetRegistry {
     bool contains(const std::string& name) const;
 
     // Devuelve false si el archivo falta o no es un atlas v3. El llamante decide si eso es
-    // fatal: `vne_bake script` avisa y sigue sin validar, para no volver imposible compilar
+    // fatal: `sz_bake script` avisa y sigue sin validar, para no volver imposible compilar
     // un guion en un arbol donde todavia no se ha horneado el atlas.
     static bool load_from_atlas_bin(const char* path, AssetRegistry* out);
 };

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(vne LANGUAGES CXX C)
+project(SystemZ LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,9 +38,9 @@ CPMAddPackage(
     "SDL_EXAMPLES OFF"
 )
 if(TARGET SDL3::SDL3)
-  set(VNE_SDL3_TARGET SDL3::SDL3)
+  set(SZ_SDL3_TARGET SDL3::SDL3)
 else()
-  set(VNE_SDL3_TARGET SDL3::SDL3-static)
+  set(SZ_SDL3_TARGET SDL3::SDL3-static)
 endif()
 
 CPMAddPackage(
@@ -62,7 +62,7 @@ CPMAddPackage(
 
 # sokol_gfx.h pineado a un commit anterior al refactor de "sg_view" (23-ago-2025) que
 # reescribio la API de bindings: este commit usa la API clasica images[]/samplers[]/
-# image_sampler_pairs[] sobre la que estan escritos src/gfx/shaders.h y texture.cpp.
+# image_sampler_pairs[] sobre la que estan escritos src/rhi/shaders.h y texture.cpp.
 CPMAddPackage(
   NAME sokol
   GITHUB_REPOSITORY floooh/sokol
@@ -88,7 +88,7 @@ endif()
 
 # stb_image.h: SPEC.md #3 dice "solo en herramientas offline, nunca en runtime". Ahora
 # hace falta de verdad: assets_src/png/ tiene sprites reales (Kenney UI Pack, CC0) y
-# vne_bake los empaqueta con un shelf packer real en vez de la rejilla procedural de M1
+# sz_bake los empaqueta con un shelf packer real en vez de la rejilla procedural de M1
 # (ADR-0011 / ADR-0025, ver docs/DECISIONS.md).
 CPMAddPackage(
   NAME stb
@@ -117,13 +117,13 @@ endif()
 
 # Dear ImGui, rama docking (SPEC.md #3: "toda la UI de desarrollo"), solo para Debug/Dev.
 # SPEC.md #6 dice literalmente "en Ship, todo el codigo de src/editor/ queda excluido del
-# build": en vez de compilarlo vacio tras un #if defined(VN_EDITOR) (que dejaria simbolos
+# build": en vez de compilarlo vacio tras un #if defined(SZ_EDITOR) (que dejaria simbolos
 # de ImGui como codigo muerto pero presente), directamente no se añade ni ImGui ni
 # src/editor/ al target en una configuracion Ship — la unica forma de garantizar "cero
 # simbolos de ImGui" de verdad, no solo "cero uso". CMAKE_BUILD_TYPE es fijo por
 # configuracion (un directorio de build por preset, ver CMakePresets.json), asi que esta
 # comprobacion en tiempo de configuracion es fiable aqui.
-set(VNE_EDITOR_ENABLED $<NOT:$<CONFIG:Ship>>)
+set(SZ_EDITOR_ENABLED $<NOT:$<CONFIG:Ship>>)
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Ship")
   CPMAddPackage(
     NAME imgui
@@ -141,8 +141,8 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Ship")
     )
     target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR})
     # ImGui no compila limpio bajo -Wall -Wextra -Werror ajenos (SPEC.md #4 solo exige
-    # eso en el codigo propio del proyecto, ver el comentario de VNE_WARNING_FLAGS mas
-    # abajo): se compila con los flags por defecto del compilador, sin vne_apply_project_flags.
+    # eso en el codigo propio del proyecto, ver el comentario de SZ_WARNING_FLAGS mas
+    # abajo): se compila con los flags por defecto del compilador, sin sz_apply_project_flags.
   endif()
 endif()
 
@@ -199,14 +199,14 @@ endif()
 # las instalaciones de Visual Studio lo traen (falta si no se marco el componente individual
 # "C++ AddressSanitizer" en el instalador). Lo detectamos para no romper el build entero por
 # un componente opcional ausente; ver docs/DECISIONS.md.
-set(VNE_ASAN_AVAILABLE ON)
+set(SZ_ASAN_AVAILABLE ON)
 if(MSVC)
-  find_file(VNE_MSVC_ASAN_LIB
+  find_file(SZ_MSVC_ASAN_LIB
     NAMES clang_rt.asan_dynamic_runtime_thunk-x86_64.lib clang_rt.asan_dynamic_runtime_thunk.lib
     PATHS "$ENV{VCToolsInstallDir}lib/x64" "$ENV{VCToolsInstallDir}lib/onecore/x64"
   )
-  if(NOT VNE_MSVC_ASAN_LIB)
-    set(VNE_ASAN_AVAILABLE OFF)
+  if(NOT SZ_MSVC_ASAN_LIB)
+    set(SZ_ASAN_AVAILABLE OFF)
     message(WARNING
       "AddressSanitizer no disponible: falta el runtime clang_rt.asan en esta instalacion "
       "de MSVC (componente individual 'C++ AddressSanitizer' del VS Installer). La build "
@@ -217,28 +217,28 @@ endif()
 # Flags del proyecto (SPEC.md #4). Se aplican solo a nuestros propios targets, nunca a
 # dependencias de terceros traidas por CPM: SDL3 no compila limpio bajo -Werror ajeno.
 if(MSVC)
-  set(VNE_WARNING_FLAGS /W4 /WX)
-  set(VNE_LANG_FLAGS /GR- /EHs-c-)
+  set(SZ_WARNING_FLAGS /W4 /WX)
+  set(SZ_LANG_FLAGS /GR- /EHs-c-)
 else()
-  set(VNE_WARNING_FLAGS -Wall -Wextra -Werror)
-  set(VNE_LANG_FLAGS -fno-exceptions -fno-rtti)
+  set(SZ_WARNING_FLAGS -Wall -Wextra -Werror)
+  set(SZ_LANG_FLAGS -fno-exceptions -fno-rtti)
 endif()
 
-function(vne_apply_project_flags target)
-  target_compile_options(${target} PRIVATE ${VNE_WARNING_FLAGS} ${VNE_LANG_FLAGS})
+function(sz_apply_project_flags target)
+  target_compile_options(${target} PRIVATE ${SZ_WARNING_FLAGS} ${SZ_LANG_FLAGS})
   target_compile_definitions(${target} PRIVATE
-    $<$<CONFIG:Debug>:VN_DEBUG=1>
-    $<$<CONFIG:Dev>:VN_DEBUG=1>
-    $<$<CONFIG:Dev>:VN_EDITOR=1>
+    $<$<CONFIG:Debug>:SZ_DEBUG=1>
+    $<$<CONFIG:Dev>:SZ_DEBUG=1>
+    $<$<CONFIG:Dev>:SZ_EDITOR=1>
     $<$<CONFIG:Ship>:NDEBUG>
-    $<$<CONFIG:Ship>:VN_SHIPPING=1>
+    $<$<CONFIG:Ship>:SZ_SHIPPING=1>
   )
   if(MSVC)
     # fopen/fread/etc son estandar y portables; el aviso de "usa fopen_s" de MSVC no
     # aplica al resto de plataformas del proyecto.
     target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
   endif()
-  if(VNE_ASAN_AVAILABLE)
+  if(SZ_ASAN_AVAILABLE)
     if(MSVC)
       target_compile_options(${target} PRIVATE $<$<CONFIG:Debug>:/fsanitize=address>)
     else()
@@ -252,42 +252,43 @@ endfunction()
 # contexto de cada backend se crea a mano sobre la ventana SDL3 (ver ADR-0009: Metal/macOS
 # queda fuera de M1 por no haber Mac disponible para escribirlo y probarlo).
 if(WIN32)
-  set(VNE_GFX_BACKEND_SOURCES src/gfx/gfx_backend_d3d11.cpp)
-  set(VNE_GFX_BACKEND_DEFINE VNE_GFX_BACKEND_D3D11=1)
-  set(VNE_GFX_SOKOL_BACKEND_DEFINE SOKOL_D3D11)
-  set(VNE_GFX_BACKEND_LIBS d3d11 dxgi)
+  set(SZ_RHI_BACKEND_SOURCES src/rhi/rhi_d3d11.cpp)
+  set(SZ_RHI_BACKEND_DEFINE SZ_RHI_BACKEND_D3D11=1)
+  set(SZ_RHI_SOKOL_BACKEND_DEFINE SOKOL_D3D11)
+  set(SZ_RHI_BACKEND_LIBS d3d11 dxgi)
 elseif(APPLE)
-  set(VNE_GFX_BACKEND_SOURCES "")
-  set(VNE_GFX_BACKEND_DEFINE VNE_GFX_BACKEND_NONE=1)
-  set(VNE_GFX_SOKOL_BACKEND_DEFINE SOKOL_DUMMY_BACKEND)
-  set(VNE_GFX_BACKEND_LIBS "")
+  set(SZ_RHI_BACKEND_SOURCES "")
+  set(SZ_RHI_BACKEND_DEFINE SZ_RHI_BACKEND_NONE=1)
+  set(SZ_RHI_SOKOL_BACKEND_DEFINE SOKOL_DUMMY_BACKEND)
+  set(SZ_RHI_BACKEND_LIBS "")
   message(WARNING
     "Backend Metal no implementado todavia (ADR-0009): M1 no renderiza nada real en macOS.")
 else()
-  set(VNE_GFX_BACKEND_SOURCES src/gfx/gfx_backend_gl.cpp)
-  set(VNE_GFX_BACKEND_DEFINE VNE_GFX_BACKEND_GL=1)
-  set(VNE_GFX_SOKOL_BACKEND_DEFINE SOKOL_GLCORE)
-  set(VNE_GFX_BACKEND_LIBS GL)
+  set(SZ_RHI_BACKEND_SOURCES src/rhi/rhi_gl.cpp)
+  set(SZ_RHI_BACKEND_DEFINE SZ_RHI_BACKEND_GL=1)
+  set(SZ_RHI_SOKOL_BACKEND_DEFINE SOKOL_GLCORE)
+  set(SZ_RHI_BACKEND_LIBS GL)
 endif()
 
-add_library(vne_base STATIC
-  src/base/log.cpp
-  src/base/arena.cpp
-  src/base/heap_guard.cpp
-  src/base/heap_guard_hooks.cpp
-  src/base/math.cpp
-  src/base/radix_sort.cpp
-  src/base/crc32.cpp
-  src/base/rng.cpp
+add_library(sz_engine STATIC
+  src/core/log.cpp
+  src/core/arena.cpp
+  src/core/heap_guard.cpp
+  src/core/heap_guard_hooks.cpp
+  src/core/math.cpp
+  src/core/radix_sort.cpp
+  src/core/crc32.cpp
+  src/core/rng.cpp
   src/platform/window.cpp
   src/platform/input.cpp
+  src/platform/input_record.cpp
   src/platform/files.cpp
-  src/assets/pak.cpp
+  src/vfs/pak.cpp
   src/assets/assets.cpp
   src/assets/hot_reload.cpp
-  src/gfx/atlas.cpp
-  src/gfx/gfx.cpp
-  src/gfx/texture.cpp
+  src/render/atlas.cpp
+  src/render/render.cpp
+  src/render/texture.cpp
   src/text/font.cpp
   src/text/glyph_cache.cpp
   src/text/layout.cpp
@@ -298,8 +299,9 @@ add_library(vne_base STATIC
   src/vm/backlog.cpp
   src/vm/rollback.cpp
   src/vm/save.cpp
-  src/script/lua_bindings.cpp
+  src/lua/lua_bindings.cpp
   src/audio/audio.cpp
+  src/game/ui.cpp
   src/game/vn_mode.cpp
   src/game/backlog_mode.cpp
   src/game/menu_mode.cpp
@@ -308,41 +310,41 @@ add_library(vne_base STATIC
   src/game/locales.cpp
   src/game/map_catalog.cpp
   src/game/map_mode.cpp
-  ${VNE_GFX_BACKEND_SOURCES}
+  ${SZ_RHI_BACKEND_SOURCES}
 )
-target_include_directories(vne_base PUBLIC src)
+target_include_directories(sz_engine PUBLIC src)
 if(WIN32)
   # El backend WASAPI de miniaudio en Windows usa COM.
-  set(VNE_AUDIO_BACKEND_LIBS ole32)
+  set(SZ_AUDIO_BACKEND_LIBS ole32)
 else()
-  set(VNE_AUDIO_BACKEND_LIBS "")
+  set(SZ_AUDIO_BACKEND_LIBS "")
 endif()
-target_link_libraries(vne_base
-  PUBLIC ${VNE_SDL3_TARGET} HandmadeMath
-  PRIVATE sokol_gfx qoi freetype harfbuzz ${VNE_GFX_BACKEND_LIBS} lua_static sol2 miniaudio ${VNE_AUDIO_BACKEND_LIBS}
+target_link_libraries(sz_engine
+  PUBLIC ${SZ_SDL3_TARGET} HandmadeMath
+  PRIVATE sokol_gfx qoi freetype harfbuzz ${SZ_RHI_BACKEND_LIBS} lua_static sol2 miniaudio ${SZ_AUDIO_BACKEND_LIBS}
 )
-target_compile_definitions(vne_base PRIVATE ${VNE_GFX_BACKEND_DEFINE})
+target_compile_definitions(sz_engine PRIVATE ${SZ_RHI_BACKEND_DEFINE})
 # El backend de sokol_gfx solo debe estar activo en la unidad de traduccion que hace
-# SOKOL_IMPL (gfx.cpp); definirlo a nivel de target es simple y no da falsos positivos
-# porque ninguna otra .cpp de vne_base incluye sokol_gfx.h con SOKOL_IMPL.
-set_source_files_properties(src/gfx/gfx.cpp PROPERTIES COMPILE_DEFINITIONS ${VNE_GFX_SOKOL_BACKEND_DEFINE})
+# SOKOL_IMPL (render.cpp); definirlo a nivel de target es simple y no da falsos positivos
+# porque ninguna otra .cpp de sz_engine incluye sokol_gfx.h con SOKOL_IMPL.
+set_source_files_properties(src/render/render.cpp PROPERTIES COMPILE_DEFINITIONS ${SZ_RHI_SOKOL_BACKEND_DEFINE})
 
 # Editor (M8): src/editor/editor.cpp NO se añade al target en una configuracion Ship
 # (SPEC.md #6, ver el bloque de ImGui mas arriba). En Debug/Dev si se añade y se compila
-# (aunque su cuerpo entero este vacio bajo #if defined(VN_EDITOR) salvo en Dev, igual que
-# gfx_backend_gl.cpp en Windows) para que los errores de tipos se detecten pronto, no solo
+# (aunque su cuerpo entero este vacio bajo #if defined(SZ_EDITOR) salvo en Dev, igual que
+# rhi_gl.cpp en Windows) para que los errores de tipos se detecten pronto, no solo
 # en una build Dev.
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Ship")
-  target_sources(vne_base PRIVATE src/editor/editor.cpp)
-  target_link_libraries(vne_base PRIVATE imgui)
+  target_sources(sz_engine PRIVATE src/editor/editor.cpp)
+  target_link_libraries(sz_engine PRIVATE imgui)
   # sokol_imgui.h necesita saber el backend activo para elegir sus shaders embebidos,
-  # igual que gfx.cpp con SOKOL_IMPL (mismo motivo, ver comentario de arriba).
-  # VNE_SOURCE_DIR: el watcher de recarga de scripts necesita la ruta absoluta al .vns
+  # igual que render.cpp con SOKOL_IMPL (mismo motivo, ver comentario de arriba).
+  # SZ_SOURCE_DIR: el watcher de recarga de scripts necesita la ruta absoluta al .vns
   # fuente (assets_src/scripts/ nunca se copia al directorio de build, a diferencia de
-  # png/ogg/ttf: vne_bake ya lo lee directo de CMAKE_SOURCE_DIR), o dependeria de que
-  # vne_game se ejecute con el CWD exacto del directorio de build (fragil).
+  # png/ogg/ttf: sz_bake ya lo lee directo de CMAKE_SOURCE_DIR), o dependeria de que
+  # sz_runtime se ejecute con el CWD exacto del directorio de build (fragil).
   set_source_files_properties(src/editor/editor.cpp PROPERTIES COMPILE_DEFINITIONS
-    "${VNE_GFX_SOKOL_BACKEND_DEFINE};VNE_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"")
+    "${SZ_RHI_SOKOL_BACKEND_DEFINE};SZ_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"")
   if(MSVC)
     # ImGui/sokol_imgui.h son codigo de terceros que llega a esta unidad de traduccion:
     # advertencias de conversion y variables locales sin usar en sus propias macros, no
@@ -351,7 +353,7 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Ship")
   endif()
 endif()
 
-vne_apply_project_flags(vne_base)
+sz_apply_project_flags(sz_engine)
 
 if(MSVC)
   # sol2 es codigo de terceros que llega via #include a esta unica unidad de traduccion
@@ -360,19 +362,19 @@ if(MSVC)
   # doctest en tests/CMakeLists.txt (basic_ostream::operator<< usa try/catch interno
   # aunque nunca lance, y el proyecto compila con /EHs-c-). Ninguno de los dos es un
   # problema de nuestro codigo.
-  set_source_files_properties(src/script/lua_bindings.cpp PROPERTIES COMPILE_OPTIONS "/wd5321;/wd4530")
+  set_source_files_properties(src/lua/lua_bindings.cpp PROPERTIES COMPILE_OPTIONS "/wd5321;/wd4530")
 endif()
 
-add_executable(vne_game src/main.cpp)
-target_link_libraries(vne_game PRIVATE vne_base)
-vne_apply_project_flags(vne_game)
+add_executable(sz_runtime src/main.cpp)
+target_link_libraries(sz_runtime PRIVATE sz_engine)
+sz_apply_project_flags(sz_runtime)
 
 # Codigo de herramientas offline: lexer/parser/compilador del DSL (SPEC.md #9.3) y el
-# escaner de TMX de los mapas (ADR-0044). Solo se linkan en vne_bake y en los tests;
-# vne_game nunca los ve — "cero parsing en release". std::string/vector son aceptables
+# escaner de TMX de los mapas (ADR-0044). Solo se linkan en sz_bake y en los tests;
+# sz_runtime nunca los ve — "cero parsing en release". std::string/vector son aceptables
 # aqui porque este codigo jamas corre en el bucle de frame del juego. El escaner de mapas
-# vive aqui, y no dentro de vne_bake, precisamente para que los tests puedan ejercitarlo.
-add_library(vne_script_tools STATIC
+# vive aqui, y no dentro de sz_bake, precisamente para que los tests puedan ejercitarlo.
+add_library(sz_content STATIC
   src/script/lexer.cpp
   src/script/parser.cpp
   src/script/compiler.cpp
@@ -381,76 +383,76 @@ add_library(vne_script_tools STATIC
   src/script/symbols.cpp
   src/script/map_bake.cpp
 )
-target_include_directories(vne_script_tools PUBLIC src)
-vne_apply_project_flags(vne_script_tools)
+target_include_directories(sz_content PUBLIC src)
+sz_apply_project_flags(sz_content)
 
-# Herramienta offline: no enlaza vne_base (SDL3/sokol/gfx) porque no abre ventana ni
-# dibuja nada, solo genera y codifica bytes. Solo toma prestado base/log.cpp de vne_base.
-# crc32.cpp va suelto y no via vne_base: vne_bake es una herramienta offline y enlazar
-# vne_base le arrastraria SDL y el sistema grafico enteros para usar una funcion de hash.
-add_executable(vne_bake tools/bake/main.cpp src/base/log.cpp src/base/crc32.cpp)
-target_include_directories(vne_bake PRIVATE src)
-target_link_libraries(vne_bake PRIVATE qoi vne_script_tools stb_image harfbuzz harfbuzz-subset)
-vne_apply_project_flags(vne_bake)
+# Herramienta offline: no enlaza sz_engine (SDL3/sokol/gfx) porque no abre ventana ni
+# dibuja nada, solo genera y codifica bytes. Solo toma prestado base/log.cpp de sz_engine.
+# crc32.cpp va suelto y no via sz_engine: sz_bake es una herramienta offline y enlazar
+# sz_engine le arrastraria SDL y el sistema grafico enteros para usar una funcion de hash.
+add_executable(sz_bake tools/bake/main.cpp src/core/log.cpp src/core/crc32.cpp)
+target_include_directories(sz_bake PRIVATE src)
+target_link_libraries(sz_bake PRIVATE qoi sz_content stb_image harfbuzz harfbuzz-subset)
+sz_apply_project_flags(sz_bake)
 
-# vne_bake busca assets_src/png/*.png con una ruta relativa a su propio CWD (ADR-0025):
+# sz_bake busca assets_src/png/*.png con una ruta relativa a su propio CWD (ADR-0025):
 # hace falta copiarlo al directorio de build igual que las fuentes, o siempre caeria al
 # respaldo procedural aunque los PNGs reales existan en el arbol fuente.
-file(GLOB VNE_PNG_ASSETS ${CMAKE_SOURCE_DIR}/assets_src/png/*.png)
+file(GLOB SZ_PNG_ASSETS ${CMAKE_SOURCE_DIR}/assets_src/png/*.png)
 add_custom_command(
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/.vne_png_assets_copied
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/.sz_png_assets_copied
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_src/png
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           ${CMAKE_SOURCE_DIR}/assets_src/png
           ${CMAKE_CURRENT_BINARY_DIR}/assets_src/png
-  COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/.vne_png_assets_copied
-  DEPENDS ${VNE_PNG_ASSETS}
+  COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/.sz_png_assets_copied
+  DEPENDS ${SZ_PNG_ASSETS}
   COMMENT "Copiando assets_src/png/ (Kenney UI Pack, CC0) al directorio de build"
 )
-add_custom_target(vne_copy_png_assets
-  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/.vne_png_assets_copied
+add_custom_target(sz_copy_png_assets
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/.sz_png_assets_copied
 )
 
 # Un checkout limpio mas un build debe producir un juego ejecutable sin pasos manuales
-# (skill vne-build-verify): vne_game depende del atlas de prueba horneado por vne_bake en
+# (skill vne-build-verify): sz_runtime depende del atlas de prueba horneado por sz_bake en
 # el propio directorio de build, no de que alguien se acuerde de ejecutarlo a mano.
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.qoi
          ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
-  COMMAND vne_bake
+  COMMAND sz_bake
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  DEPENDS vne_bake ${CMAKE_CURRENT_BINARY_DIR}/.vne_png_assets_copied
-  COMMENT "vne_bake: generando atlas (real si hay PNGs, procedural si no — ADR-0011/0025)"
+  DEPENDS sz_bake ${CMAKE_CURRENT_BINARY_DIR}/.sz_png_assets_copied
+  COMMENT "sz_bake: generando atlas (real si hay PNGs, procedural si no — ADR-0011/0025)"
 )
-add_custom_target(vne_bake_assets
+add_custom_target(sz_bake_assets
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.qoi
 )
-add_dependencies(vne_bake_assets vne_copy_png_assets)
-add_dependencies(vne_game vne_bake_assets)
+add_dependencies(sz_bake_assets sz_copy_png_assets)
+add_dependencies(sz_runtime sz_bake_assets)
 
 # assets_src/ogg/ (M6, audio): audio_init() escanea este directorio con una ruta relativa
 # a su propio CWD para armar el catalogo de musica (ver ADR de M6 en docs/DECISIONS.md),
-# igual que vne_bake con los PNG arriba. Sonidos placeholder generados (tonos sinteticos,
+# igual que sz_bake con los PNG arriba. Sonidos placeholder generados (tonos sinteticos,
 # no assets de terceros): puerta_cierra.wav (sfx) y tema_a.wav/tema_b.wav (musica, para
 # probar el crossfade con dos pistas distintas de verdad).
-file(GLOB VNE_OGG_ASSETS ${CMAKE_SOURCE_DIR}/assets_src/ogg/*)
+file(GLOB SZ_OGG_ASSETS ${CMAKE_SOURCE_DIR}/assets_src/ogg/*)
 add_custom_command(
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/.vne_ogg_assets_copied
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/.sz_ogg_assets_copied
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ogg
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           ${CMAKE_SOURCE_DIR}/assets_src/ogg
           ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ogg
-  COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/.vne_ogg_assets_copied
-  DEPENDS ${VNE_OGG_ASSETS}
+  COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/.sz_ogg_assets_copied
+  DEPENDS ${SZ_OGG_ASSETS}
   COMMENT "Copiando assets_src/ogg/ (audio de prueba, tonos sinteticos) al directorio de build"
 )
-add_custom_target(vne_copy_ogg_assets
-  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/.vne_ogg_assets_copied
+add_custom_target(sz_copy_ogg_assets
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/.sz_ogg_assets_copied
 )
-add_dependencies(vne_game vne_copy_ogg_assets)
+add_dependencies(sz_runtime sz_copy_ogg_assets)
 
 # Fuentes de prueba (Noto Sans + Noto Sans JP, OFL, ADR-0017): se copian al directorio de
-# build para que vne_game las encuentre con una ruta relativa a su propio CWD, igual que
+# build para que sz_runtime las encuentre con una ruta relativa a su propio CWD, igual que
 # el atlas horneado. NotoSans.ttf (latina) se anadio en M10 para el idioma base del
 # dialogo, separada de la CJK que solo hace falta "bajo demanda" (ver docs/DECISIONS.md).
 foreach(font_file NotoSansJP-subset.ttf NotoSans-subset.ttf)
@@ -464,15 +466,15 @@ foreach(font_file NotoSansJP-subset.ttf NotoSans-subset.ttf)
     COMMENT "Copiando ${font_file} al directorio de build"
   )
 endforeach()
-add_custom_target(vne_copy_fonts DEPENDS
+add_custom_target(sz_copy_fonts DEPENDS
   ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSansJP-subset.ttf
   ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSans-subset.ttf)
-add_dependencies(vne_game vne_copy_fonts)
+add_dependencies(sz_runtime sz_copy_fonts)
 
 # Tabla de simbolos del proyecto (M14, ADR-0067). Va ANTES que cualquier guion y con TODOS
 # los guiones como entrada: los ids tienen que ser los mismos en todos, que es justo lo que
-# `vne_bake script` no puede dar porque ve un guion cada vez.
-set(VNE_ALL_SCRIPTS
+# `sz_bake script` no puede dar porque ve un guion cada vez.
+set(SZ_ALL_SCRIPTS
   ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo.vns
   ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_branching.vns
   ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_audio.vns
@@ -481,14 +483,14 @@ set(VNE_ALL_SCRIPTS
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
-  COMMAND vne_bake symbols
+  COMMAND sz_bake symbols
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym
-          ${VNE_ALL_SCRIPTS}
+          ${SZ_ALL_SCRIPTS}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  DEPENDS vne_bake ${VNE_ALL_SCRIPTS}
-  COMMENT "vne_bake: tabla de simbolos del proyecto"
+  DEPENDS sz_bake ${SZ_ALL_SCRIPTS}
+  COMMENT "sz_bake: tabla de simbolos del proyecto"
 )
-add_custom_target(vne_bake_symbols
+add_custom_target(sz_bake_symbols
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym)
 
 # Guion de prueba de M3 (ADR pendiente, ver docs/DECISIONS.md): nombres placeholder
@@ -497,97 +499,97 @@ add_custom_target(vne_bake_symbols
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo.vnc
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
-  COMMAND vne_bake script
+  COMMAND sz_bake script
           ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo.vnc
-  DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo.vns
+  DEPENDS sz_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym
-  COMMENT "vne_bake: compilando demo.vns a demo.vnc"
+  COMMENT "sz_bake: compilando demo.vns a demo.vnc"
 )
-add_custom_target(vne_bake_script DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo.vnc)
-add_dependencies(vne_game vne_bake_script)
+add_custom_target(sz_bake_script DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo.vnc)
+add_dependencies(sz_runtime sz_bake_script)
 
 # Guion de prueba de M5 (docs/DECISIONS.md): 3 ramas y 2 finales (SPEC.md #12), nombres
 # placeholder obvios igual que demo.vns.
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_branching.vnc
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
-  COMMAND vne_bake script
+  COMMAND sz_bake script
           ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_branching.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_branching.vnc
-  DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_branching.vns
+  DEPENDS sz_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_branching.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym
-  COMMENT "vne_bake: compilando demo_branching.vns a demo_branching.vnc"
+  COMMENT "sz_bake: compilando demo_branching.vns a demo_branching.vnc"
 )
-add_custom_target(vne_bake_script_branching
+add_custom_target(sz_bake_script_branching
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_branching.vnc)
-add_dependencies(vne_game vne_bake_script_branching)
+add_dependencies(sz_runtime sz_bake_script_branching)
 
 # Guion de prueba de M6 (audio): @bgm/@sfx/@stopbgm (docs/DECISIONS.md).
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_audio.vnc
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
-  COMMAND vne_bake script
+  COMMAND sz_bake script
           ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_audio.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_audio.vnc
-  DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_audio.vns
+  DEPENDS sz_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_audio.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym
-  COMMENT "vne_bake: compilando demo_audio.vns a demo_audio.vnc"
+  COMMENT "sz_bake: compilando demo_audio.vns a demo_audio.vnc"
 )
-add_custom_target(vne_bake_script_audio
+add_custom_target(sz_bake_script_audio
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_audio.vnc)
-add_dependencies(vne_game vne_bake_script_audio)
+add_dependencies(sz_runtime sz_bake_script_audio)
 
 # Guion de prueba de M12 (transiciones): @transition fade/wipe/dissolve y @move.
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_transitions.vnc
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
-  COMMAND vne_bake script
+  COMMAND sz_bake script
           ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_transitions.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_transitions.vnc
-  DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_transitions.vns
+  DEPENDS sz_bake ${CMAKE_SOURCE_DIR}/assets_src/scripts/demo_transitions.vns
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/atlas_00.bin
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/project.vnsym
-  COMMENT "vne_bake: compilando demo_transitions.vns a demo_transitions.vnc"
+  COMMENT "sz_bake: compilando demo_transitions.vns a demo_transitions.vnc"
 )
-add_custom_target(vne_bake_script_transitions
+add_custom_target(sz_bake_script_transitions
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_transitions.vnc)
-add_dependencies(vne_game vne_bake_script_transitions)
+add_dependencies(sz_runtime sz_bake_script_transitions)
 
 # Mapa de prueba de M9 (TMX -> .vnm, ADR de M9 en docs/DECISIONS.md).
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_map.vnm
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
-  COMMAND vne_bake map
+  COMMAND sz_bake map
           ${CMAKE_SOURCE_DIR}/assets_src/maps/demo_map.tmx
           ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_map.vnm
-  DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/maps/demo_map.tmx
-  COMMENT "vne_bake: compilando demo_map.tmx a demo_map.vnm"
+  DEPENDS sz_bake ${CMAKE_SOURCE_DIR}/assets_src/maps/demo_map.tmx
+  COMMENT "sz_bake: compilando demo_map.tmx a demo_map.vnm"
 )
-add_custom_target(vne_bake_map
+add_custom_target(sz_bake_map
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/demo_map.vnm)
-add_dependencies(vne_game vne_bake_map)
+add_dependencies(sz_runtime sz_bake_map)
 
 # Catalogos de localizacion (M10, ADR-0046: horneados a binario). assets_src/locale/*.csv
 # son el formato de autoria, ya en el repo (es.csv se regenera a mano con
-# "vne_bake catalog-extract" cuando cambian los guiones, no automaticamente en cada build
+# "sz_bake catalog-extract" cuando cambian los guiones, no automaticamente en cada build
 # — evita que un build normal reescriba un archivo que un traductor puede estar editando).
 foreach(locale es ja)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/${locale}.vnl
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_baked
-    COMMAND vne_bake catalog-compile
+    COMMAND sz_bake catalog-compile
             ${CMAKE_SOURCE_DIR}/assets_src/locale/${locale}.csv
             ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/${locale}.vnl
-    DEPENDS vne_bake ${CMAKE_SOURCE_DIR}/assets_src/locale/${locale}.csv
-    COMMENT "vne_bake: compilando ${locale}.csv a ${locale}.vnl"
+    DEPENDS sz_bake ${CMAKE_SOURCE_DIR}/assets_src/locale/${locale}.csv
+    COMMENT "sz_bake: compilando ${locale}.csv a ${locale}.vnl"
   )
-  add_custom_target(vne_bake_catalog_${locale}
+  add_custom_target(sz_bake_catalog_${locale}
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/assets_baked/${locale}.vnl)
-  add_dependencies(vne_game vne_bake_catalog_${locale})
+  add_dependencies(sz_runtime sz_bake_catalog_${locale})
 endforeach()
 
 enable_testing()

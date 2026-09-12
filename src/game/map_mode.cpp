@@ -4,13 +4,13 @@
 
 #include <SDL3/SDL.h>
 
-#include "assets/pak.h"
-#include "base/log.h"
-#include "gfx/gfx.h"
+#include "vfs/pak.h"
+#include "core/log.h"
+#include "render/render.h"
 
 bool MapMode::load(const char* logical_name, Arena* arena) {
     // M11: ya no abre directamente por ruta de archivo -- se resuelve a traves del
-    // backend activo (directorio suelto o .pak, ver assets/pak.h), mismo patron que
+    // backend activo (directorio suelto o .pak, ver vfs/pak.h), mismo patron que
     // vm/script_load.cpp.
     const u8* bytes = nullptr;
     usize     size  = 0;
@@ -31,11 +31,11 @@ bool MapMode::load(const char* logical_name, Arena* arena) {
     }
     if (header[1] != k_vnm_version) {
         // Se RECHAZA, no se migra, y es deliberado (M13): un .vnm es un artefacto generado
-        // desde su .tmx con `vne_bake map`, igual que un .vnc desde su .vns. Los generados
+        // desde su .tmx con `sz_bake map`, igual que un .vnc desde su .vns. Los generados
         // se regeneran; solo los datos de usuario (.vnsave) merecen una funcion de
         // migracion, porque son lo unico que no se puede reconstruir. Ver ADR-0065.
         log_error("MapMode::load: '%s' es version %u, se esperaba %u; vuelve a ejecutar "
-                  "'vne_bake map' sobre el .tmx",
+                  "'sz_bake map' sobre el .tmx",
                   logical_name, header[1], k_vnm_version);
         return false;
     }
@@ -137,6 +137,33 @@ void MapMode::update(const InputState& input, f32 dt) {
     if (input.key_down[SDL_SCANCODE_A]) dx -= 1.0f;
     if (input.key_down[SDL_SCANCODE_D]) dx += 1.0f;
 
+    // Ir andando hasta donde se pinche (M15). El mapa se dibuja 1:1 en el espacio virtual
+    // desde el origen, asi que las coordenadas virtuales del raton (main.cpp ya deshizo el
+    // letterbox) SON coordenadas de mapa, sin transformacion intermedia. Cuando haya camara
+    // habra que restarle su desplazamiento aqui.
+    if (input.mouse_pressed[0]) {
+        move_target_x   = input.mouse_x;
+        move_target_y   = input.mouse_y;
+        has_move_target = true;
+    }
+    if (dx != 0.0f || dy != 0.0f) {
+        // El teclado manda: tocar WASD cancela el destino en vez de pelearse con el.
+        has_move_target = false;
+    } else if (has_move_target) {
+        f32 to_x = move_target_x - state->player_x;
+        f32 to_y = move_target_y - state->player_y;
+        f32 dist = SDL_sqrtf(to_x * to_x + to_y * to_y);
+        // Umbral de llegada de un paso de frame: sin el, el jugador oscilaria alrededor del
+        // destino sin alcanzarlo nunca.
+        f32 arrive = k_player_speed_px_per_s * dt;
+        if (dist <= arrive || dist <= 1.0f) {
+            has_move_target = false;
+        } else {
+            dx = to_x / dist;
+            dy = to_y / dist;
+        }
+    }
+
     if (dx != 0.0f || dy != 0.0f) {
         f32 len = SDL_sqrtf(dx * dx + dy * dy);
         dx /= len;
@@ -153,11 +180,20 @@ void MapMode::update(const InputState& input, f32 dt) {
         // el centro del jugador, asi que el cuerpo se metia media caja dentro de la pared
         // antes de detenerse y por un hueco de un tile de ancho cabia un jugador de 0.6
         // tiles sin rozar.
+        f32 before_x = state->player_x;
+        f32 before_y = state->player_y;
         if (!box_blocked(new_x, state->player_y)) {
             state->player_x = new_x;
         }
         if (!box_blocked(state->player_x, new_y)) {
             state->player_y = new_y;
+        }
+        // Destino inalcanzable (una pared en medio, sin busqueda de camino — no hay motor
+        // de fisicas ni pathfinding, SPEC.md #10): si los dos ejes quedaron bloqueados, el
+        // jugador no se movio nada y seguir intentandolo lo dejaria empujando la pared para
+        // siempre. Se abandona el destino y se para.
+        if (has_move_target && state->player_x == before_x && state->player_y == before_y) {
+            has_move_target = false;
         }
     }
 
@@ -190,24 +226,24 @@ void MapMode::render() {
         for (u32 x = 0; x < grid_w; ++x) {
             u16 gid = tiles[y * grid_w + x];
             Sprite s{};
-            s.tex   = gfx_white_texture();
+            s.tex   = render_white_texture();
             s.dst_x = static_cast<f32>(x) * ts;
             s.dst_y = static_cast<f32>(y) * ts;
             s.dst_w = ts - 1.0f;
             s.dst_h = ts - 1.0f;
             s.color = k_tile_colors[gid % 4];
-            s.layer = static_cast<u16>(GfxLayer::Background);
-            gfx_draw_sprite(s);
+            s.layer = static_cast<u16>(RenderLayer::Background);
+            render_draw_sprite(s);
         }
     }
 
     Sprite player{};
-    player.tex   = gfx_white_texture();
+    player.tex   = render_white_texture();
     player.dst_x = state->player_x - ts * 0.3f;
     player.dst_y = state->player_y - ts * 0.3f;
     player.dst_w = ts * 0.6f;
     player.dst_h = ts * 0.6f;
     player.color = 0xFFFFFFFFu;
-    player.layer = static_cast<u16>(GfxLayer::Actors);
-    gfx_draw_sprite(player);
+    player.layer = static_cast<u16>(RenderLayer::Actors);
+    render_draw_sprite(player);
 }

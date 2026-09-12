@@ -2,8 +2,8 @@
 
 #include <SDL3/SDL.h>
 
-#include "base/heap_guard_hooks.h"
-#include "base/log.h"
+#include "core/heap_guard_hooks.h"
+#include "core/log.h"
 
 bool platform_window_create(PlatformWindow* out, const char* title, i32 width, i32 height) {
     // Antes de SDL_Init a proposito: SDL no deja cambiar sus funciones de memoria una vez
@@ -22,9 +22,9 @@ bool platform_window_create(PlatformWindow* out, const char* title, i32 width, i
     }
 
     SDL_WindowFlags flags = 0;
-#if defined(VNE_GFX_BACKEND_GL)
+#if defined(SZ_RHI_BACKEND_GL)
     // Los atributos de contexto GL deben fijarse antes de crear la ventana: el backend
-    // GL (gfx_backend_gl.cpp) solo llama a SDL_GL_CreateContext despues, sobre esta
+    // GL (rhi_gl.cpp) solo llama a SDL_GL_CreateContext despues, sobre esta
     // ventana ya marcada con SDL_WINDOW_OPENGL.
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);

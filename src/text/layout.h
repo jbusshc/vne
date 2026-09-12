@@ -1,9 +1,9 @@
 #pragma once
 #include <string_view>
 
-#include "base/arena.h"
-#include "base/handle.h"
-#include "base/types.h"
+#include "core/arena.h"
+#include "core/handle.h"
+#include "core/types.h"
 
 // Layout de texto: shaping con HarfBuzz, word-wrap latino (por espacios) y CJK (kinsoku
 // basico), marcado inline y furigana (SPEC.md #7.2). text_layout() es la unica funcion

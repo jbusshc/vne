@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <string>
 
-#include "base/log.h"
+#include "core/log.h"
 #include "platform/clock.h"
 #include "script/compiler.h"
 #include "script/parser.h"
@@ -15,7 +15,7 @@
 // segundo". vm_skip_current es exactamente lo que usa el modo skip de VnMode (game/
 // vn_mode.cpp) para avanzar sin esperar input real ni temporizadores de fade/wait.
 TEST_CASE("skip: 1000 comandos via vm_skip_current en menos de 1 segundo (mediana)") {
-    std::string path = std::string(VNE_SOURCE_DIR) + "/assets_src/scripts/demo.vns";
+    std::string path = std::string(SZ_SOURCE_DIR) + "/assets_src/scripts/demo.vns";
     std::FILE*  f    = std::fopen(path.c_str(), "rb");
     REQUIRE(f != nullptr);
     std::fseek(f, 0, SEEK_END);

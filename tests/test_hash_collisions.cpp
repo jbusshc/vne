@@ -3,12 +3,12 @@
 #include <ostream>
 #include <string>
 
-#include "base/hash.h"
+#include "core/hash.h"
 #include "script/compiler.h"
 #include "script/hash_collisions.h"
 #include "script/symbols.h"
 #include "script/parser.h"
-#include "vm/state.h"
+#include "formats/state.h"
 
 // Deteccion de colisiones de hash al hornear (M13). ADR-0029/0034/0047 aceptaron el riesgo
 // sin ninguna deteccion: dos nombres que caen en el mismo id se pisan en silencio y el

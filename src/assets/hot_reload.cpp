@@ -1,15 +1,15 @@
 #include "assets/hot_reload.h"
 
-#if defined(VN_DEBUG)
+#if defined(SZ_DEBUG)
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "assets/assets.h"
-#include "assets/pak.h"
-#include "base/heap_guard.h"
-#include "base/log.h"
+#include "vfs/pak.h"
+#include "core/heap_guard.h"
+#include "core/log.h"
 #include "platform/files.h"
 #include "text/font.h"
 #include "text/glyph_cache.h"
@@ -55,20 +55,20 @@ i64 png_dir_newest_mtime() {
 }
 
 void rebake_atlas_and_reload() {
-    // vne_bake sin argumentos re-empaqueta el atlas desde assets_src/png/ relativo a su
+    // sz_bake sin argumentos re-empaqueta el atlas desde assets_src/png/ relativo a su
     // propio CWD, que es el mismo directorio de build donde corre el juego.
     // system() asigna heap: misma excepcion acotada y ya aceptada que la recarga de
     // scripts del editor (ADR-0042), y por el mismo motivo -- esto no existe en Ship.
     heap_guard_suspend();
 #if defined(_WIN32)
-    int result = std::system(".\\vne_bake.exe");
+    int result = std::system(".\\sz_bake.exe");
 #else
-    int result = std::system("./vne_bake");
+    int result = std::system("./sz_bake");
 #endif
     heap_guard_resume();
 
     if (result != 0) {
-        log_error("hot_reload: vne_bake fallo re-empaquetando el atlas");
+        log_error("hot_reload: sz_bake fallo re-empaquetando el atlas");
         return;
     }
     assets_reload_texture("atlas_00.qoi");
@@ -113,8 +113,8 @@ void hot_reload_update(f32 dt) {
     g_timer = 0.0f;
 
     // Excepcion a la regla de cero heap por frame (SPEC.md #4), de la misma familia que el
-    // subproceso `vne_bake` del editor (M8): herramienta de desarrollo que NO existe en
-    // Ship (todo este archivo esta bajo #if VN_DEBUG), no un camino de juego.
+    // subproceso `sz_bake` del editor (M8): herramienta de desarrollo que NO existe en
+    // Ship (todo este archivo esta bajo #if SZ_DEBUG), no un camino de juego.
     //
     // Medido en M12, cuando los hooks de terceros hicieron visibles los malloc de las
     // librerias C: recorrer los directorios vigilados cuesta 673 asignaciones dentro de
@@ -150,7 +150,7 @@ void hot_reload_update(f32 dt) {
     }
 }
 
-#else  // !VN_DEBUG
+#else  // !SZ_DEBUG
 
 // En Ship no hay nada que vigilar: el .pak es inmutable (SPEC.md #7.4, "hot reload en
 // Debug y Dev"). Definiciones vacias para no llenar los llamantes de #if.
@@ -158,4 +158,4 @@ void hot_reload_init() {}
 void hot_reload_watch_font(FontHandle, const char*, u32) {}
 void hot_reload_update(f32) {}
 
-#endif  // VN_DEBUG
+#endif  // SZ_DEBUG

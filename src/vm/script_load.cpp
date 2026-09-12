@@ -2,8 +2,9 @@
 
 #include <cstring>
 
-#include "assets/pak.h"
-#include "base/log.h"
+#include "vfs/pak.h"
+#include "core/heap_guard.h"
+#include "core/log.h"
 
 namespace {
 // Deben coincidir exactamente con src/script/compiler.cpp (write_vnc). Duplicados a
@@ -16,13 +17,23 @@ ScriptLoadResult script_load(const char* logical_name, Arena* arena, CompiledScr
     *out = CompiledScript{};
 
     // M11: ya no abre directamente por ruta de archivo -- se resuelve a traves del
-    // backend activo (directorio suelto o .pak, ver assets/pak.h). pak_resolve_into_arena
+    // backend activo (directorio suelto o .pak, ver vfs/pak.h). pak_resolve_into_arena
     // copia a `arena` en backend suelto (para que el buffer viva tanto como la escena,
     // ver el comentario en pak.h) o devuelve el puntero residente sin copiar en backend
     // empaquetado.
+    //
+    // Leer el archivo pasa por SDL, que asigna (13 veces, medido en M15 reproduciendo la
+    // sesion de raton que pisa un trigger). Cargar el guion de un trigger ocurre DENTRO del
+    // frame desde M9 y nadie lo habia visto: la sesion grabada de teclado no llegaba a pisar
+    // ninguno. Misma excepcion acotada que ADR-0035, y en el mismo sitio que la de
+    // catalog_load —dentro y no en el llamante— para que valga igual para los cuatro
+    // llamantes de script_load, dos de los cuales corren en el frame.
     const u8* bytes = nullptr;
     usize     size  = 0;
-    if (!pak_resolve_into_arena(logical_name, arena, &bytes, &size)) {
+    heap_guard_suspend();
+    bool found = pak_resolve_into_arena(logical_name, arena, &bytes, &size);
+    heap_guard_resume();
+    if (!found) {
         log_error("script_load: no se encontro '%s'", logical_name);
         return ScriptLoadResult::NotFound;
     }

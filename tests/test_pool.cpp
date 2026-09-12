@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "base/pool.h"
+#include "core/pool.h"
 
 namespace {
 struct DummyTag;

@@ -5,12 +5,12 @@
 
 #include "assets/assets.h"
 #include "assets/hot_reload.h"
-#include "assets/pak.h"
+#include "vfs/pak.h"
 #include "audio/audio.h"
-#include "base/arena.h"
-#include "base/heap_guard.h"
-#include "base/log.h"
-#if defined(VN_EDITOR)
+#include "core/arena.h"
+#include "core/heap_guard.h"
+#include "core/log.h"
+#if defined(SZ_EDITOR)
 #include "editor/editor.h"
 #endif
 #include "game/backlog_mode.h"
@@ -20,17 +20,19 @@
 #include "game/menu_mode.h"
 #include "game/mode.h"
 #include "game/save_load_mode.h"
+#include "game/ui.h"
 #include "game/vn_mode.h"
-#include "gfx/atlas.h"
-#include "gfx/gfx.h"
-#include "gfx/texture.h"
+#include "render/atlas.h"
+#include "render/render.h"
+#include "render/texture.h"
 #include "platform/clock.h"
 #include "platform/input.h"
+#include "platform/input_record.h"
 #include "platform/window.h"
 #include "text/font.h"
 #include "text/glyph_cache.h"
 #include "text/layout.h"
-#include "script/lua_bindings.h"
+#include "lua/lua_bindings.h"
 #include "vm/backlog.h"
 #include "vm/rollback.h"
 #include "vm/save.h"
@@ -46,12 +48,11 @@
 // avanzando con el efecto de maquina de escribir (visible_glyphs), para demostrar que
 // text_layout no se vuelve a llamar por frame (SPEC.md #12).
 //
-// M3: VM y DSL. Carga assets_baked/demo.vnc (compilado por vne_bake desde
+// M3: VM y DSL. Carga assets_baked/demo.vnc (compilado por sz_bake desde
 // assets_src/scripts/demo.vns) y lo avanza con vm_update() cada frame. Con
 // --autoplay-script <ruta> corre un guion entero via vm_skip_current() sin abrir ventana,
 // a maxima velocidad (skill vne-build-verify), y sale con codigo 0/1.
 
-constexpr f32 k_demo_typewriter_glyphs_per_second = 18.0f;
 
 constexpr usize k_perm_arena_size  = 64ull * 1024 * 1024;
 constexpr usize k_scene_arena_size = 256ull * 1024 * 1024;
@@ -59,9 +60,6 @@ constexpr usize k_frame_arena_size = 8ull * 1024 * 1024;
 
 constexpr u32 k_frame_history_len   = 240;
 constexpr f64 k_report_interval_s   = 2.0;
-constexpr u32 k_stress_sprite_count = 5000;
-constexpr u32 k_stress_grid_cols    = 100;
-constexpr u32 k_stress_grid_rows    = 50;  // 100*50 = 5000
 
 
 static f32 frame_history_p99_ms(const f32* history, u32 count) {
@@ -90,7 +88,7 @@ static f32 frame_history_p99_ms(const f32* history, u32 count) {
 
 // El lector del manifiesto del atlas vivia aqui suelto desde M1 ("no hay todavia un modulo
 // assets/ formal: esto es una lectura minima, solo para el stress test"). M13 lo saca a
-// gfx/atlas.{h,cpp} porque ahora tiene consumidores de verdad —validacion de @show/@bg al
+// render/atlas.{h,cpp} porque ahora tiene consumidores de verdad —validacion de @show/@bg al
 // compilar y dibujado de fondos y actores— y necesita busqueda por nombre, no solo por
 // indice.
 
@@ -99,7 +97,7 @@ static f32 frame_history_p99_ms(const f32* history, u32 count) {
 // (leer un archivo recien modificado sin volver a hornear el .pak entero). Un unico sitio
 // para esta decision: main() y run_autoplay() la comparten.
 static void mount_assets_backend() {
-#if defined(VN_SHIPPING)
+#if defined(SZ_SHIPPING)
     pak_mount("game.pak");
 #else
     pak_mount(".");  // assets_baked/ y assets_src/ttf|ogg del propio build dir
@@ -115,6 +113,11 @@ static int run_autoplay(const char* script_path) {
     g_arena_scene = arena_create(k_scene_arena_size, "scene");
     g_arena_frame = arena_create(k_frame_arena_size, "frame");
     mount_assets_backend();
+    // La tabla de simbolos del proyecto hace falta AQUI tambien, y faltaba: sin ella
+    // `vn.get_var/set_var` no puede resolver un nombre a un id y todo `@lua` de un guion
+    // reportaba "la variable no existe". --autoplay-script seguia saliendo con 0, asi que la
+    // verificacion de guiones daba por bueno un Lua que no funcionaba. Encontrado en P0.
+    symbols_load(&g_arena_perm);
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
     lua_init();
@@ -155,6 +158,12 @@ int main(int argc, char** argv) {
     // bloquean esperando un input que en este entorno no se puede inyectar.
     const char* script_name     = "demo.vnc";
     bool        script_override = false;
+    // M15: --record-input graba las pulsaciones a un .vnrec y --replay-input las vuelve a
+    // meter como si alguien las estuviera tecleando. Es lo que por fin permite verificar
+    // F5/F9, el rollback, los modos y el cambio de idioma con teclas de verdad y no solo por
+    // su logica interna (la limitacion que se venia declarando desde M4).
+    const char* record_path = nullptr;
+    const char* replay_path = nullptr;
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::strcmp(argv[i], "--autoplay-script") == 0) {
             return run_autoplay(argv[i + 1]);
@@ -162,6 +171,12 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--script") == 0) {
             script_name     = argv[i + 1];
             script_override = true;
+        }
+        if (std::strcmp(argv[i], "--record-input") == 0) {
+            record_path = argv[i + 1];
+        }
+        if (std::strcmp(argv[i], "--replay-input") == 0) {
+            replay_path = argv[i + 1];
         }
     }
 
@@ -171,7 +186,13 @@ int main(int argc, char** argv) {
     mount_assets_backend();
     // Antes que nada lo que dependa de una preferencia: el idioma y los volumenes salen de
     // aqui, no de valores por defecto (M14).
-    config_load();
+    // Una reproduccion NO lee las preferencias del jugador (M15): si las leyera, la misma
+    // sesion daria resultados distintos segun el config.ini que hubiera en el disco, y una
+    // grabacion existe precisamente para ser reproducible. De paso evita que reproducir una
+    // sesion le pise la configuracion a quien este jugando.
+    if (replay_path == nullptr) {
+        config_load();
+    }
     rollback_init(&g_rollback);
     backlog_reset(&g_backlog);
     lua_init();
@@ -182,21 +203,21 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    if (!gfx_init(&window)) {
-        log_error("gfx_init fallo");
+    if (!render_init(&window)) {
+        log_error("render_init fallo");
         return 1;
     }
-    // Despues de gfx_init (su primera pagina de atlas usa texture_create_dynamic, que
-    // necesita el sistema de texturas ya en pie) y desde aqui, no desde gfx_init: gfx no
+    // Despues de render_init (su primera pagina de atlas usa texture_create_dynamic, que
+    // necesita el sistema de texturas ya en pie) y desde aqui, no desde render_init: gfx no
     // depende de text en ninguna otra parte y meterle este include invertiria las capas
-    // (text/ ya depende de gfx/). Es la misma capa que ya llama a
+    // (text/ ya depende de render/). Es la misma capa que ya llama a
     // glyph_cache_begin_frame() cada frame.
     glyph_cache_init();
     // Despues del sistema de texturas (assets_texture reserva el handle placeholder) y con
     // el backend ya montado: arranca el hilo de IO (SPEC.md #7.4).
     assets_init();
 
-#if defined(VN_EDITOR)
+#if defined(SZ_EDITOR)
     editor_init();
     g_editor_render_hook = editor_render;
 #endif
@@ -207,10 +228,12 @@ int main(int argc, char** argv) {
     // (SPEC.md #7.4, criterio de M11). Los primeros frames dibujan magenta a proposito.
     TextureHandle atlas = assets_texture("atlas_00.qoi");
 
-    // El registro de sprites del atlas (M13, gfx/atlas.h). Un fallo no es fatal: el juego
+    // El registro de sprites del atlas (M13, render/atlas.h). Un fallo no es fatal: el juego
     // sigue con el placeholder magenta, igual que antes.
     atlas_load(&g_arena_perm);
-    u32 atlas_count = atlas_sprite_count();
+    // De donde saca la UI su arte (M15). Una sola vez: los modos no reciben la textura, la
+    // piden a game/ui.h, que es tambien quien decide que sprite usa cada elemento.
+    ui_set_atlas(atlas);
 
     FontHandle demo_font = text_load_font("ttf/NotoSansJP-subset.ttf", 28);
     if (!demo_font.valid()) {
@@ -235,16 +258,6 @@ int main(int argc, char** argv) {
     hot_reload_init();
     hot_reload_watch_font(demo_font, "ttf/NotoSansJP-subset.ttf", 28);
     hot_reload_watch_font(latin_dialogue_font, "ttf/NotoSans-subset.ttf", 28);
-    const char* demo_text =
-        "Hola {b}mundo{/b}. {color=#ff5040}Texto en rojo{/color}. "
-        "{ruby=\xE3\x81\x8B\xE3\x82\x93\xE3\x81\x98}\xE6\xBC\xA2\xE5\xAD\x97{/ruby} "
-        "con furigana.";
-    // La arena de escena (no la de frame) porque el layout debe sobrevivir entre frames:
-    // el efecto de maquina de escribir solo cambia visible_glyphs, nunca relayoutea
-    // (regla del skill vne-rendering). Arriba de la pantalla para no pelear visualmente
-    // con el cuadro de dialogo real de M7 (VnMode), que vive en la parte de abajo.
-    TextLayout demo_layout = text_layout(demo_font, demo_text, 1700.0f, &g_arena_scene);
-    f32        visible_glyphs_f = 0.0f;
 
     GameState demo_state{};
     // Posicion inicial dentro de assets_src/maps/demo_map.tmx (M9): el centro de la sala
@@ -263,7 +276,7 @@ int main(int argc, char** argv) {
 
     CompiledScript demo_script{};
     if (script_load(script_name, &g_arena_scene, &demo_script) != ScriptLoadResult::Ok) {
-        log_error("No se pudo cargar '%s'; ejecuta vne_bake primero.", script_name);
+        log_error("No se pudo cargar '%s'; ejecuta sz_bake primero.", script_name);
     }
 
     // Pila de modos (SPEC.md #10, M7): VnMode dirige la VM y el cuadro de dialogo real
@@ -296,6 +309,16 @@ int main(int argc, char** argv) {
     // que es el criterio de SPEC.md #12 ("cambiar el idioma, cerrar el proceso y volver a
     // abrirlo mantiene el idioma elegido"). Va DESPUES de cablear las fuentes: apply_locale
     // las reasigna segun el idioma.
+    // Grabacion/reproduccion de input (M15). Va justo antes del bucle: todo lo que se
+    // inicializa arriba ya esta en pie, asi que la sesion empieza con el juego en un estado
+    // conocido.
+    menu_mode.persist_config = (replay_path == nullptr);
+    if (record_path != nullptr) {
+        input_record_begin(record_path);
+    } else if (replay_path != nullptr) {
+        input_replay_begin(replay_path);
+    }
+
     menu_mode.catalog_arena = &g_arena_perm;  // el catalogo sobrevive a un cambio de escena
     menu_mode.locale_index  = static_cast<i32>(g_config.locale_index);
     menu_mode.apply_locale();
@@ -322,7 +345,7 @@ int main(int argc, char** argv) {
     bool        have_map = map_name != nullptr && map_mode.load(map_name, &g_arena_scene);
     if (!have_map) {
         log_error("No se pudo cargar el mapa con map_id=%u (%u mapas en el catalogo); "
-                  "ejecuta vne_bake map primero.",
+                  "ejecuta sz_bake map primero.",
                   demo_state.map_id, map_catalog_count());
     }
 
@@ -336,8 +359,14 @@ int main(int argc, char** argv) {
         mode_stack_push(&mode_stack, &vn_mode);
     }
 
-    InputState input{};
-    Clock      clock = clock_create();
+    InputState input{};  // tal y como lo entrega la plataforma: raton en pixeles de ventana
+    // Lo que ve la logica de juego: el mismo estado con el raton ya convertido a
+    // coordenadas virtuales 1920x1080 (M15, ADR-0070). Son dos valores y no uno porque el
+    // editor necesita el primero (ImGui dibuja en pixeles de ventana) y los Mode el
+    // segundo (ningun modo conoce el tamano de la ventana, skill vne-rendering).
+    InputState ui_input{};
+    i32        window_w = 0, window_h = 0;
+    Clock      clock    = clock_create();
 
     f32* frame_times      = arena_alloc_n<f32>(&g_arena_perm, k_frame_history_len);
     u32  frame_index      = 0;
@@ -345,21 +374,36 @@ int main(int argc, char** argv) {
     f64  report_timer     = 0.0;
     u64  max_frame_allocs = 0;
 
-    const f32 cell_dst_w = static_cast<f32>(k_virtual_width) / static_cast<f32>(k_stress_grid_cols);
-    const f32 cell_dst_h = static_cast<f32>(k_virtual_height) / static_cast<f32>(k_stress_grid_rows);
-
     while (!input.quit_requested) {
         arena_reset(&g_arena_frame);
         heap_guard_reset_frame();
-        gfx_begin_frame();
+        render_begin_frame();
         glyph_cache_begin_frame();
         // Unico punto donde un asset que trajo el hilo de IO entra en el juego (SPEC.md
         // #7.4). Acotado por dentro para no reventar el presupuesto del frame.
         assets_process_completed_loads();
 
-        platform_poll_events(&input);
+        // En reproduccion el input NO se lee del sistema: sale de la sesion grabada. Cuando
+        // se acaba, el juego se cierra solo — asi una sesion reproducida termina de forma
+        // determinista en vez de quedarse en una ventana esperando a nadie.
+        platform_window_size_px(&window, &window_w, &window_h);
+        if (input_replay_active()) {
+            // Una grabacion guarda ya el estado CONVERTIDO, asi que reproducirla no vuelve
+            // a convertir nada: por eso una sesion se reproduce igual en una ventana de
+            // otro tamano, y dentro de la suite de tests, donde no hay ventana ninguna.
+            if (!input_replay_next(&ui_input)) {
+                break;
+            }
+            input = ui_input;
+        } else {
+            platform_poll_events(&input);
+            ui_input = input;
+            render_window_to_virtual(window_w, window_h, input.mouse_x, input.mouse_y,
+                                   &ui_input.mouse_x, &ui_input.mouse_y);
+        }
+        input_record_frame(ui_input);
 
-#if defined(VN_EDITOR)
+#if defined(SZ_EDITOR)
         if (input.key_pressed[SDL_SCANCODE_F1]) {
             editor_toggle();
         }
@@ -396,12 +440,18 @@ int main(int argc, char** argv) {
             vm_resync_after_state_change(&demo_state);
         }
 
+        // Paso fijo mientras se graba o se reproduce (M15): una sesion grabada existe para ser
+        // reproducible, y con dt variable la reproduccion divergiria del original en cuanto un
+        // temporizador cayera en otro frame.
         f32 dt = clock_tick(&clock);
+        if (input_replay_active() || input_record_active()) {
+            dt = k_input_record_dt;
+        }
         audio_update(dt, &demo_state.bgm_position);
         // Vacio en Ship; en Debug/Dev comprueba mtimes como mucho cada 500 ms.
         hot_reload_update(dt);
 
-        mode_stack_update(&mode_stack, input, dt);
+        mode_stack_update(&mode_stack, ui_input, dt);
         if (backlog_mode.wants_close) {
             backlog_mode.wants_close = false;
             mode_stack_pop(&mode_stack);
@@ -414,6 +464,41 @@ int main(int argc, char** argv) {
             save_load_mode.wants_close = false;
             mode_stack_pop(&mode_stack);
         }
+
+        // Lo mismo que el router de teclas de arriba, pero pedido con el raton desde la
+        // botonera de VnMode (M15). Comparte el mismo `mode_stack.count == 1`: un boton no
+        // puede abrir un overlay estando ya dentro de otro, igual que no lo puede la tecla.
+        if (mode_stack.count == 1 && vn_mode.ui_request != VnUiRequest::None) {
+            switch (vn_mode.ui_request) {
+                case VnUiRequest::Backlog:
+                    mode_stack_push(&mode_stack, &backlog_mode);
+                    break;
+                case VnUiRequest::Menu:
+                    mode_stack_push(&mode_stack, &menu_mode);
+                    break;
+                case VnUiRequest::Save:
+                    save_load_mode.is_save = true;
+                    mode_stack_push(&mode_stack, &save_load_mode);
+                    break;
+                case VnUiRequest::Load:
+                    save_load_mode.is_save = false;
+                    mode_stack_push(&mode_stack, &save_load_mode);
+                    break;
+                case VnUiRequest::RollbackBack:
+                    rollback_back(&g_rollback, &demo_state);
+                    vm_resync_after_state_change(&demo_state);
+                    break;
+                case VnUiRequest::RollbackForward:
+                    rollback_forward(&g_rollback, &demo_state);
+                    vm_resync_after_state_change(&demo_state);
+                    break;
+                case VnUiRequest::None:
+                    break;
+            }
+        }
+        // Se limpia SIEMPRE, incluso si no se atendio (por ejemplo por haber un overlay
+        // abierto): una peticion es de este frame, no una cola.
+        vn_mode.ui_request = VnUiRequest::None;
 
         // MapMode <-> VnMode (M9, SPEC.md #10): pisar un trigger apila una VnMode nueva
         // con el guion de ese trigger; cuando esa escena termina, se vuelve al mapa con
@@ -439,57 +524,25 @@ int main(int argc, char** argv) {
             mode_stack_pop(&mode_stack);
         }
 
-        for (u32 i = 0; i < k_stress_sprite_count; ++i) {
-            AtlasSprite rect{0, 0, 1, 1};
-            if (atlas_count > 0) {
-                atlas_sprite_at(i % atlas_count, &rect);
-            }
-
-            Sprite s{};
-            s.tex   = atlas;
-            s.src_x = static_cast<f32>(rect.x);
-            s.src_y = static_cast<f32>(rect.y);
-            s.src_w = static_cast<f32>(rect.w);
-            s.src_h = static_cast<f32>(rect.h);
-
-            u32 col = i % k_stress_grid_cols;
-            u32 row = i / k_stress_grid_cols;
-            s.dst_x = static_cast<f32>(col) * cell_dst_w;
-            s.dst_y = static_cast<f32>(row) * cell_dst_h;
-            s.dst_w = cell_dst_w - 1.0f;
-            s.dst_h = cell_dst_h - 1.0f;
-            s.layer = static_cast<u16>(GfxLayer::Actors);
-
-            gfx_draw_sprite(s);
-        }
-
         // VnMode ya avanzo la VM dentro de mode_stack_update() de mas arriba (SPEC.md
         // #10): un unico router de modos, no una llamada aparte a vm_update aqui.
         mode_stack_render(&mode_stack);
 
-        visible_glyphs_f += k_demo_typewriter_glyphs_per_second * dt;
-        if (visible_glyphs_f > static_cast<f32>(demo_layout.count) * 1.5f) {
-            visible_glyphs_f = 0.0f;  // reinicia el efecto para que la demo haga bucle
-        }
-        u32 visible_glyphs = static_cast<u32>(visible_glyphs_f);
-        text_draw(demo_layout, 80.0f, 60.0f, visible_glyphs);
-
         // Una sola vez por frame, despues de todos los text_draw/text_layout del frame y
-        // antes de gfx_flush(): sg_update_image solo admite una subida por pagina y por
+        // antes de render_flush(): sg_update_image solo admite una subida por pagina y por
         // frame (ver docs/DECISIONS.md, hito M2).
         glyph_cache_flush_dirty_pages();
 
-        gfx_flush();
+        render_flush();
 
-        i32 window_w = 0, window_h = 0;
-        platform_window_size_px(&window, &window_w, &window_h);
 
-#if defined(VN_EDITOR)
+#if defined(SZ_EDITOR)
         EditorDiagnostics editor_diag{};
         editor_diag.frame_times        = frame_times;
         editor_diag.frame_time_count   = frames_recorded;
         editor_diag.max_frame_allocs   = max_frame_allocs;
-        editor_diag.atlas_sprite_count = atlas_count;
+        editor_diag.atlas_sprite_count = atlas_sprite_count();
+        editor_diag.atlas_texture       = atlas;
         editor_update(input, &demo_state, &demo_script, "assets_src/scripts/demo.vns",
                       editor_diag, window_w, window_h, dt);
 #endif
@@ -501,7 +554,7 @@ int main(int argc, char** argv) {
             max_frame_allocs = g_frame_alloc_count;
         }
 
-        gfx_present(window_w, window_h);
+        render_present(window_w, window_h);
 
         frame_times[frame_index % k_frame_history_len] = dt;
         frame_index += 1;
@@ -516,19 +569,24 @@ int main(int argc, char** argv) {
             log_info(
                 "fps~%.1f frame_p99=%.2fms draw_calls=%u sprites=%u heap_allocs_frame_max=%llu "
                 "text_layout_calls=%u vm_pc=%u/%u",
-                fps, p99_ms, g_gfx_draw_call_count, g_gfx_sprite_count_last_frame,
+                // El denominador es el guion que la VM esta ejecutando AHORA, no demo.vnc: al
+                // pisar un trigger VnMode cambia de guion (M9) y el HUD seguia dividiendo
+                // por los 185 comandos de demo.vnc, asi que "vm_pc=40/185" describia dos
+                // guiones distintos a la vez.
+                fps, p99_ms, g_render_draw_call_count, g_render_sprite_count_last_frame,
                 static_cast<unsigned long long>(max_frame_allocs), g_text_layout_call_count,
-                demo_state.vm.pc, demo_script.cmd_count);
+                demo_state.vm.pc, vn_mode.script.cmd_count);
         }
     }
 
-#if defined(VN_EDITOR)
+    input_record_end();  // escribe el .vnrec si se estaba grabando (M15)
+#if defined(SZ_EDITOR)
     editor_shutdown();
 #endif
     audio_shutdown();
     assets_shutdown();       // para el hilo de IO antes de tirar nada que pueda estar usando
-    glyph_cache_shutdown();  // antes de gfx_shutdown, simetrico con el init de arriba
-    gfx_shutdown();
+    glyph_cache_shutdown();  // antes de render_shutdown, simetrico con el init de arriba
+    render_shutdown();
     platform_window_destroy(&window);
     arena_destroy(&g_arena_frame);
     arena_destroy(&g_arena_scene);

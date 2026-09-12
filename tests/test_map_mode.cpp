@@ -7,7 +7,7 @@
 
 #include <SDL3/SDL.h>
 
-#include "base/arena.h"
+#include "core/arena.h"
 #include "game/map_catalog.h"
 #include "game/map_mode.h"
 

@@ -105,6 +105,41 @@ Requisitos que no son negociables:
 - Furigana / ruby text soportado en el layout desde el diseño inicial.
 - Marcado inline: `{b}`, `{color=#rrggbb}`, `{ruby=...}`, `{w=n}`, `{speed=n}`.
 
+## Una subida por imagen y por frame
+
+`sokol_gfx` admite **una sola** llamada a `sg_update_image` por imagen y por frame. Pasarse no
+devuelve un error: dispara su assert interno y **aborta el proceso**.
+
+Afecta a todo lo que suba píxeles desde la CPU: las páginas del atlas de glifos y las texturas
+dinámicas (`texture_update_dynamic`, que es por donde van las miniaturas de guardado). Cada
+consumidor resuelve el choque a su manera, y la diferencia es deliberada:
+
+- `glyph_cache_flush_dirty_pages` **posterga** la subida al frame siguiente, porque cada subida
+  trae glifos nuevos que se perderían.
+- `texture_update_dynamic` **descarta** la segunda con un `log_warn`, porque es la misma imagen
+  otra vez y descartarla no pierde información (ADR-0072).
+
+Si añades un camino que suba una imagen, decide cuál de las dos cosas hace y compruébalo: el
+fallo no se manifiesta como un fotograma raro, se manifiesta como un proceso muerto, y solo
+cuando el jugador hace la misma acción dos veces en 16 ms. Costó encontrarlo una vez.
+
+## La UI mide en unidades virtuales
+
+El ratón llega a los `Mode` en coordenadas virtuales 1920x1080, no en píxeles de ventana:
+`main.cpp` convierte una copia del `InputState` con `gfx_window_to_virtual` una vez por frame
+(ADR-0070). El editor es la excepción, porque ImGui dibuja en píxeles de ventana.
+
+`gfx_window_to_virtual` y `gfx_present` son las **únicas** dos funciones del proyecto que
+conocen el tamaño real de la ventana. Si estás a punto de pedir `window_w`/`window_h` en
+cualquier otro sitio, para: casi seguro lo que necesitas son unidades virtuales.
+
+Un punto sobre la barra negra del letterbox cae **fuera** de `[0,1920]x[0,1080]`, a propósito,
+así que ningún rectángulo de UI lo contiene y no hace falta comprobar "está dentro" aparte.
+
+Los rectángulos de la UI se definen en **una** función que comparten `update()` y `render()`
+(`vn_button_rect`, `menu_slider_rect`, `save_slot_rect`...). Si cada uno calculara los suyos,
+un botón se dibujaría donde no se puede pulsar y nada lo avisaría.
+
 ## La regla del máquina de escribir
 
 **`text_layout` no se llama por frame.** Se llama una vez cuando el texto cambia. El efecto
@@ -116,14 +151,16 @@ común en motores de VN.
 
 ## Transiciones
 
-**No implementadas todavía: las añade M12.** La capa `Transition` (7) existe en `gfx.h` pero
-nadie dibuja en ella, y `CmdKind` no tiene `Transition`. Cuando toque, se implementan como un
-shader de pantalla completa sobre esa capa, con una textura de máscara y un umbral animado, de
-forma que fade, wipe y disolución compartan la misma ruta de código. No escribas un sistema de
-transiciones por comando.
+Implementadas en M12. Un shader de pantalla completa sobre la capa `Transition` (7), con una
+textura de máscara y un umbral animado: fade, wipe y disolución comparten **una sola fórmula**
+(`alpha = saturate((threshold - mask) * sharpness)`) y las máscaras se generan por código, no
+son assets. No escribas un sistema de transiciones por comando.
 
-Ojo: los `fade` que ya aceptan `@bg`, `@show` y `@hide` son interpolaciones de alfa por sprite,
-que es otra cosa y ya funciona. Lo que falta es la transición de pantalla completa.
+Cuesta **exactamente una draw call extra**, sea cual sea la máscara, porque las tres comparten
+shader y solo cambia la textura de máscara. Medido: 3 -> 4.
+
+Ojo: los `fade` que aceptan `@bg`, `@show` y `@hide` son interpolaciones de alfa por sprite,
+que es otra cosa distinta de `@transition`.
 
 ## Placeholder
 

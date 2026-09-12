@@ -1,10 +1,10 @@
 #pragma once
-#include "base/handle.h"
-#include "base/types.h"
+#include "core/handle.h"
+#include "core/types.h"
 
 // Audio (SPEC.md #7.3): miniaudio decodifica OGG/WAV/FLAC y mezcla. La musica se
 // reproduce en streaming, los efectos se cargan enteros. No sabe nada de miniaudio fuera
-// de audio.cpp (misma idea que gfx/texture_internal.h para sokol_gfx).
+// de audio.cpp (misma idea que render/texture_internal.h para sokol_gfx).
 
 enum class Bus : u8 { Master, Music, Sfx, Voice, Count };
 

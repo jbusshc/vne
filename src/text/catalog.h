@@ -1,6 +1,6 @@
 #pragma once
-#include "base/arena.h"
-#include "base/types.h"
+#include "core/arena.h"
+#include "core/types.h"
 
 // Catalogo de localizacion (SPEC.md #9.2/#10, M10). Formato .vnl horneado a binario
 // (ADR-0046: decision del usuario, no del agente — SPEC.md #14 lo marcaba
@@ -21,7 +21,7 @@ constexpr u32 k_vnl_version = 1;
 enum class CatalogLoadResult : u8 { Ok, NotFound, BadFormat };
 
 // logical_name se resuelve contra el backend de assets activo (directorio suelto o .pak,
-// ver assets/pak.h -- p.ej. "ja.vnl"), no una ruta de archivo literal (M11).
+// ver vfs/pak.h -- p.ej. "ja.vnl"), no una ruta de archivo literal (M11).
 CatalogLoadResult catalog_load(const char* logical_name, Arena* arena);
 
 // Sin catalogo activo (idioma base, el mismo en que se autoraron los guiones): cualquier

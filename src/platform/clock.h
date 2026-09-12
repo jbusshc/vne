@@ -1,7 +1,7 @@
 #pragma once
 #include <SDL3/SDL.h>
 
-#include "base/types.h"
+#include "core/types.h"
 
 // Sin timestep fijo (SPEC.md #6.5): el VN no necesita determinismo porque el rollback usa
 // instantaneas completas, no reejecucion.

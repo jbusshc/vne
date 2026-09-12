@@ -1,13 +1,25 @@
 #pragma once
-#include "base/arena.h"
-#include "base/handle.h"
+#include "core/arena.h"
+#include "core/handle.h"
 #include "game/mode.h"
+#include "game/ui.h"
 #include "text/layout.h"
-#include "vm/state.h"
+#include "formats/state.h"
 
-// Menu de configuracion (SPEC.md #10): volumenes de bus (M6) con sliders discretos
-// (flechas izq/der, sin mouse: platform/input.h no rastrea el raton todavia, ver
-// docs/DECISIONS.md), mas cambio de idioma en caliente (M10). Se apila sobre VnMode.
+// Menu de configuracion (SPEC.md #10): volumenes de bus (M6) con sliders, mas cambio de
+// idioma en caliente (M10). Se apila sobre VnMode.
+//
+// M15: se maneja tambien con el raton — los sliders se arrastran y la fila de idioma se
+// pincha. Hasta aqui era solo teclado (flechas), que es lo que ADR-0040 dejo anotado.
+
+constexpr i32 k_menu_row_count = 5;  // 4 buses + idioma
+
+// Rectangulos en coordenadas virtuales, compartidos por update() y render() para que lo
+// que se dibuja y lo que se puede pulsar no puedan discrepar. Expuestos para que un test
+// pinche un slider concreto sin adivinar coordenadas.
+UiRect menu_row_rect(i32 row);
+UiRect menu_slider_rect(i32 bus);
+UiRect menu_close_rect();
 struct MenuMode : Mode {
     GameState* state = nullptr;
     FontHandle font;
@@ -38,6 +50,11 @@ struct MenuMode : Mode {
     // todavia, pero era una mina: en un test lo fue, con SIGSEGV.
     Arena* catalog_arena = nullptr;
 
+    // Si false, cambiar una preferencia NO escribe config.ini (M15). Lo pone a false quien
+    // reproduce una sesion grabada: una reproduccion no debe pisarle la configuracion a
+    // quien este jugando, ni depender de la que hubiera.
+    bool persist_config = true;
+
     // Aplica el idioma actual: carga su catalogo y pone las fuentes que le tocan. Publica
     // porque main.cpp la llama al arrancar para aplicar lo que venia en config.ini, sin
     // tener que simular una pulsacion de tecla.
@@ -49,6 +66,17 @@ struct MenuMode : Mode {
     i32        cached_selected      = -1;
     f32        cached_volumes[4]    = {-1.0f, -1.0f, -1.0f, -1.0f};
     i32        cached_locale        = -1;
+
+    // Raton (M15). dragging_bus es el bus cuyo slider se esta arrastrando, o -1: hace falta
+    // recordarlo entre frames por dos razones. Una, para que arrastrar siga funcionando
+    // aunque el cursor se salga un poco del carril. Y otra mas concreta: config.ini se
+    // escribe al SOLTAR, no en cada frame del arrastre, que serian sesenta escrituras de
+    // archivo por segundo.
+    i32        dragging_bus = -1;
+    i32        hovered_row   = -1;
+    bool       hovered_close = false;
+    TextLayout close_label;
+    bool       close_label_built = false;
 
     void update(const InputState& input, f32 dt) override;
     void render() override;

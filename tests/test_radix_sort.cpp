@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "base/radix_sort.h"
+#include "core/radix_sort.h"
 
 TEST_CASE("radix_sort_u64: ordena claves ascendentes") {
     Arena a = arena_create(4096, "test");

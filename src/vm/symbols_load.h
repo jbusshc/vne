@@ -1,9 +1,9 @@
 #pragma once
-#include "base/arena.h"
-#include "base/types.h"
+#include "core/arena.h"
+#include "core/types.h"
 
 // Lector en runtime de la tabla de simbolos del proyecto (`project.vnsym`, M14). El escritor
-// vive en src/script/symbols.h y solo lo usa `vne_bake`; aqui no hay std::string ni
+// vive en src/script/symbols.h y solo lo usa `sz_bake`; aqui no hay std::string ni
 // asignacion, como en el resto del runtime.
 //
 // La tabla es UN solo sitio donde un nombre se convierte en un id, compartido por todos los

@@ -14,8 +14,9 @@
 #pragma warning(pop)
 #endif
 
-#include "gfx/gfx.h"
-#include "gfx/texture.h"
+#include "core/heap_guard.h"
+#include "render/render.h"
+#include "render/texture.h"
 
 const char* save_slot_path(u32 slot_index) {
     static char paths[k_save_slot_count][64];
@@ -58,10 +59,26 @@ void load_slot_thumbnail(SaveLoadMode* m, u32 i) {
 }  // namespace
 
 void SaveLoadMode::on_enter() {
+    // Misma excepcion que al guardar (ver update): abrir el panel decodifica la miniatura de
+    // cada hueco con qoi, que asigna. Es una operacion puntual al abrir un menu, no algo que
+    // pase en cada frame.
+    heap_guard_suspend();
     for (u32 i = 0; i < k_save_slot_count; ++i) {
         load_slot_thumbnail(this, i);
     }
+    heap_guard_resume();
     labels_built = false;
+}
+
+UiRect save_slot_rect(u32 slot_index) {
+    // Misma geometria que render(): miniatura de 192x108 a la izquierda y etiqueta a la
+    // derecha, con el paso vertical de la miniatura mas 30 de aire.
+    f32 step = static_cast<f32>(k_thumbnail_height) * 0.5f + 30.0f;
+    return UiRect{90.0f, 114.0f + static_cast<f32>(slot_index) * step, 900.0f, step - 8.0f};
+}
+
+UiRect save_close_rect() {
+    return UiRect{static_cast<f32>(k_virtual_width) - 260.0f, 40.0f, 200.0f, 60.0f};
 }
 
 void SaveLoadMode::update(const InputState& input, f32 dt) {
@@ -77,13 +94,50 @@ void SaveLoadMode::update(const InputState& input, f32 dt) {
         selected < static_cast<i32>(k_save_slot_count) - 1) {
         selected += 1;
     }
-    if (!input.key_pressed[SDL_SCANCODE_RETURN] && !input.key_pressed[SDL_SCANCODE_SPACE]) {
+
+    // Raton (M15).
+    hovered_close = ui_hover(save_close_rect(), input);
+    if (hovered_close && input.mouse_pressed[0]) {
+        wants_close = true;
+        return;
+    }
+    hovered_slot = -1;
+    for (u32 i = 0; i < k_save_slot_count; ++i) {
+        if (ui_hover(save_slot_rect(i), input)) {
+            hovered_slot = static_cast<i32>(i);
+        }
+    }
+    // Un clic en un hueco lo elige Y ejecuta la accion, igual que INTRO sobre el hueco
+    // elegido. Un solo gesto y no dos: quien abre este panel ya decidio si viene a guardar o
+    // a cargar (is_save), asi que pedir una confirmacion aparte solo anadiria un clic.
+    bool clicked_slot = input.mouse_pressed[0] && hovered_slot >= 0;
+    if (clicked_slot) {
+        selected = hovered_slot;
+    }
+
+    if (!clicked_slot && !input.key_pressed[SDL_SCANCODE_RETURN] &&
+        !input.key_pressed[SDL_SCANCODE_SPACE]) {
         return;
     }
 
     const char* path = save_slot_path(static_cast<u32>(selected));
+
+    // Guardar y cargar salen del presupuesto de cero heap por frame (SPEC.md #4), misma
+    // familia que ADR-0035: codigo de terceros que asigna al codificar/decodificar un asset
+    // durante una operacion pesada, puntual y pedida por el jugador. Medido en M15 al
+    // reproducir la sesion grabada: qoi_encode de la miniatura hace 2 asignaciones.
+    //
+    // Nadie lo habia visto hasta ahora porque ningun test habia pulsado F5 DENTRO del bucle
+    // de frame — es exactamente el hueco que la grabacion de input existe para cerrar.
+    // Un tiron al guardar es normal en cualquier juego; uno por frame no lo seria, y por eso
+    // la excepcion se acota aqui y no mas arriba.
+    heap_guard_suspend();
+    struct GuardResume {
+        ~GuardResume() { heap_guard_resume(); }
+    } guard_resume;
+
     if (is_save) {
-        bool captured = gfx_capture_thumbnail(g_thumbnail_scratch, k_thumbnail_width,
+        bool captured = render_capture_thumbnail(g_thumbnail_scratch, k_thumbnail_width,
                                                k_thumbnail_height);
         if (captured) {
             qoi_desc desc{};
@@ -117,14 +171,14 @@ void SaveLoadMode::update(const InputState& input, f32 dt) {
 
 void SaveLoadMode::render() {
     Sprite panel{};
-    panel.tex   = gfx_white_texture();
+    panel.tex   = render_white_texture();
     panel.dst_x = 0.0f;
     panel.dst_y = 0.0f;
     panel.dst_w = static_cast<f32>(k_virtual_width);
     panel.dst_h = static_cast<f32>(k_virtual_height);
     panel.color = 0xE6000000u;
-    panel.layer = static_cast<u16>(GfxLayer::UI);
-    gfx_draw_sprite(panel);
+    panel.layer = static_cast<u16>(RenderLayer::UI);
+    render_draw_sprite(panel);
 
     if (font.valid() && !labels_built) {
         for (u32 i = 0; i < k_save_slot_count; ++i) {
@@ -139,6 +193,12 @@ void SaveLoadMode::render() {
 
     f32 y = 120.0f;
     for (u32 i = 0; i < k_save_slot_count; ++i) {
+        UiRect row = save_slot_rect(i);
+        if (static_cast<i32>(i) == selected) {
+            ui_draw_button(row, k_ui_row_selected);
+        } else if (static_cast<i32>(i) == hovered_slot) {
+            ui_draw_button(row, k_ui_button_idle);
+        }
         if (slot_has_data[i] && slot_thumbnail[i].valid()) {
             Sprite thumb{};
             thumb.tex   = slot_thumbnail[i];
@@ -146,12 +206,24 @@ void SaveLoadMode::render() {
             thumb.dst_y = y;
             thumb.dst_w = static_cast<f32>(k_thumbnail_width) * 0.5f;
             thumb.dst_h = static_cast<f32>(k_thumbnail_height) * 0.5f;
-            thumb.layer = static_cast<u16>(GfxLayer::UI);
-            gfx_draw_sprite(thumb);
+            thumb.layer = static_cast<u16>(RenderLayer::UI);
+            thumb.order = 1;  // por encima del fondo de la fila
+            render_draw_sprite(thumb);
         }
         if (font.valid()) {
             text_draw(slot_label[i], 350.0f, y, slot_label[i].count);
         }
         y += static_cast<f32>(k_thumbnail_height) * 0.5f + 30.0f;
     }
+
+    if (!font.valid()) {
+        return;
+    }
+    if (!close_label_built) {
+        close_label       = text_layout(font, "Cerrar", 200.0f, scratch_arena);
+        close_label_built = true;
+    }
+    UiRect close = save_close_rect();
+    ui_draw_button(close, hovered_close ? k_ui_button_hover : k_ui_button_idle);
+    text_draw(close_label, close.x + 16.0f, close.y + 8.0f, close_label.count);
 }

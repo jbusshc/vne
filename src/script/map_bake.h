@@ -3,8 +3,8 @@
 #include <string_view>
 #include <vector>
 
-#include "base/types.h"
-#include "game/map_format.h"
+#include "core/types.h"
+#include "formats/map_format.h"
 
 // Horneado de mapas TMX (Tiled) a .vnm (SPEC.md #11, ADR-0043/ADR-0044). Uso exclusivo de
 // herramientas offline, igual que el lexer/parser/compilador del DSL: el juego solo lee
@@ -12,7 +12,7 @@
 //
 // El parseo esta separado de la E/S a proposito (tmx_parse trabaja sobre una cadena en
 // memoria): asi los tests pueden ejercitar el escaner con un TMX literal, sin archivos ni
-// subprocesos. Antes esto vivia dentro del main.cpp de vne_bake y no habia forma de
+// subprocesos. Antes esto vivia dentro del main.cpp de sz_bake y no habia forma de
 // testearlo — tres bugs reales del escaner (npos+1 desbordando a 0, la <property> de un
 // objeto autocerrado leyendose del objeto siguiente, y ese mismo objeto siguiente
 // saltandose entero) se colaron precisamente por eso.
@@ -32,5 +32,5 @@ struct ParsedMap {
 // produce un mapa a medias en silencio (mismo principio que SPEC.md #9.2).
 bool tmx_parse(std::string_view xml, ParsedMap* out, std::string* out_error);
 
-// Serializa un ParsedMap al formato .vnm (game/map_format.h).
+// Serializa un ParsedMap al formato .vnm (formats/map_format.h).
 bool write_vnm(const std::string& path, const ParsedMap& map);

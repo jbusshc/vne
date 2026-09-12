@@ -5,8 +5,8 @@
 #include <ostream>
 #include <string_view>
 
-#include "base/arena.h"
-#include "base/hash.h"
+#include "core/arena.h"
+#include "core/hash.h"
 #include "text/catalog.h"
 
 // assets_baked/es.vnl y ja.vnl ya estan horneados por el propio build (CMakeLists.txt:

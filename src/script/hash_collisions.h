@@ -2,7 +2,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "base/types.h"
+#include "core/types.h"
 
 // Deteccion de colisiones de hash al hornear (M13). Varios sitios del motor resuelven un
 // nombre a un id por `fnv1a % capacidad` sin tabla de interning, y los ADR que lo decidieron
@@ -17,7 +17,7 @@
 // de musica se confunden al restaurar una partida. Es un bug de logica imposible de rastrear
 // desde el sintoma. Detectarlo cuesta un diccionario en una herramienta offline.
 //
-// Es deliberado que esto viva solo en `vne_script_tools`: el juego no comprueba nada de
+// Es deliberado que esto viva solo en `sz_content`: el juego no comprueba nada de
 // esto en runtime, igual que no valida nombres de asset (skill vne-script-dsl, "cero parsing
 // en release").
 struct HashCollisionCheck {

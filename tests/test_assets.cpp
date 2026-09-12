@@ -6,8 +6,8 @@
 #include <cstdio>
 
 #include "assets/assets.h"
-#include "base/log.h"
-#include "gfx/texture.h"
+#include "core/log.h"
+#include "render/texture.h"
 #include "platform/clock.h"
 #include "test_fonts.h"
 
@@ -15,7 +15,7 @@
 // llamo en test_main.cpp, con el backend montado en "." y el sistema de texturas en pie.
 //
 // Nota: estos tests necesitan contexto grafico (texture_reserve_placeholder reserva un
-// slot del pool de texturas, que solo existe tras gfx_init). Si no lo hay, g_test_font_latin
+// slot del pool de texturas, que solo existe tras render_init). Si no lo hay, g_test_font_latin
 // tampoco es valido -- se usa como senal de "hay GPU" igual que en los tests de M2.
 
 namespace {
@@ -65,7 +65,7 @@ TEST_CASE("assets_texture: devuelve un handle dibujable de inmediato, sin tocar 
     // mismo razonamiento de ADR-0018 para el test de layout de M2, y de lo que se hizo con
     // integrate_us en M11). El numero se sigue registrando SIEMPRE, asi que una regresion
     // de verdad se ve igual en la salida de los tests.
-#if defined(VN_DEBUG) && !defined(VN_EDITOR)
+#if defined(SZ_DEBUG) && !defined(SZ_EDITOR)
     CHECK(worst_us < 1000);  // Debug+ASan: solo guarda contra un desastre de orden de magnitud
 #else
     CHECK(worst_us < 100);  // 0.1 ms, el criterio de M11 tal cual

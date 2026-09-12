@@ -5,7 +5,7 @@
 #include <cstring>
 
 #include "script/parser.h"
-#include "vm/state.h"
+#include "formats/state.h"
 
 namespace {
 constexpr u32 k_kind_count = static_cast<u32>(SymbolKind::Count);

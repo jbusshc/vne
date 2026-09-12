@@ -1,5 +1,5 @@
 #pragma once
-#include "base/types.h"
+#include "core/types.h"
 #include "platform/input.h"
 
 // Pila de estados de juego (SPEC.md #10). Decision explicita de la especificacion usar

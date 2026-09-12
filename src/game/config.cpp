@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "base/log.h"
+#include "core/log.h"
 #include "game/locales.h"
 
 Config g_config;

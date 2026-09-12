@@ -1,12 +1,12 @@
 #pragma once
-#include "base/handle.h"
-#include "base/types.h"
+#include "core/handle.h"
+#include "core/types.h"
 
 // Carga de fuentes con FreeType (SPEC.md #7.2). No sabe nada de FreeType/HarfBuzz: eso
 // vive en font_internal.h, de uso exclusivo de src/text/*.cpp.
 
 // logical_name se resuelve contra el backend de assets activo (directorio suelto o .pak,
-// ver assets/pak.h -- p.ej. "ttf/NotoSans-subset.ttf"), no una ruta de archivo literal (M11).
+// ver vfs/pak.h -- p.ej. "ttf/NotoSans-subset.ttf"), no una ruta de archivo literal (M11).
 // Sincrono: parsear metricas de un TTF es barato, no pasa por el hilo de IO (ver el
 // comentario de text_load_font en font.cpp para el porque).
 //

@@ -4,14 +4,14 @@
 #include <cstdio>
 #include <cstring>
 
-#include "base/types.h"
+#include "core/types.h"
 
 namespace {
 
 constexpr u32 k_atlas_bin_magic   = 0x54414E56u;  // 'VNAT'
 constexpr u32 k_atlas_bin_version = 3;
 
-// Mismo layout que AtlasEntry en tools/bake/main.cpp y en src/gfx/atlas.cpp. Duplicado a
+// Mismo layout que AtlasEntry en tools/bake/main.cpp y en src/render/atlas.cpp. Duplicado a
 // proposito, igual que el resto de formatos de este proyecto: quien escribe, quien lee en
 // runtime y quien valida offline son tres binarios distintos.
 struct AtlasEntry {

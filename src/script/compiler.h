@@ -4,11 +4,11 @@
 
 #include "script/parser.h"
 #include "script/symbols.h"
-#include "vm/cmd.h"
+#include "formats/cmd.h"
 
 // Compilador: resuelve etiquetas a pc, interna nombres de actor/pose/fondo a IDs
 // numericos, y arma el Cmd[] + pool de strings final (SPEC.md #9.3). Uso exclusivo de
-// vne_bake: el runtime nunca ve este codigo (script_load.h lee el .vnc ya compilado).
+// sz_bake: el runtime nunca ve este codigo (script_load.h lee el .vnc ya compilado).
 
 struct CompiledLabel {
     u32 name_hash;
@@ -16,7 +16,7 @@ struct CompiledLabel {
 };
 
 // Una entrada del catalogo de localizacion (SPEC.md #9.2: "clave estable
-// archivo:linea:hash"). No es parte del .vnc: vne_bake la escribe aparte, al catalogo de
+// archivo:linea:hash"). No es parte del .vnc: sz_bake la escribe aparte, al catalogo de
 // extraccion (M10, ver ADR-0046 en docs/DECISIONS.md).
 struct CatalogEntry {
     std::string key;   // "archivo:linea:hash_hex"

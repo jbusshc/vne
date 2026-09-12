@@ -3,10 +3,10 @@
 #include <ostream>
 #include <string>
 
-#include "base/hash.h"
+#include "core/hash.h"
 #include "script/compiler.h"
 #include "script/parser.h"
-#include "vm/state.h"
+#include "formats/state.h"
 #include "vm/vm.h"
 
 // @flag en el DSL (M13). Hasta ahora GameState.flags solo se tocaba desde Lua, asi que una

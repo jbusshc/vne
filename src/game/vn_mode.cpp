@@ -2,9 +2,9 @@
 
 #include <SDL3/SDL.h>
 
-#include "base/log.h"
-#include "gfx/atlas.h"
-#include "gfx/gfx.h"
+#include "core/log.h"
+#include "render/atlas.h"
+#include "render/render.h"
 #include "text/catalog.h"
 #include "vm/script_load.h"
 #include "vm/symbols_load.h"
@@ -86,6 +86,207 @@ void advance_typewriter(VnMode* vn, f32 dt) {
 
 }  // namespace
 
+const char* vn_button_label(VnButton b) {
+    switch (b) {
+        case VnButton::Backlog:         return "Historial";
+        case VnButton::Save:            return "Guardar";
+        case VnButton::Load:            return "Cargar";
+        case VnButton::Menu:            return "Menu";
+        case VnButton::Auto:            return "Auto";
+        case VnButton::Skip:            return "Saltar";
+        case VnButton::RollbackBack:    return "<<";
+        case VnButton::RollbackForward: return ">>";
+        case VnButton::Count:           break;
+    }
+    return "?";
+}
+
+UiRect vn_dialogue_box_rect() {
+    return UiRect{60.0f, 800.0f, static_cast<f32>(k_virtual_width) - 120.0f, 220.0f};
+}
+
+UiRect vn_button_rect(VnButton b) {
+    constexpr f32 k_w   = 150.0f;
+    constexpr f32 k_h   = 52.0f;
+    constexpr f32 k_gap = 8.0f;
+    // Fila justo encima del cuadro de dialogo, alineada a su borde izquierdo. Ocho botones
+    // ocupan 8*158-8 = 1256 de los 1800 del cuadro, asi que no hay riesgo de salirse.
+    UiRect box = vn_dialogue_box_rect();
+    return UiRect{box.x + static_cast<f32>(b) * (k_w + k_gap), box.y - k_h - 12.0f, k_w, k_h};
+}
+
+UiRect vn_choice_rect(u32 option_index, u32 option_count) {
+    constexpr f32 k_h   = 84.0f;
+    constexpr f32 k_gap = 16.0f;
+    constexpr f32 k_w   = 1100.0f;
+    // Bloque centrado vertical y horizontalmente: las opciones son LA decision del momento,
+    // no un adorno en un borde.
+    f32 total = static_cast<f32>(option_count) * k_h +
+                static_cast<f32>(option_count > 0 ? option_count - 1 : 0) * k_gap;
+    f32 top   = (static_cast<f32>(k_virtual_height) - total) * 0.5f;
+    return UiRect{(static_cast<f32>(k_virtual_width) - k_w) * 0.5f,
+                  top + static_cast<f32>(option_index) * (k_h + k_gap), k_w, k_h};
+}
+
+namespace {
+
+bool current_is_choice(const VnMode& vn) {
+    return vn.state->vm.pc < vn.script.cmd_count &&
+           vn.script.cmds[vn.state->vm.pc].kind == CmdKind::Choice;
+}
+
+// Layouts de las opciones del @choice en curso, con las mismas reglas que
+// rebuild_layout_if_needed: se reconstruyen al cambiar el pc o el idioma, nunca por frame
+// (skill vne-rendering).
+void rebuild_choice_layouts_if_needed(VnMode* vn) {
+    if (!current_is_choice(*vn)) {
+        vn->choice_count      = 0;
+        vn->choice_layout_pc = 0xFFFFFFFFu;
+        return;
+    }
+    u32 gen = catalog_generation();
+    if (vn->choice_layout_pc == vn->state->vm.pc && vn->choice_layout_locale == gen) {
+        return;
+    }
+
+    const Cmd& cmd = vn->script.cmds[vn->state->vm.pc];
+    // El compilador ya rechaza un @choice con mas de k_max_choice_options (M15), asi que
+    // este min es una red de seguridad ante un .vnc de otra epoca, no el limite de verdad.
+    u32 count = cmd.choice.option_count < k_max_choice_options
+                     ? cmd.choice.option_count
+                     : k_max_choice_options;
+    for (u32 i = 0; i < count; ++i) {
+        const ChoiceOption& opt = vn->script.choice_options[cmd.choice.first_option + i];
+        // Por catalogo igual que el dialogo (M10): las opciones son texto de juego, no de
+        // interfaz, y tienen su propio key_hash desde M10 precisamente para esto.
+        const char* base = script_string(vn->script, opt.text_id);
+        const char* text = catalog_resolve(opt.key_hash, base);
+        vn->choice_layouts[i] =
+            text_layout(vn->font, text, vn_choice_rect(i, count).w - 60.0f, vn->layout_arena,
+                         0xFFFFFFFFu, vn->bold_font);
+    }
+    vn->choice_count          = count;
+    vn->choice_layout_pc     = vn->state->vm.pc;
+    vn->choice_layout_locale = gen;
+
+    // Arranca en la primera opcion DISPONIBLE, no en la primera sin mas: si la 0 tiene una
+    // condicion que no se cumple, dejar el cursor ahi ofreceria algo que al confirmar no
+    // hace nada.
+    vn->choice_selected = 0;
+    for (u32 i = 0; i < count; ++i) {
+        if (vm_choice_option_available(*vn->state, vn->script, static_cast<u8>(i))) {
+            vn->choice_selected = static_cast<i32>(i);
+            break;
+        }
+    }
+}
+
+// Mueve la seleccion saltandose las opciones cuya condicion no se cumple. El bucle da como
+// mucho una vuelta completa, asi que con todas las opciones bloqueadas no se cuelga: se
+// queda donde estaba.
+void move_choice_selection(VnMode* vn, i32 delta) {
+    i32 n = static_cast<i32>(vn->choice_count);
+    if (n <= 0) {
+        return;
+    }
+    for (i32 step = 1; step <= n; ++step) {
+        i32 candidate = ((vn->choice_selected + delta * step) % n + n) % n;
+        if (vm_choice_option_available(*vn->state, vn->script, static_cast<u8>(candidate))) {
+            vn->choice_selected = candidate;
+            return;
+        }
+    }
+}
+
+// Botonera y gestos de raton. Devuelve true si el clic de este frame lo consumio algo de la
+// UI: sin eso, pinchar "Guardar" abriria el panel Y avanzaria el dialogo por debajo.
+bool handle_mouse_ui(VnMode* vn, const InputState& input) {
+    vn->hovered_button = -1;
+    for (u32 i = 0; i < k_vn_button_count; ++i) {
+        if (ui_hover(vn_button_rect(static_cast<VnButton>(i)), input)) {
+            vn->hovered_button = static_cast<i32>(i);
+        }
+    }
+
+    if (input.mouse_pressed[0] && vn->hovered_button >= 0) {
+        switch (static_cast<VnButton>(vn->hovered_button)) {
+            case VnButton::Backlog: vn->ui_request = VnUiRequest::Backlog; break;
+            case VnButton::Save:    vn->ui_request = VnUiRequest::Save; break;
+            case VnButton::Load:    vn->ui_request = VnUiRequest::Load; break;
+            case VnButton::Menu:    vn->ui_request = VnUiRequest::Menu; break;
+            case VnButton::Auto:    vn->auto_mode = !vn->auto_mode; break;
+            case VnButton::Skip:    vn->skip_mode = !vn->skip_mode; break;
+            case VnButton::RollbackBack:
+                vn->ui_request = VnUiRequest::RollbackBack;
+                break;
+            case VnButton::RollbackForward:
+                vn->ui_request = VnUiRequest::RollbackForward;
+                break;
+            case VnButton::Count: break;
+        }
+        return true;
+    }
+
+    // Las dos convenciones de raton que tiene cualquier novela visual, y que evitan que
+    // jugar solo con raton dependa de acertar un boton de 150x52: rueda arriba abre el
+    // historial, clic derecho abre el menu.
+    if (input.mouse_wheel_y > 0.0f) {
+        vn->ui_request = VnUiRequest::Backlog;
+        return true;
+    }
+    if (input.mouse_pressed[2]) {
+        vn->ui_request = VnUiRequest::Menu;
+        return true;
+    }
+    return false;
+}
+
+// Elegir una opcion con teclado o con raton. click_consumed viene de handle_mouse_ui: un
+// clic que ya pulso un boton no debe elegir tambien una opcion.
+void handle_choice_input(VnMode* vn, const InputState& input, bool click_consumed) {
+    if (input.key_pressed[SDL_SCANCODE_UP]) {
+        move_choice_selection(vn, -1);
+    }
+    if (input.key_pressed[SDL_SCANCODE_DOWN]) {
+        move_choice_selection(vn, 1);
+    }
+
+    // El hover mueve la MISMA seleccion que las flechas, en vez de pintar dos cursores
+    // distintos: el jugador ve siempre un unico "esto es lo que vas a elegir".
+    for (u32 i = 0; i < vn->choice_count; ++i) {
+        if (ui_hover(vn_choice_rect(i, vn->choice_count), input) &&
+            vm_choice_option_available(*vn->state, vn->script, static_cast<u8>(i))) {
+            vn->choice_selected = static_cast<i32>(i);
+        }
+    }
+
+    bool pick = confirm_pressed(input);
+    if (!click_consumed && input.mouse_pressed[0]) {
+        for (u32 i = 0; i < vn->choice_count; ++i) {
+            if (ui_hover(vn_choice_rect(i, vn->choice_count), input)) {
+                pick = true;
+                break;
+            }
+        }
+    }
+    // Atajo por numero, como cualquier novela visual. SDL_SCANCODE_1..9 son consecutivos.
+    for (u32 i = 0; i < vn->choice_count; ++i) {
+        if (input.key_pressed[SDL_SCANCODE_1 + i]) {
+            vn->choice_selected = static_cast<i32>(i);
+            pick                = true;
+        }
+    }
+
+    if (pick) {
+        // Devuelve false si la opcion tiene una condicion que no se cumple; entonces no
+        // pasa nada y el jugador sigue eligiendo, que es el comportamiento correcto.
+        vm_select_choice(&vn->state->vm, vn->state, vn->script,
+                          static_cast<u8>(vn->choice_selected));
+    }
+}
+
+}  // namespace
+
 void VnMode::update(const InputState& input, f32 dt) {
     if (finished || script.cmd_count == 0) {
         return;
@@ -97,6 +298,10 @@ void VnMode::update(const InputState& input, f32 dt) {
     if (input.key_pressed[SDL_SCANCODE_A]) {
         auto_mode = !auto_mode;
     }
+
+    // Raton (M15). Va antes que todo lo demas para que un clic sobre un boton no cuente
+    // ademas como "avanzar el dialogo" ni como "elegir una opcion".
+    bool click_consumed = handle_mouse_ui(this, input);
 
     if (skip_mode) {
         // Modo skip (SPEC.md #12: 1000 comandos en menos de 1 segundo): vm_skip_current
@@ -129,9 +334,23 @@ void VnMode::update(const InputState& input, f32 dt) {
     }
 
     rebuild_layout_if_needed(this);
+    rebuild_choice_layouts_if_needed(this);
+
+    // Un Choice no se completa con el paso del tiempo (vm_update devuelve false para
+    // siempre): lo resuelve vm_select_choice, y hasta M15 nadie lo llamaba desde el juego.
+    if (choice_count > 0) {
+        handle_choice_input(this, input, click_consumed);
+        if (vm_update(&state->vm, state, script, dt)) {
+            finished = true;
+        }
+        return;
+    }
 
     bool waiting_on_say = current_is_say(*this) && state->vm.waiting_for_input != 0;
     bool typewriter_done = visible_glyphs_f >= static_cast<f32>(current_layout.count);
+    // Un clic izquierdo que no consumio la UI avanza el dialogo, igual que espacio o
+    // intro: es LA interaccion de una novela visual con raton.
+    bool confirm = confirm_pressed(input) || (input.mouse_pressed[0] && !click_consumed);
 
     if (waiting_on_say) {
         if (!typewriter_done) {
@@ -140,12 +359,12 @@ void VnMode::update(const InputState& input, f32 dt) {
             // marcha lo completa al instante en vez de avanzar de linea (convencion
             // estandar de novela visual): igual que skip_to_end pero solo para el
             // texto, no para el resto del comando.
-            if (confirm_pressed(input)) {
+            if (confirm) {
                 visible_glyphs_f = static_cast<f32>(current_layout.count);
-        // Completar la linea de golpe cancela cualquier {w=n} en curso: si no, el texto
-        // ya estaria entero en pantalla pero el avance seguiria bloqueado esperando una
-        // pausa que ya no tiene sentido.
-        pause_timer = 0.0f;
+                // Completar la linea de golpe cancela cualquier {w=n} en curso: si no, el
+                // texto ya estaria entero en pantalla pero el avance seguiria bloqueado
+                // esperando una pausa que ya no tiene sentido.
+                pause_timer = 0.0f;
             }
         } else if (auto_mode) {
             auto_hold_timer += dt;
@@ -153,7 +372,7 @@ void VnMode::update(const InputState& input, f32 dt) {
                 auto_hold_timer = 0.0f;
                 vm_confirm_say(state);
             }
-        } else if (confirm_pressed(input)) {
+        } else if (confirm) {
             vm_confirm_say(state);
         }
     }
@@ -165,15 +384,15 @@ void VnMode::update(const InputState& input, f32 dt) {
 
 namespace {
 
-// La capa gfx no puede incluir vm/cmd.h (SPEC.md #5: gfx esta por debajo de vm), asi que
+// La capa gfx no puede incluir formats/cmd.h (SPEC.md #5: gfx esta por debajo de vm), asi que
 // la traduccion entre los dos enums vive aqui, en la capa que ve a ambos.
-GfxTransitionMask to_gfx_mask(TransitionKind kind) {
+RenderTransitionMask to_gfx_mask(TransitionKind kind) {
     switch (kind) {
-        case TransitionKind::Fade:     return GfxTransitionMask::Fade;
-        case TransitionKind::Wipe:     return GfxTransitionMask::Wipe;
-        case TransitionKind::Dissolve: return GfxTransitionMask::Dissolve;
+        case TransitionKind::Fade:     return RenderTransitionMask::Fade;
+        case TransitionKind::Wipe:     return RenderTransitionMask::Wipe;
+        case TransitionKind::Dissolve: return RenderTransitionMask::Dissolve;
     }
-    return GfxTransitionMask::Fade;
+    return RenderTransitionMask::Fade;
 }
 
 }  // namespace
@@ -194,13 +413,13 @@ void append_cstr(char* dst, usize cap, usize* len, const char* src) {
 //
 // Hasta M13 esto no existia: @bg, @show, @hide y @move mantenian bg_id y actors[] pero
 // NADIE los convertia en sprites, asi que una escena de novela visual solo pintaba el
-// cuadro de dialogo. El registro de nombres del atlas (gfx/atlas.h) y las tablas de
+// cuadro de dialogo. El registro de nombres del atlas (render/atlas.h) y las tablas de
 // nombres del .vnc v5 son lo que hacia falta para poder resolver un actor_id a un sprite.
 void draw_scene(const VnMode& vn) {
     const GameState& state = *vn.state;
 
     // Fondo, escalado a la resolucion virtual completa. Los placeholders son de 256x144,
-    // asi que se ven deliberadamente toscos al estirarlos (ver vne_bake placeholders).
+    // asi que se ven deliberadamente toscos al estirarlos (ver sz_bake placeholders).
     const char* bg_name = symbols_name(SymKind::Bg, state.bg_id);
     if (bg_name[0] != '\0') {
         char  name[96];
@@ -221,8 +440,8 @@ void draw_scene(const VnMode& vn) {
             s.dst_y = 0.0f;
             s.dst_w = static_cast<f32>(k_virtual_width);
             s.dst_h = static_cast<f32>(k_virtual_height);
-            s.layer = static_cast<u16>(GfxLayer::Background);
-            gfx_draw_sprite(s);
+            s.layer = static_cast<u16>(RenderLayer::Background);
+            render_draw_sprite(s);
         }
     }
 
@@ -264,13 +483,13 @@ void draw_scene(const VnMode& vn) {
         s.dst_y = a.y * static_cast<f32>(k_virtual_height) - h;
         s.dst_w = w;
         s.dst_h = h;
-        // El alpha va en el canal alto del color, premultiplicado como pide gfx.h: el
+        // El alpha va en el canal alto del color, premultiplicado como pide render.h: el
         // fundido de @show/@hide ya lo mantiene vm.cpp en ActorSlot.alpha.
         u32 alpha_byte = static_cast<u32>(a.alpha * 255.0f) & 0xFFu;
         s.color        = (alpha_byte << 24) | (alpha_byte << 16) | (alpha_byte << 8) | alpha_byte;
-        s.layer        = static_cast<u16>(GfxLayer::Actors);
+        s.layer        = static_cast<u16>(RenderLayer::Actors);
         s.order        = static_cast<u16>(i);
-        gfx_draw_sprite(s);
+        render_draw_sprite(s);
     }
 }
 
@@ -298,9 +517,32 @@ void VnMode::render() {
             }
             // Negro opaco premultiplicado: el shader lo multiplica por el alpha que
             // calcula, asi que aqui va el tinte a plena intensidad.
-            gfx_draw_transition(to_gfx_mask(cur.transition.transition_kind), threshold,
+            render_draw_transition(to_gfx_mask(cur.transition.transition_kind), threshold,
                                  0xFF000000u);
         }
+    }
+
+    // Opciones del @choice (M15). Van antes del early-return de "no es un Say" porque un
+    // Choice no es un Say y hasta ahora eso significaba que no se dibujaba nada en absoluto.
+    if (choice_count > 0) {
+        for (u32 i = 0; i < choice_count; ++i) {
+            UiRect r         = vn_choice_rect(i, choice_count);
+            bool   available = vm_choice_option_available(*state, script, static_cast<u8>(i));
+            u32    color     = k_ui_button_idle;
+            if (!available) {
+                // Se DIBUJA apagada en vez de esconderse: que una opcion exista pero no
+                // este disponible es informacion de juego (SPEC.md #9.1), y ocultarla haria
+                // que el menu cambiara de tamano segun el estado de las variables.
+                color = 0x60202020u;
+            } else if (static_cast<i32>(i) == choice_selected) {
+                color = k_ui_button_hover;
+            }
+            ui_draw_button(r, color);
+            if (font.valid()) {
+                text_draw(choice_layouts[i], r.x + 30.0f, r.y + 18.0f, choice_layouts[i].count);
+            }
+        }
+        return;
     }
 
     if (!current_is_say(*this)) {
@@ -310,16 +552,36 @@ void VnMode::render() {
     // Caja de dialogo: un rectangulo solido simple (sin atlas todavia, SPEC.md #7.1 capa
     // DialogueBox) mas el texto encima (capa DialogueText). Placeholder deliberado: el
     // arte real de UI llega con el pipeline de assets (fuera de alcance de M7).
-    Sprite box{};
-    box.tex   = gfx_white_texture();
-    box.dst_x = 60.0f;
-    box.dst_y = 800.0f;
-    box.dst_w = static_cast<f32>(k_virtual_width) - 120.0f;
-    box.dst_h = 220.0f;
-    box.color = 0xCC1A1A1Au;
-    box.layer = static_cast<u16>(GfxLayer::DialogueBox);
-    gfx_draw_sprite(box);
+    // Arte real (Kenney UI Pack, CC0) estirado en nueve trozos, no un rectangulo solido:
+    // hasta M15 el cuadro de dialogo era literalmente render_white_texture() tintada.
+    ui_draw_nine_slice(vn_dialogue_box_rect(), "button_rectangle_border", 0xE0303030u,
+                        RenderLayer::DialogueBox);
 
     u32 visible = static_cast<u32>(visible_glyphs_f);
     text_draw(current_layout, 90.0f, 830.0f, visible);
+
+    // Botonera de raton (M15). Las etiquetas son texto de interfaz fijo, asi que se
+    // maquetan una sola vez y no se rehacen al cambiar de idioma (ver "Pendientes
+    // observados" en docs/DECISIONS.md).
+    if (font.valid() && !button_labels_built) {
+        for (u32 i = 0; i < k_vn_button_count; ++i) {
+            button_labels[i] = text_layout(font, vn_button_label(static_cast<VnButton>(i)),
+                                            200.0f, layout_arena);
+        }
+        button_labels_built = true;
+    }
+    for (u32 i = 0; i < k_vn_button_count; ++i) {
+        VnButton b = static_cast<VnButton>(i);
+        UiRect   r = vn_button_rect(b);
+        // Un modo activo (auto o saltar) se pinta encendido aunque el cursor no este
+        // encima: sin eso no habria forma de saber si estan puestos.
+        bool on = (b == VnButton::Auto && auto_mode) || (b == VnButton::Skip && skip_mode);
+        u32  color = on ? k_ui_button_active
+                        : (hovered_button == static_cast<i32>(i) ? k_ui_button_hover
+                                                                  : k_ui_button_idle);
+        ui_draw_button(r, color);
+        if (button_labels_built) {
+            text_draw(button_labels[i], r.x + 12.0f, r.y + 6.0f, button_labels[i].count);
+        }
+    }
 }

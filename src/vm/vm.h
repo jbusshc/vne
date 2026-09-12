@@ -1,7 +1,7 @@
 #pragma once
-#include "base/types.h"
-#include "vm/cmd.h"
-#include "vm/state.h"
+#include "core/types.h"
+#include "formats/cmd.h"
+#include "formats/state.h"
 
 // Interprete del guion (SPEC.md #8.1). Un guion compilado es un array de Cmd contiguo
 // mas su pool de strings, apuntado directo desde el .vnc cargado (sin copiar, sin
@@ -66,6 +66,28 @@ void vm_skip_current(VmState* vm, GameState* state, const CompiledScript& script
 // si la opcion tiene una condicion que no se cumple.
 bool vm_select_choice(VmState* vm, GameState* state, const CompiledScript& script,
                        u8 option_index);
+
+// true si la opcion `option_index` del Choice en el pc actual se le puede OFRECER al
+// jugador. VnMode la necesita para no dibujar —ni dejar pulsar— una opcion cuya condicion
+// no se cumple, que es justo la que vm_select_choice rechazaria: sin esto la UI ensenaria
+// opciones que al pincharlas no hacen nada, y el jugador no tendria forma de saber por que.
+// Devuelve false tambien si el pc no esta en un Choice o si el indice esta fuera de rango.
+bool vm_choice_option_available(const GameState& state, const CompiledScript& script,
+                                 u8 option_index);
+
+// Punto de enganche del scripting (P0 del rediseño). `vm.cpp` NO puede incluir
+// `lua/lua_bindings.h`: el intérprete es una capa por encima del intérprete de comandos y
+// hacerlo creaba un ciclo de dependencia real (`vm` -> `lua` -> `vm`), uno de los tres que
+// REDESIGN.md §1.1 documenta. Mismo patrón que `g_editor_render_hook` en render.h, y por la
+// misma razón: quien está arriba se registra, quien está abajo solo llama si hay alguien.
+//
+// `lua_init()` lo instala. Si queda en nullptr —un proyecto que no usa scripting— un
+// comando LuaCall se registra y se salta, nunca aborta (degradación visible, SPEC.md #4).
+//
+// En P5 esto se convierte en el registro de rangos de opcodes de ADR-0078 y el caso
+// `LuaCall` del switch desaparece de aquí junto con los otros 23.
+extern void (*g_script_call_hook)(const char* code, GameState* state,
+                                   const CompiledScript* script);
 
 // Confirma la linea de dialogo actual (SPEC.md #10, VnMode): sin efecto si no hay ningun
 // Say esperando input. Cierra ADR-0023.

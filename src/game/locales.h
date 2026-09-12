@@ -1,5 +1,5 @@
 #pragma once
-#include "base/types.h"
+#include "core/types.h"
 
 // Los idiomas del proyecto, en una tabla (M14). Sustituye al `locale_index == 1` que habia
 // en menu_mode.cpp, que asumia que **cualquier idioma que no fuera espanol era japones** y

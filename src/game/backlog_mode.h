@@ -1,12 +1,17 @@
 #pragma once
-#include "base/arena.h"
-#include "base/handle.h"
+#include "core/arena.h"
+#include "core/handle.h"
 #include "game/mode.h"
 #include "text/layout.h"
 #include "vm/backlog.h"
 #include "vm/vm.h"
+#include "game/ui.h"
 
 constexpr u32 k_backlog_visible_lines = 8;
+
+// Rectangulo del boton de cerrar, en coordenadas virtuales. Compartido por update() y
+// render() para que no puedan discrepar.
+UiRect backlog_close_rect();
 
 // Historial de dialogo (SPEC.md #10): lista desplazable sobre g_backlog (M4). Se apila
 // sobre VnMode sin destruirlo (blocks_render_below=false: VnMode se sigue viendo detras).
@@ -26,6 +31,11 @@ struct BacklogMode : Mode {
     // idioma con el backlog ya abierto dejaria las lineas en el idioma anterior: el cache
     // solo se reconstruia al hacer scroll. Mismo mecanismo que usa VnMode desde M10.
     u32        cached_locale_gen = 0xFFFFFFFFu;
+
+    // Raton (M15): boton de cerrar y rueda para desplazarse.
+    bool       hovered_close      = false;
+    TextLayout close_label;
+    bool       close_label_built = false;
 
     void update(const InputState& input, f32 dt) override;
     void render() override;

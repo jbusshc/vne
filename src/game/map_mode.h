@@ -1,8 +1,8 @@
 #pragma once
-#include "base/arena.h"
-#include "game/map_format.h"
+#include "core/arena.h"
+#include "formats/map_format.h"
 #include "game/mode.h"
-#include "vm/state.h"
+#include "formats/state.h"
 
 // MapMode (SPEC.md #10, hito M9): tilemaps de Tiled horneados a .vnm, colision por
 // rejilla de bits (sin motor de fisicas), movimiento del jugador a nivel de pixel con
@@ -35,8 +35,20 @@ struct MapMode : Mode {
     // volver a entrar de inmediato: se limpia cuando el jugador sale del tile.
     i32 active_trigger_index = -1;
 
+    // Destino de "camina hasta ahi", puesto con un clic (M15). Necesario para el criterio
+    // de SPEC.md #12 "una partida completa se juega de principio a fin solo con el raton":
+    // la partida EMPIEZA en el mapa, asi que sin esto no se llega ni a la primera escena.
+    //
+    // No vive en GameState a proposito, igual que active_trigger_index: es intencion de
+    // entrada, no estado de partida. Guardar en medio de un paseo y cargar deja al jugador
+    // quieto donde estaba, que es un resultado correcto y no obliga a subir la version del
+    // .vnsave por un dato que no se echa de menos.
+    f32  move_target_x   = 0.0f;
+    f32  move_target_y   = 0.0f;
+    bool has_move_target = false;
+
     // logical_name se resuelve contra el backend de assets activo (directorio suelto o
-    // .pak, ver assets/pak.h -- p.ej. "demo_map.vnm"), no una ruta de archivo literal
+    // .pak, ver vfs/pak.h -- p.ej. "demo_map.vnm"), no una ruta de archivo literal
     // (M11).
     bool load(const char* logical_name, Arena* arena);
 

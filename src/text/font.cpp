@@ -4,10 +4,10 @@
 
 #include <freetype/ftmodapi.h>  // FT_New_Library, FT_Add_Default_Modules
 
-#include "assets/pak.h"
-#include "base/heap_guard_hooks.h"
-#include "base/log.h"
-#include "base/pool.h"
+#include "vfs/pak.h"
+#include "core/heap_guard_hooks.h"
+#include "core/log.h"
+#include "core/pool.h"
 #include "text/font_internal.h"
 
 namespace {
@@ -62,7 +62,7 @@ FontHandle text_load_font(const char* logical_name, u32 px_size, bool bold) {
     }
 
     // M11: ya no se abre directamente por ruta de archivo -- se resuelve a traves del
-    // backend activo (directorio suelto o .pak, ver assets/pak.h), asi que una build Ship
+    // backend activo (directorio suelto o .pak, ver vfs/pak.h), asi que una build Ship
     // funciona igual con los assets sueltos o empaquetados. Sincrono a proposito (no pasa
     // por el hilo de IO): a diferencia de una textura, no hay concepto de "fuente
     // placeholder" en este proyecto (ver el comentario de text_load_font en font.h,

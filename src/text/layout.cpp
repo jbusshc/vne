@@ -4,10 +4,10 @@
 
 #include <cstring>
 
-#include "base/heap_guard.h"
-#include "base/log.h"
-#include "gfx/gfx.h"
-#include "gfx/texture.h"
+#include "core/heap_guard.h"
+#include "core/log.h"
+#include "render/render.h"
+#include "render/texture.h"
 #include "text/font_internal.h"
 #include "text/glyph_cache.h"
 
@@ -621,7 +621,7 @@ TextLayout text_layout(FontHandle font, std::string_view utf8, f32 max_width, Ar
     // varios cuadros de dialogo a la vez), una segunda subida de la misma pagina dentro
     // del mismo frame reventaria esa regla. El llamante (el bucle de frame, no este
     // modulo) debe invocar glyph_cache_flush_dirty_pages() una sola vez por frame, despues
-    // de todos los text_layout() de ese frame y antes de gfx_flush() (ver
+    // de todos los text_layout() de ese frame y antes de render_flush() (ver
     // docs/DECISIONS.md, hito M2).
 
     result.quads      = quads;
@@ -657,8 +657,8 @@ void text_draw(const TextLayout& l, f32 x, f32 y, u32 visible_glyphs) {
         s.dst_w = q.w;
         s.dst_h = q.h;
         s.color = q.color;
-        s.layer = static_cast<u16>(GfxLayer::DialogueText);
+        s.layer = static_cast<u16>(RenderLayer::DialogueText);
         s.order = 0;
-        gfx_draw_sprite(s);
+        render_draw_sprite(s);
     }
 }

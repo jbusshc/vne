@@ -3,8 +3,8 @@
 #include FT_FREETYPE_H
 #include <hb.h>
 
-#include "base/handle.h"
-#include "base/types.h"
+#include "core/handle.h"
+#include "core/types.h"
 
 // Uso exclusivo de src/text/*.cpp: resuelve un FontHandle a sus objetos FreeType/HarfBuzz.
 // font.h se mantiene limpio de tipos de terceros, igual que texture.h con sokol_gfx.

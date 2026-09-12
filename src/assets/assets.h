@@ -1,9 +1,9 @@
 #pragma once
-#include "base/handle.h"
-#include "base/types.h"
+#include "core/handle.h"
+#include "core/types.h"
 
 // Sistema de assets (SPEC.md #7.4). Resuelve nombres logicos a recursos por handle,
-// apoyandose en assets/pak.h para los bytes (que ya abstrae "directorio suelto" vs
+// apoyandose en vfs/pak.h para los bytes (que ya abstrae "directorio suelto" vs
 // ".pak"). Lo que esta capa anade encima es el hilo de IO y la cache por nombre.
 //
 // El hilo de IO SOLO lee bytes. Decodificar (QOI, TTF, audio) y subir a la GPU se queda

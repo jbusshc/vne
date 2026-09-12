@@ -17,5 +17,5 @@ cambio los rompe, es el cambio el que está mal.
 | `v3.vnsave` | 3 | Ids de actor ya inservibles (ADR-0062), variables aún por hash. |
 | `v4.vnsave` | 4 | Variables ya por tabla de símbolos; backlog sin `key_hash`, 12 bytes por entrada. |
 
-Los generó `vne_bake save-fixtures` (herramienta offline), que escribe cada formato byte a
+Los generó `sz_bake save-fixtures` (herramienta offline), que escribe cada formato byte a
 byte tal y como lo habría escrito el binario de su época.

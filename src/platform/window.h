@@ -1,10 +1,10 @@
 #pragma once
-#include "base/types.h"
+#include "core/types.h"
 
 struct SDL_Window;
 
 // Ventana SDL3 pura: no sabe nada de sokol_gfx ni de D3D11/GL. El backend grafico
-// (src/gfx/gfx_backend_*.cpp) extrae de aqui lo que necesita (HWND, contexto GL, ...).
+// (src/render/rhi_*.cpp) extrae de aqui lo que necesita (HWND, contexto GL, ...).
 struct PlatformWindow {
     SDL_Window* sdl_window = nullptr;
     i32         width      = 0;
@@ -16,5 +16,5 @@ struct PlatformWindow {
 void platform_window_destroy(PlatformWindow* w);
 
 // Tamano actual en pixeles (puede diferir del pedido en platform_window_create si el
-// usuario redimensiono la ventana). Usado por gfx_present para el letterbox.
+// usuario redimensiono la ventana). Usado por render_present para el letterbox.
 void platform_window_size_px(const PlatformWindow* w, i32* out_w, i32* out_h);

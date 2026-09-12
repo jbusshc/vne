@@ -1,18 +1,18 @@
 #include <doctest/doctest.h>
 
-#include "base/heap_guard.h"
+#include "core/heap_guard.h"
 
 // Tests del contador de asignaciones por frame (SPEC.md #4). Solo tienen sentido bajo
-// VN_DEBUG: en Ship no hay overload de operator new ni hooks que cuenten, y todas las
+// SZ_DEBUG: en Ship no hay overload de operator new ni hooks que cuenten, y todas las
 // funciones se compilan a nada.
 //
 // El caso que de verdad importa aqui es el anidamiento de suspend/resume. Fue un bug real
 // hasta M12: g_heap_guard_suspended era un bool, asi que el resume de un ambito interno
 // reactivaba el contador dejando al externo desprotegido. Pasaba de verdad en dos sitios
-// (`@lua` -> vn.play_sfx -> audio_load, y hot_reload_update -> vne_bake) y nadie lo vio
+// (`@lua` -> vn.play_sfx -> audio_load, y hot_reload_update -> sz_bake) y nadie lo vio
 // porque hasta ADR-0058 las asignaciones de terceros ni siquiera se contaban.
 
-#if defined(VN_DEBUG)
+#if defined(SZ_DEBUG)
 
 TEST_CASE("heap_guard: cuenta una asignacion de tercero y la resetea por frame") {
     heap_guard_reset_frame();
@@ -67,4 +67,4 @@ TEST_CASE("heap_guard: reset_frame no altera la profundidad de suspension") {
     heap_guard_reset_frame();
 }
 
-#endif  // VN_DEBUG
+#endif  // SZ_DEBUG
