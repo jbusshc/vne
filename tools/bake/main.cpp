@@ -11,6 +11,9 @@
 #include "game/map_format.h"
 #include "script/asset_validate.h"
 #include "script/hash_collisions.h"
+
+#include <hb.h>
+#include <hb-subset.h>
 #include "script/compiler.h"
 #include "script/map_bake.h"
 #include "script/parser.h"
@@ -241,6 +244,161 @@ int bake_script(const char* in_path, const char* out_path) {
 
     log_info("vne_bake: %s -> %s (%zu comandos, %zu bytes de strings)", in_path, out_path,
               compiled.data.cmds.size(), compiled.data.string_pool.size());
+    return 0;
+}
+
+// --- vne_bake font: subconjunto de glifos (M13) ----------------------------------------
+//
+// SPEC.md #11 lista `vne_bake font` como la herramienta que faltaba, y M13 le pone un
+// criterio concreto: "el repositorio deja de contener una fuente de 9.5 MB". NotoSansJP.ttf
+// pesa 9.5 MB porque cubre el japones entero, y el proyecto usaba una fraccion minuscula.
+//
+// Se apoya en hb-subset, que es parte de HarfBuzz — **ya esta en la lista cerrada de
+// dependencias de SPEC.md #3**, no es una dependencia nueva; solo habia que enlazar su
+// segundo target (harfbuzz-subset), que su propio CMake ya compila por defecto.
+//
+// La alternativa que describe la tabla de SPEC.md #11 (rasterizar a un atlas horneado
+// `font_*.atlas` + metricas) se descarto: chocaria con el diseño de rasterizar CJK bajo
+// demanda que fija el skill vne-rendering, porque obligaria a decidir por adelantado cada
+// glifo y tamaño. Un TTF mas pequeño conserva ese diseño intacto y ademas sigue valiendo
+// para cualquier tamaño de punto.
+
+// Conjunto base que siempre se incluye: ASCII imprimible mas las letras acentuadas y signos
+// del espanol, que es el idioma en que se autoran los guiones (ADR-0048). Sin esto, un texto
+// que todavia no existe en ningun archivo (un nombre escrito por el jugador, un mensaje de
+// error) saldria con cuadraditos.
+void add_base_codepoints(hb_set_t* set) {
+    for (u32 cp = 0x20; cp <= 0x7E; ++cp) {
+        hb_set_add(set, cp);
+    }
+    static const u32 k_spanish[] = {
+        0x00A1, 0x00BF,                                          // ¡ ¿
+        0x00C1, 0x00C9, 0x00CD, 0x00D3, 0x00DA, 0x00DC, 0x00D1,  // ÁÉÍÓÚÜÑ
+        0x00E1, 0x00E9, 0x00ED, 0x00F3, 0x00FA, 0x00FC, 0x00F1,  // áéíóúüñ
+        0x00AB, 0x00BB, 0x2018, 0x2019, 0x201C, 0x201D,          // « » ‘ ’ “ ”
+        0x2013, 0x2014, 0x2026,                                   // – — …
+    };
+    for (u32 cp : k_spanish) {
+        hb_set_add(set, cp);
+    }
+
+    // Kana y puntuacion CJK completos. No es contenido: es la cobertura minima para que las
+    // funciones CJK del motor (kinsoku en text/layout.cpp, furigana) sigan siendo usables y
+    // testeables. Sin kana, un subconjunto deja esa parte del motor muerta aunque el codigo
+    // siga ahi — que es exactamente lo que paso la primera vez que se subseteo y fallaron
+    // test_kinsoku y test_ruby. Son unos 300 glifos, calderilla frente a los 9.5 MB.
+    //
+    // Los KANJI no entran aqui: son miles y dependen del contenido, asi que salen de los
+    // archivos de texto que se le pasen al comando.
+    for (u32 cp = 0x3000; cp <= 0x30FF; ++cp) {  // puntuacion CJK + hiragana + katakana
+        hb_set_add(set, cp);
+    }
+    for (u32 cp = 0xFF01; cp <= 0xFF65; ++cp) {  // formas de ancho completo (（ ） ！ ？...)
+        hb_set_add(set, cp);
+    }
+}
+
+// Añade cada codepoint que aparezca en un archivo de texto UTF-8 (un .vns, un .csv de
+// catalogo). Asi el subconjunto cubre exactamente lo que el proyecto escribe, incluido el
+// japones real el dia que lo haya.
+bool add_codepoints_from_file(const char* path, hb_set_t* set) {
+    std::string content;
+    if (!read_whole_file(path, &content)) {
+        log_error("vne_bake font: no se pudo leer '%s'", path);
+        return false;
+    }
+    usize i = 0;
+    while (i < content.size()) {
+        u8  c0  = static_cast<u8>(content[i]);
+        u32 cp  = c0;
+        usize len = 1;
+        if ((c0 & 0xE0) == 0xC0 && i + 1 < content.size()) {
+            len = 2;
+            cp  = (static_cast<u32>(c0 & 0x1F) << 6) | (static_cast<u8>(content[i + 1]) & 0x3F);
+        } else if ((c0 & 0xF0) == 0xE0 && i + 2 < content.size()) {
+            len = 3;
+            cp  = (static_cast<u32>(c0 & 0x0F) << 12) |
+                 (static_cast<u32>(static_cast<u8>(content[i + 1]) & 0x3F) << 6) |
+                 (static_cast<u8>(content[i + 2]) & 0x3F);
+        } else if ((c0 & 0xF8) == 0xF0 && i + 3 < content.size()) {
+            len = 4;
+            cp  = (static_cast<u32>(c0 & 0x07) << 18) |
+                 (static_cast<u32>(static_cast<u8>(content[i + 1]) & 0x3F) << 12) |
+                 (static_cast<u32>(static_cast<u8>(content[i + 2]) & 0x3F) << 6) |
+                 (static_cast<u8>(content[i + 3]) & 0x3F);
+        }
+        if (cp >= 0x20) {  // los de control no tienen glifo
+            hb_set_add(set, cp);
+        }
+        i += len;
+    }
+    return true;
+}
+
+// vne_bake font <entrada.ttf> <salida.ttf> [archivo_de_texto ...]
+int bake_font(const char* in_path, const char* out_path, int extra_count, char** extra_paths) {
+    std::string ttf;
+    if (!read_whole_file(in_path, &ttf)) {
+        log_error("vne_bake font: no se pudo leer '%s'", in_path);
+        return 1;
+    }
+
+    hb_blob_t* blob = hb_blob_create(ttf.data(), static_cast<unsigned>(ttf.size()),
+                                      HB_MEMORY_MODE_READONLY, nullptr, nullptr);
+    hb_face_t* face = hb_face_create(blob, 0);
+    hb_blob_destroy(blob);
+    if (hb_face_get_glyph_count(face) == 0) {
+        hb_face_destroy(face);
+        log_error("vne_bake font: '%s' no parece un TTF valido (0 glifos)", in_path);
+        return 1;
+    }
+
+    hb_subset_input_t* input = hb_subset_input_create_or_fail();
+    if (input == nullptr) {
+        hb_face_destroy(face);
+        log_error("vne_bake font: hb_subset_input_create_or_fail fallo");
+        return 1;
+    }
+    hb_set_t* unicodes = hb_subset_input_unicode_set(input);
+    add_base_codepoints(unicodes);
+    for (int i = 0; i < extra_count; ++i) {
+        if (!add_codepoints_from_file(extra_paths[i], unicodes)) {
+            hb_subset_input_destroy(input);
+            hb_face_destroy(face);
+            return 1;
+        }
+    }
+    unsigned requested = hb_set_get_population(unicodes);
+
+    hb_face_t* subset = hb_subset_or_fail(face, input);
+    hb_subset_input_destroy(input);
+    if (subset == nullptr) {
+        hb_face_destroy(face);
+        log_error("vne_bake font: hb_subset_or_fail fallo sobre '%s'", in_path);
+        return 1;
+    }
+
+    hb_blob_t*  out_blob = hb_face_reference_blob(subset);
+    unsigned    out_size = 0;
+    const char* out_data = hb_blob_get_data(out_blob, &out_size);
+    bool        ok       = false;
+    if (out_data != nullptr && out_size > 0) {
+        std::FILE* f = std::fopen(out_path, "wb");
+        if (f != nullptr) {
+            ok = std::fwrite(out_data, 1, out_size, f) == out_size;
+            std::fclose(f);
+        }
+    }
+    hb_blob_destroy(out_blob);
+    hb_face_destroy(subset);
+    hb_face_destroy(face);
+
+    if (!ok) {
+        log_error("vne_bake font: no se pudo escribir '%s'", out_path);
+        return 1;
+    }
+    log_info("vne_bake font: %s -> %s (%zu KB -> %u KB, %u codepoints pedidos)", in_path,
+              out_path, ttf.size() / 1024, out_size / 1024, requested);
     return 0;
 }
 
@@ -863,6 +1021,12 @@ int bake_pack(const char* out_path, const char* baked_dir, const char* src_dir) 
 // Sin argumentos (o "atlas"): empaqueta assets_src/png/*.png si hay alguno (ADR-0025), o
 // genera el placeholder procedural de respaldo si no.
 int main(int argc, char** argv) {
+    if (argc >= 5 && std::strcmp(argv[1], "font") == 0) {
+        return bake_font(argv[2], argv[3], argc - 4, argv + 4);
+    }
+    if (argc == 4 && std::strcmp(argv[1], "font") == 0) {
+        return bake_font(argv[2], argv[3], 0, nullptr);
+    }
     if (argc >= 2 && std::strcmp(argv[1], "placeholders") == 0) {
         return bake_placeholders();
     }

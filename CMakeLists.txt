@@ -383,7 +383,7 @@ vne_apply_project_flags(vne_script_tools)
 # dibuja nada, solo genera y codifica bytes. Solo toma prestado base/log.cpp de vne_base.
 add_executable(vne_bake tools/bake/main.cpp src/base/log.cpp)
 target_include_directories(vne_bake PRIVATE src)
-target_link_libraries(vne_bake PRIVATE qoi vne_script_tools stb_image)
+target_link_libraries(vne_bake PRIVATE qoi vne_script_tools stb_image harfbuzz harfbuzz-subset)
 vne_apply_project_flags(vne_bake)
 
 # vne_bake busca assets_src/png/*.png con una ruta relativa a su propio CWD (ADR-0025):
@@ -446,7 +446,7 @@ add_dependencies(vne_game vne_copy_ogg_assets)
 # build para que vne_game las encuentre con una ruta relativa a su propio CWD, igual que
 # el atlas horneado. NotoSans.ttf (latina) se anadio en M10 para el idioma base del
 # dialogo, separada de la CJK que solo hace falta "bajo demanda" (ver docs/DECISIONS.md).
-foreach(font_file NotoSansJP.ttf NotoSans.ttf)
+foreach(font_file NotoSansJP-subset.ttf NotoSans-subset.ttf)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/${font_file}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf
@@ -458,8 +458,8 @@ foreach(font_file NotoSansJP.ttf NotoSans.ttf)
   )
 endforeach()
 add_custom_target(vne_copy_fonts DEPENDS
-  ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSansJP.ttf
-  ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSans.ttf)
+  ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSansJP-subset.ttf
+  ${CMAKE_CURRENT_BINARY_DIR}/assets_src/ttf/NotoSans-subset.ttf)
 add_dependencies(vne_game vne_copy_fonts)
 
 # Guion de prueba de M3 (ADR pendiente, ver docs/DECISIONS.md): nombres placeholder

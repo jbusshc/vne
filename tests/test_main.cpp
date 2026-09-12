@@ -53,8 +53,8 @@ int main(int argc, char** argv) {
         // Despues del sistema de texturas (reserva el handle placeholder) y con el backend
         // ya montado arriba: assets_init() arranca el hilo de IO.
         assets_init();
-        g_test_font_latin = text_load_font("ttf/NotoSans.ttf", 32);
-        g_test_font_cjk   = text_load_font("ttf/NotoSansJP.ttf", 32);
+        g_test_font_latin = text_load_font("ttf/NotoSans-subset.ttf", 32);
+        g_test_font_cjk   = text_load_font("ttf/NotoSansJP-subset.ttf", 32);
     }
 
     int result = context.run();

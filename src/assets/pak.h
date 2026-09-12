@@ -37,7 +37,7 @@ void pak_unmount();
 bool pak_is_packed();
 
 // Resuelve `logical_path` (relativo al root montado, con '/': "atlas_00.qoi",
-// "ttf/NotoSans.ttf", "demo.vnc") a un puntero de solo lectura y su tamano.
+// "ttf/NotoSans-subset.ttf", "demo.vnc") a un puntero de solo lectura y su tamano.
 //
 // *out_owned dice si el llamante es responsable de liberar el buffer con pak_release()
 // cuando termine: true en backend suelto (el buffer es suyo, recien leido), false en

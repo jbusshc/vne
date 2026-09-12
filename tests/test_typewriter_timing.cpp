@@ -163,7 +163,7 @@ TEST_CASE("text_layout: {b} usa la fuente en negrita y engorda los glifos (M12)"
     }
     // La misma cara cargada aparte y marcada para engordar el contorno al rasterizar: no
     // hay ningun TTF en negrita entre los assets (ver text_load_font).
-    FontHandle bold = text_load_font("ttf/NotoSans.ttf", 32, /*bold=*/true);
+    FontHandle bold = text_load_font("ttf/NotoSans-subset.ttf", 32, /*bold=*/true);
     REQUIRE(bold.valid());
 
     Arena arena = arena_create(1u << 20, "test_bold");

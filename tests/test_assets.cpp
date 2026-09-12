@@ -58,7 +58,18 @@ TEST_CASE("assets_texture: devuelve un handle dibujable de inmediato, sin tocar 
     // M11 (mismo patron que layout_perf/skip_perf).
     log_info("assets_texture: peor caso de 16 llamadas = %llu us (criterio: <100 us)",
              static_cast<unsigned long long>(worst_us));
-    CHECK(worst_us < 100);  // 0.1 ms
+
+    // El umbral estricto solo se exige donde la medida significa algo. Bajo ASan y sin
+    // optimizar esto marca 74-96 us contra un limite de 100: pasaba casi siempre y fallaba
+    // de vez en cuando segun la carga de la maquina, que es lo peor de los dos mundos (el
+    // mismo razonamiento de ADR-0018 para el test de layout de M2, y de lo que se hizo con
+    // integrate_us en M11). El numero se sigue registrando SIEMPRE, asi que una regresion
+    // de verdad se ve igual en la salida de los tests.
+#if defined(VN_DEBUG) && !defined(VN_EDITOR)
+    CHECK(worst_us < 1000);  // Debug+ASan: solo guarda contra un desastre de orden de magnitud
+#else
+    CHECK(worst_us < 100);  // 0.1 ms, el criterio de M11 tal cual
+#endif
 
     drain_pending_loads();
 }
@@ -145,7 +156,7 @@ TEST_CASE("assets_texture: un nombre inexistente se queda en el placeholder y no
 }
 
 TEST_CASE("assets_font: resuelve por el backend de assets, igual que text_load_font") {
-    FontHandle f = assets_font("ttf/NotoSans.ttf", 16);
+    FontHandle f = assets_font("ttf/NotoSans-subset.ttf", 16);
     if (g_test_font_latin.valid()) {
         CHECK(f.valid());
     }

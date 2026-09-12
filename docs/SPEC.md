@@ -748,8 +748,8 @@ Modos previstos: `VnMode`, `MapMode`, `MenuMode`, `BacklogMode`, `SaveLoadMode`.
 
 | Origen (`assets_src/`) | Herramienta | Destino (`assets_baked/`) | Estado |
 |---|---|---|---|
-| `png/*.png` | `vne_bake atlas` | `atlas_NN.qoi` + `atlas.bin` | parcial: `atlas.bin` sigue sin nombres ni sub-páginas (ADR-0025). M11 lo dejó así a propósito: no hay ningún consumidor que pida un sprite por nombre todavía. Lo necesita M15 |
-| `ttf/*.ttf` | `vne_bake font` | `font_*.atlas` + métricas | **no existe**: las fuentes se rasterizan en runtime. M13 |
+| `png/*.png` | `vne_bake atlas` | `atlas_NN.qoi` + `atlas.bin` | hecho (M13, ADR-0061): `atlas.bin` v3 lleva tabla de nombres lógicos y es el registro de assets. Sigue sin sub-páginas (una sola de 1024x1024) |
+| `ttf/*.ttf` | `vne_bake font` | `*-subset.ttf` | hecho (M13, ADR-0064). **No** produce `font_*.atlas` + métricas como decía esta tabla: subsetea el TTF con `hb-subset` y la rasterización sigue bajo demanda en runtime, que es el diseño que fija el skill `vne-rendering` para CJK. 11,4 MB → 304 KB |
 | `scripts/*.vns` | `vne_bake script` | `*.vnc` | hecho (M3) |
 | `maps/*.tmx` | `vne_bake map` | `*.vnm` | hecho (M9) |
 | `locale/*.csv` | `vne_bake catalog-compile` | `*.vnl` | hecho (M10, ADR-0046). No estaba en esta tabla |

@@ -206,29 +206,29 @@ int main(int argc, char** argv) {
     atlas_load(&g_arena_perm);
     u32 atlas_count = atlas_sprite_count();
 
-    FontHandle demo_font = text_load_font("ttf/NotoSansJP.ttf", 28);
+    FontHandle demo_font = text_load_font("ttf/NotoSansJP-subset.ttf", 28);
     if (!demo_font.valid()) {
-        log_error("No se pudo cargar la fuente de prueba NotoSansJP.ttf");
+        log_error("No se pudo cargar la fuente de prueba NotoSansJP-subset.ttf");
     }
     // Fuente latina aparte para el dialogo en español (M10, "fuentes CJK bajo demanda":
     // la fuente CJK completa solo se necesita de verdad cuando el idioma activo la usa;
     // la rasterizacion de glifos bajo demanda en si ya existe desde M2 en glyph_cache).
-    FontHandle latin_dialogue_font = text_load_font("ttf/NotoSans.ttf", 28);
+    FontHandle latin_dialogue_font = text_load_font("ttf/NotoSans-subset.ttf", 28);
     if (!latin_dialogue_font.valid()) {
-        log_error("No se pudo cargar la fuente de prueba NotoSans.ttf");
+        log_error("No se pudo cargar la fuente de prueba NotoSans-subset.ttf");
     }
     // Variantes en negrita para {b} (M12): la misma cara marcada para engordar el contorno
     // al rasterizar, porque no hay ningun TTF en negrita entre los assets. Una por idioma,
     // igual que las normales.
-    FontHandle latin_bold_font = text_load_font("ttf/NotoSans.ttf", 28, /*bold=*/true);
-    FontHandle cjk_bold_font   = text_load_font("ttf/NotoSansJP.ttf", 28, /*bold=*/true);
+    FontHandle latin_bold_font = text_load_font("ttf/NotoSans-subset.ttf", 28, /*bold=*/true);
+    FontHandle cjk_bold_font   = text_load_font("ttf/NotoSansJP-subset.ttf", 28, /*bold=*/true);
 
     // Recarga en caliente (SPEC.md #7.4, M11): vigila los .ttf de estas dos fuentes y los
     // .png del atlas. Los .vns los vigila el editor aparte, porque recargarlos toca la VM
     // (ver el comentario de reparto en assets/hot_reload.h). Vacio en Ship.
     hot_reload_init();
-    hot_reload_watch_font(demo_font, "ttf/NotoSansJP.ttf", 28);
-    hot_reload_watch_font(latin_dialogue_font, "ttf/NotoSans.ttf", 28);
+    hot_reload_watch_font(demo_font, "ttf/NotoSansJP-subset.ttf", 28);
+    hot_reload_watch_font(latin_dialogue_font, "ttf/NotoSans-subset.ttf", 28);
     const char* demo_text =
         "Hola {b}mundo{/b}. {color=#ff5040}Texto en rojo{/color}. "
         "{ruby=\xE3\x81\x8B\xE3\x82\x93\xE3\x81\x98}\xE6\xBC\xA2\xE5\xAD\x97{/ruby} "

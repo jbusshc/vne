@@ -2155,6 +2155,61 @@ silencioso, pero no es gratis.
 
 ---
 
+## ADR-0064 — `vne_bake font` subsetea el TTF con hb-subset, no hornea un atlas de glifos
+
+**Fecha:** 2026-09-11
+**Hito:** M13
+**Estado:** aceptada
+
+**Contexto.** La tabla de SPEC.md §11 listaba `vne_bake font` produciendo `font_*.atlas` +
+métricas, y lo marcaba como lo único del pipeline que no existía. El criterio concreto de M13
+es más estrecho: **"el repositorio deja de contener una fuente de 9.5 MB"**. `NotoSansJP.ttf`
+cubre el japonés entero y el proyecto usaba una fracción minúscula.
+
+**Decisión.** `vne_bake font <entrada.ttf> <salida.ttf> [archivo_de_texto ...]` produce un
+**TTF más pequeño**, no un atlas rasterizado. Usa `hb-subset`, que es parte de HarfBuzz —
+**ya en la lista cerrada de SPEC.md §3**, no es dependencia nueva; solo había que enlazar su
+segundo target, que el propio CMake de HarfBuzz ya compila por defecto.
+
+Se descartó lo que la tabla decía (rasterizar a un atlas horneado) porque chocaría con el
+diseño de rasterizar CJK bajo demanda que fija el skill `vne-rendering`: obligaría a decidir
+por adelantado cada glifo **y cada tamaño de punto**. Un TTF reducido conserva ese diseño
+intacto y sigue valiendo para cualquier tamaño. La tabla de §11 queda corregida.
+
+El conjunto de glifos es: ASCII imprimible + acentos y signos del español + **kana y
+puntuación CJK completos** + cada codepoint que aparezca en los archivos de texto que se le
+pasen (guiones, catálogos, y los `.cpp` de tests que llevan kanji literales).
+
+**Los kana están en el conjunto base por una razón medida.** La primera versión del
+subconjunto no los incluía —`ja.csv` es un placeholder ASCII (ADR-0048), así que ningún
+archivo del proyecto aportaba un solo kana— y `test_kinsoku` y `test_ruby` empezaron a
+fallar. Sin kana, las funciones CJK del motor (kinsoku, furigana) quedan muertas aunque el
+código siga ahí. Son unos 300 glifos, calderilla frente a los 9,5 MB. Los **kanji** no entran
+en el base: son miles y dependen del contenido.
+
+**Resultado medido.** `NotoSansJP.ttf` 9365 KB → 245 KB, `NotoSans.ttf` 2001 KB → 59 KB. El
+directorio entero pasa de **11,4 MB a 304 KB**, y 173/173 tests siguen pasando, incluidos los
+de kinsoku y furigana.
+
+**Consecuencias.** Un carácter fuera del subconjunto se dibuja como `.notdef` (un cuadrado):
+visible e inconfundible, nunca un fallo silencioso, pero hay que saberlo. Añadir diálogo en
+japonés de verdad **obliga a regenerar el subconjunto** o saldrán cuadrados.
+
+Y una consecuencia operativa que conviene no aprender por las malas: **subsetear no es
+reversible**. De un subconjunto no se puede sacar otro mayor, y las originales ya no están en
+el repositorio. `assets_src/ttf/README.md` documenta la procedencia, la licencia y el comando
+exacto para regenerar desde una original descargada de nuevo. (Al implementar esto borré las
+originales antes de tiempo, hubo que ampliar el conjunto con los kana, y se recuperaron del
+historial de git.)
+
+**Licencias.** Las dos originales son OFL 1.1, que permite modificar y redistribuir siempre
+que la versión modificada siga entera bajo la misma licencia: los `OFL-*.txt` se quedan en el
+repositorio. `NotoSansJP` declara además el *Reserved Font Name* `'Source'` (herencia de
+Source Han Sans), que estos archivos no usan. El sufijo `-subset` deja claro que son versiones
+modificadas.
+
+---
+
 ## Pendientes observados
 
 Anota aquí cosas detectadas fuera del alcance del hito actual, para no perderlas ni
